@@ -55,6 +55,19 @@ public static class SnapshotBuilder
                 FanRpm: hw.Val(SensorType.Fan, "GPU"),
                 PowerW: hw.Val(SensorType.Power, "GPU")));
         }
+        return PreferDiscreteGpus(gpus);
+    }
+
+    /// <summary>
+    /// Drops integrated GPUs when a discrete GPU is present — beside a real GPU
+    /// the integrated one is redundant clutter (no temperature, no clock, only
+    /// shared memory). Integrated GPUs are kept only as a fallback for machines
+    /// that have no discrete GPU at all.
+    /// </summary>
+    internal static List<GpuInfo> PreferDiscreteGpus(List<GpuInfo> gpus)
+    {
+        if (gpus.Any(g => g.Kind == "discrete"))
+            gpus.RemoveAll(g => g.Kind == "integrated");
         return gpus;
     }
 
