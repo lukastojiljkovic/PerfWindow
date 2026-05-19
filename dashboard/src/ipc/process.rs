@@ -23,18 +23,15 @@ pub struct Sensord {
     child: Child,
     stdin: Option<ChildStdin>,
     reader: Option<JoinHandle<()>>,
-    exe_path: std::path::PathBuf,
     pub state: SharedState,
 }
 
 impl Sensord {
-    /// Extract the embedded executable to the temp directory, spawn it, and
-    /// start the reader thread. `repaint` is called whenever a new snapshot
-    /// arrives so the UI wakes up.
+    /// Stage the embedded executable into `%LOCALAPPDATA%\PerfWindow`, spawn
+    /// it, and start the reader thread. `repaint` is called whenever a new
+    /// snapshot arrives so the UI wakes up.
     pub fn spawn(repaint: impl Fn() + Send + 'static) -> std::io::Result<Sensord> {
-        let exe_path =
-            std::env::temp_dir().join(format!("PerfWindow-sensord-{}.exe", std::process::id()));
-        std::fs::write(&exe_path, SENSORD_BYTES)?;
+        let exe_path = stage_sensord()?;
 
         // sensord is a console-subsystem process; without CREATE_NO_WINDOW
         // Windows opens a console window for the spawned child.
@@ -80,7 +77,6 @@ impl Sensord {
             child,
             stdin,
             reader: Some(reader),
-            exe_path,
             state,
         })
     }
@@ -95,6 +91,32 @@ impl Sensord {
     /// `true` while the child is still producing snapshots.
     pub fn is_alive(&self) -> bool {
         self.state.lock().map(|s| s.alive).unwrap_or(false)
+    }
+}
+
+/// `%LOCALAPPDATA%\PerfWindow` — the per-user directory the staged `sensord`
+/// executable lives in.
+fn sensord_dir() -> std::io::Result<std::path::PathBuf> {
+    std::env::var_os("LOCALAPPDATA")
+        .map(|base| std::path::PathBuf::from(base).join("PerfWindow"))
+        .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "LOCALAPPDATA is not set"))
+}
+
+/// Write the embedded `sensord` executable to its per-user location and return
+/// the path. The bytes are rewritten on every launch so the staged copy always
+/// matches this build; if another PerfWindow instance is already running it
+/// (so the file is locked), the existing identical copy is reused instead.
+fn stage_sensord() -> std::io::Result<std::path::PathBuf> {
+    let dir = sensord_dir()?;
+    std::fs::create_dir_all(&dir)?;
+    let path = dir.join("sensord.exe");
+    match std::fs::write(&path, SENSORD_BYTES) {
+        Ok(()) => Ok(path),
+        Err(e) if path.exists() => {
+            eprintln!("PerfWindow: reusing the staged sensord ({e})");
+            Ok(path)
+        }
+        Err(e) => Err(e),
     }
 }
 
@@ -115,6 +137,7 @@ impl Drop for Sensord {
         if let Some(reader) = self.reader.take() {
             let _ = reader.join();
         }
-        let _ = std::fs::remove_file(&self.exe_path);
+        // The staged executable in %LOCALAPPDATA% is left in place — the next
+        // launch reuses it (and re-stages it on demand).
     }
 }
