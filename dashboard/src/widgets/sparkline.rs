@@ -1,5 +1,5 @@
 use crate::theme::Theme;
-use egui::{Color32, Pos2, Sense, Shape, Stroke, Vec2};
+use egui::{Pos2, Sense, Shape, Stroke, Vec2};
 
 /// Height of the sparkline widget in pixels.
 const HEIGHT: f32 = 30.0;
@@ -30,6 +30,9 @@ pub fn sparkline(ui: &mut egui::Ui, theme: &Theme, samples: &[f32], max: f32) {
         .enumerate()
         .map(|(i, &v)| {
             let x = rect.min.x + (i as f32 / (n - 1) as f32) * rect.width();
+            // Live sensor data: a non-finite sample (NaN/inf) would propagate
+            // through clamp into a garbage Pos2 vertex — treat it as 0.0.
+            let v = if v.is_finite() { v } else { 0.0 };
             let norm = (v / scale).clamp(0.0, 1.0);
             // y=0 (top) → max value; y=HEIGHT (bottom) → 0 value
             let y = rect.max.y - norm * HEIGHT;
@@ -41,8 +44,7 @@ pub fn sparkline(ui: &mut egui::Ui, theme: &Theme, samples: &[f32], max: f32) {
     // The data polyline zig-zags, so a single area polygon would be non-convex
     // and `convex_polygon` (fan triangulation) would render it wrong. Instead,
     // tile the area with per-segment trapezoids — each is genuinely convex.
-    let [r, g, b, _] = theme.accent.to_array();
-    let fill_color = Color32::from_rgba_unmultiplied(r, g, b, (255.0 * 0.12) as u8);
+    let fill_color = theme.accent.gamma_multiply(0.12);
 
     let baseline_y = rect.max.y;
     let trapezoids: Vec<Shape> = points

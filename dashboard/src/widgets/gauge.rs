@@ -92,8 +92,13 @@ fn draw_center_text(
 ) {
     let center = rect.center();
 
-    // Value integer text (~22 px, ink colour)
-    let value_str = format!("{}", value.round() as i32);
+    // Value integer text (~22 px, ink colour). A non-finite reading (failed
+    // sensor) must not display as a confident "0" — show "--" instead.
+    let value_str = if value.is_finite() {
+        format!("{}", value.round() as i32)
+    } else {
+        "--".to_string()
+    };
     let value_font = FontId::new(22.0, theme.font_data.egui());
 
     // Unit suffix (~11 px, dim colour) — positioned to the right of the value

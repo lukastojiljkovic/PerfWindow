@@ -1,5 +1,5 @@
 use crate::theme::Theme;
-use egui::{Color32, Rect, Response, Sense, Vec2};
+use egui::{Rect, Response, Sense, Vec2};
 
 /// A thin 6 px-tall horizontal progress bar spanning the available width.
 ///
@@ -51,11 +51,13 @@ pub fn core_strip(ui: &mut egui::Ui, theme: &Theme, loads: &[f32]) {
     let painter = ui.painter_at(rect);
     let n = loads.len() as f32;
     let total_gap = gap * (n - 1.0);
+    // When the available width is too small for `n` bars + gaps, the `.max(1.0)`
+    // floor trades exact tiling for a 1 px minimum: trailing bars then overflow
+    // `rect`, which `painter_at(rect)` clipping absorbs harmlessly.
     let bar_w = ((available_w - total_gap) / n).max(1.0);
 
     // accent at 0.72 opacity
-    let [r, g, b, _] = theme.accent.to_array();
-    let bar_color = Color32::from_rgba_unmultiplied(r, g, b, (255.0 * 0.72) as u8);
+    let bar_color = theme.accent.gamma_multiply(0.72);
 
     for (i, &load) in loads.iter().enumerate() {
         let fraction = (load / 100.0).clamp(0.0, 1.0);
