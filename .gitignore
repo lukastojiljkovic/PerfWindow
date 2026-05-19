@@ -9,8 +9,8 @@ skica/
 **/*.rs.bk
 
 # .NET — sensord
-/sensord/bin/
-/sensord/obj/
+sensord/**/bin/
+sensord/**/obj/
 /sensord/**/publish/
 
 # Build output
