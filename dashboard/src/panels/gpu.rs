@@ -14,10 +14,10 @@ use crate::widgets::{temp_color, TempKind};
 /// load-history sparkline.
 ///
 /// The card adapts to `gpu.kind`: a `"discrete"` GPU is titled `"GPU"` and
-/// shows used/total VRAM and a fan speed; an `"integrated"` GPU is titled
-/// `"iGPU"`, shows `"shared"` VRAM and has no fan. There is deliberately no
-/// per-unit strip — GPUs do not expose per-core loads. Every absent (`None`)
-/// reading renders as `"—"`; nothing here can panic.
+/// shows used/total VRAM, a fan speed and power draw; an `"integrated"` GPU is
+/// titled `"iGPU"` and shows `"shared"` VRAM. There is deliberately no per-unit
+/// strip — GPUs do not expose per-core loads. Every absent (`None`) reading
+/// renders as `"—"`; nothing here can panic.
 pub fn gpu_panel(
     ui: &mut egui::Ui,
     theme: &Theme,
@@ -31,7 +31,7 @@ pub fn gpu_panel(
     card(ui, theme, |ui| {
         panel_title(ui, theme, title, Some(&gpu.name));
 
-        // Load donut on the left, three stat rows on the right.
+        // Load donut on the left, four stat rows on the right.
         ui.horizontal(|ui| {
             donut(ui, theme, gpu.load.unwrap_or(0.0) as f32, "%", "LOAD");
             ui.vertical(|ui| {
@@ -47,6 +47,7 @@ pub fn gpu_panel(
                 stat_row(ui, theme, "VRAM", &vram, None);
 
                 stat_row(ui, theme, "FAN", &format_fan(gpu.fan_rpm), None);
+                stat_row(ui, theme, "POWER", &format_power(gpu.power_w), None);
             });
         });
 
@@ -62,6 +63,14 @@ pub fn gpu_panel(
 fn format_fan(fan_rpm: Option<f64>) -> String {
     match fan_rpm {
         Some(rpm) => format!("{} rpm", rpm.round() as i64),
+        None => "—".to_string(),
+    }
+}
+
+/// Power draw rendered as whole watts, `"16 W"`, or `"—"` when absent.
+fn format_power(power_w: Option<f64>) -> String {
+    match power_w {
+        Some(w) => format!("{} W", w.round() as i64),
         None => "—".to_string(),
     }
 }

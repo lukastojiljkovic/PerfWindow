@@ -43,7 +43,7 @@ pub fn sensors_panel(
         let rows = collect_readouts(theme, board, fans, voltages, unit);
 
         if rows.is_empty() {
-            empty_note(ui, theme, "No motherboard sensors on this machine");
+            empty_note(ui, theme, "No motherboard or fan sensors on this machine");
         } else {
             readout_grid(ui, theme, &rows);
         }
