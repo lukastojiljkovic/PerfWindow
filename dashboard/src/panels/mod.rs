@@ -1,4 +1,5 @@
-//! Component panels: one card per snapshot section (CPU, GPU, RAM).
+//! Component panels: one card per snapshot section (CPU, GPU, RAM, storage,
+//! sensors, network).
 //!
 //! Each panel composes the `crate::widgets` primitives inside the shared
 //! [`card`] frame. The grid layout that places these panels is wired up in a
@@ -6,7 +7,10 @@
 
 pub mod cpu;
 pub mod gpu;
+pub mod network;
 pub mod ram;
+pub mod sensors;
+pub mod storage;
 
 use crate::theme::Theme;
 use egui::{Frame, Margin, RichText, Stroke, Vec2};
