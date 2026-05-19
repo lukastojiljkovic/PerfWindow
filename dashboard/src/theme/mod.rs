@@ -179,18 +179,28 @@ pub fn install_fonts(ctx: &egui::Context) {
     font!("space", "SpaceMono-Regular.ttf");
 
     use egui::FontFamily::Name;
+    // egui's default Monospace family carries the symbol / emoji fallback
+    // fonts (notably `Hack`, which has the block-drawing and geometric
+    // glyphs). Append it to every bundled family so UI symbols the bundled
+    // fonts lack — ▚ ▮ ◐ ⚙ ● ↓ ↑ ✕ — render instead of showing as tofu.
+    let fallback: Vec<String> = fonts
+        .families
+        .get(&egui::FontFamily::Monospace)
+        .cloned()
+        .unwrap_or_default();
+    let family = |primary: &str| {
+        let mut chain = vec![primary.to_owned()];
+        chain.extend(fallback.iter().cloned());
+        chain
+    };
+    fonts.families.insert(Name("plex".into()), family("plex"));
     fonts
         .families
-        .insert(Name("plex".into()), vec!["plex".into()]);
+        .insert(Name("plex-bold".into()), family("plex-bold"));
     fonts
         .families
-        .insert(Name("plex-bold".into()), vec!["plex-bold".into()]);
-    fonts
-        .families
-        .insert(Name("chakra".into()), vec!["chakra".into()]);
-    fonts
-        .families
-        .insert(Name("space".into()), vec!["space".into()]);
+        .insert(Name("chakra".into()), family("chakra"));
+    fonts.families.insert(Name("space".into()), family("space"));
     fonts
         .families
         .entry(egui::FontFamily::Monospace)
