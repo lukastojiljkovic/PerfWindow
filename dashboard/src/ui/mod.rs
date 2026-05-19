@@ -503,9 +503,11 @@ pub fn error_overlay(ui: &mut egui::Ui, app: &mut PerfApp, ctx: &egui::Context) 
 /// Returns its click-sensing response.
 fn respawn_button(ui: &mut egui::Ui, theme: &Theme) -> egui::Response {
     let font = FontId::new(11.0, theme.font_data.egui());
-    let galley = ui
-        .painter()
-        .layout_no_wrap(letter_spaced("RESPAWN"), font, theme.accent);
+    // Laid out with `PLACEHOLDER` so `painter.galley`'s fallback colour tints
+    // the glyphs to the hover-dependent colour chosen below.
+    let galley =
+        ui.painter()
+            .layout_no_wrap(letter_spaced("RESPAWN"), font, egui::Color32::PLACEHOLDER);
 
     let size = galley.size() + RESPAWN_PAD * 2.0;
     let (rect, response) = ui.allocate_exact_size(size, Sense::click());
@@ -525,8 +527,8 @@ fn respawn_button(ui: &mut egui::Ui, theme: &Theme) -> egui::Response {
             Stroke::new(1.0, theme.accent),
             egui::StrokeKind::Inside,
         );
-        // The galley was laid out in `accent`; recolour it to follow the
-        // hover state (egui tints a single-colour galley to `text_color`).
+        // The galley's glyphs are `PLACEHOLDER`, so this `text_color` is the
+        // fallback that actually colours them — `accent` idle, `bg` on hover.
         painter.galley(rect.min + RESPAWN_PAD, galley, text_color);
     }
     if response.hovered() {

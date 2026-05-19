@@ -190,9 +190,11 @@ fn close_button(ui: &mut egui::Ui, theme: &Theme) -> Response {
     let font = FontId::new(12.0, theme.font_data.egui());
     // Padding mirrors the mockup's `.cfg-x { padding: 4px 9px }`.
     let pad = Vec2::new(9.0, 4.0);
+    // Laid out with `PLACEHOLDER` so the hover-dependent `text_color` below
+    // tints the glyph via `painter.galley`'s fallback colour.
     let galley = ui
         .painter()
-        .layout_no_wrap("\u{2715}".to_owned(), font, theme.dim);
+        .layout_no_wrap("\u{2715}".to_owned(), font, Color32::PLACEHOLDER);
     let size = galley.size() + pad * 2.0;
     let (rect, response) = ui.allocate_exact_size(size, Sense::click());
 
@@ -552,11 +554,13 @@ fn segmented(ui: &mut egui::Ui, theme: &Theme, segments: &[(&str, bool)]) -> Opt
     // Lay every segment's text out first so the row height (and each segment's
     // width) can be derived before any allocation. `layout_no_wrap` returns a
     // cache-shared `Arc<Galley>`; keep the `Arc` rather than deep-cloning it.
+    // The glyphs are `PLACEHOLDER` so each segment's `painter.galley` fallback
+    // colour can tint them (`bg` for the active segment, `dim` for the rest).
     let galleys: Vec<std::sync::Arc<egui::Galley>> = segments
         .iter()
         .map(|(label, _)| {
             ui.painter()
-                .layout_no_wrap((*label).to_owned(), font.clone(), theme.dim)
+                .layout_no_wrap((*label).to_owned(), font.clone(), Color32::PLACEHOLDER)
         })
         .collect();
     let text_h = galleys.iter().map(|g| g.size().y).fold(0.0_f32, f32::max);
