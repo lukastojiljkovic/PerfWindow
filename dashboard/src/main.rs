@@ -7,6 +7,7 @@ mod format;
 mod history;
 mod ipc;
 mod theme;
+mod widgets;
 
 use app::PerfApp;
 
