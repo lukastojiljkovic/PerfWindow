@@ -8,9 +8,13 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <InvariantGlobalization>true</InvariantGlobalization>
   </PropertyGroup>
+  <!-- Publish-only flags. Deliberately NO PublishTrimmed: LibreHardwareMonitorLib
+       relies on WMI/COM and reflection and is not trim-safe. Enabling trimming makes
+       the SDK emit BuiltInComInterop.IsSupported=false into runtimeconfig.json (on
+       every build, not just publish), which disables COM and breaks Storage and
+       Motherboard sensor enumeration. -->
   <PropertyGroup>
     <PublishSingleFile>true</PublishSingleFile>
-    <PublishTrimmed>true</PublishTrimmed>
     <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
     <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
   </PropertyGroup>
