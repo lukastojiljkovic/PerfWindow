@@ -1,3 +1,4 @@
+using LibreHardwareMonitor.Hardware;
 using Sensord.Sensors;
 
 namespace Sensord;
@@ -7,11 +8,13 @@ internal static class Program
     private static void Main()
     {
         using var monitor = new HardwareMonitor();
-        foreach (var hw in monitor.Refresh())
-        {
-            Console.Error.WriteLine($"{hw.HardwareType}: {hw.Name} ({hw.Sensors.Length} sensors)");
-            foreach (var sub in hw.SubHardware)
-                Console.Error.WriteLine($"  sub {sub.HardwareType}: {sub.Name} ({sub.Sensors.Length} sensors)");
-        }
+        var hardware = monitor.Refresh();
+
+        var cpu = hardware.FirstOrDefault(h => h.HardwareType == HardwareType.Cpu);
+        if (cpu is not null)
+            Console.Error.WriteLine($"CPU: {System.Text.Json.JsonSerializer.Serialize(SnapshotBuilder.BuildCpu(cpu))}");
+
+        foreach (var gpu in SnapshotBuilder.BuildGpus(hardware))
+            Console.Error.WriteLine($"GPU: {System.Text.Json.JsonSerializer.Serialize(gpu)}");
     }
 }
