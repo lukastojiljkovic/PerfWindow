@@ -5,6 +5,7 @@ mod config;
 mod format;
 mod history;
 mod ipc;
+mod theme;
 
 fn main() -> eframe::Result {
     let options = eframe::NativeOptions {
