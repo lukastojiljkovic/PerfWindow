@@ -157,6 +157,76 @@ impl Theme {
     }
 }
 
+use egui::{FontData, FontDefinitions};
+
+/// Register the three bundled families with egui. Call once at startup.
+pub fn install_fonts(ctx: &egui::Context) {
+    let mut fonts = FontDefinitions::default();
+
+    macro_rules! font {
+        ($name:literal, $file:literal) => {
+            fonts.font_data.insert(
+                $name.to_owned(),
+                std::sync::Arc::new(FontData::from_static(include_bytes!(concat!(
+                    "../../assets/fonts/",
+                    $file
+                )))),
+            );
+        };
+    }
+    font!("plex", "IBMPlexMono-Medium.ttf");
+    font!("plex-bold", "IBMPlexMono-SemiBold.ttf");
+    font!("chakra", "ChakraPetch-SemiBold.ttf");
+    font!("space", "SpaceMono-Regular.ttf");
+
+    use egui::FontFamily::Name;
+    fonts
+        .families
+        .insert(Name("plex".into()), vec!["plex".into()]);
+    fonts
+        .families
+        .insert(Name("chakra".into()), vec!["chakra".into()]);
+    fonts
+        .families
+        .insert(Name("space".into()), vec!["space".into()]);
+    fonts
+        .families
+        .entry(egui::FontFamily::Monospace)
+        .or_default()
+        .insert(0, "plex".into());
+
+    ctx.set_fonts(fonts);
+}
+
+impl FontFamily {
+    /// The egui family handle for this role.
+    pub fn egui(self) -> egui::FontFamily {
+        match self {
+            FontFamily::PlexMono => egui::FontFamily::Name("plex".into()),
+            FontFamily::ChakraPetch => egui::FontFamily::Name("chakra".into()),
+            FontFamily::SpaceMono => egui::FontFamily::Name("space".into()),
+        }
+    }
+}
+
+impl Theme {
+    /// Push this theme's palette into egui's `Visuals` so default widgets and
+    /// the window background match. Panels paint their own colours explicitly.
+    pub fn apply(&self, ctx: &egui::Context) {
+        let mut visuals = if self.dark {
+            egui::Visuals::dark()
+        } else {
+            egui::Visuals::light()
+        };
+        visuals.panel_fill = self.bg;
+        visuals.window_fill = self.panel;
+        visuals.extreme_bg_color = self.track;
+        visuals.override_text_color = Some(self.ink);
+        visuals.widgets.noninteractive.bg_stroke = egui::Stroke::new(1.0, self.border);
+        ctx.set_visuals(visuals);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
