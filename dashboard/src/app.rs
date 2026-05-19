@@ -57,6 +57,41 @@ impl PerfApp {
         app
     }
 
+    /// Restart `sensord` after it has died, re-arming the live feed.
+    ///
+    /// The old [`Sensord`] is dropped *first* (`self.sensord = None`): its
+    /// [`Drop`] kills the child, joins the reader and removes the temp exe.
+    /// This ordering is mandatory — [`Sensord::spawn`] re-extracts the embedded
+    /// executable to `%TEMP%\PerfWindow-sensord-{pid}.exe`, the *same* path the
+    /// old child still occupies, and Windows refuses to overwrite a running
+    /// `.exe`. Only once the old process is gone do we spawn the replacement.
+    ///
+    /// `history` is deliberately kept, so the sparklines carry on uninterrupted
+    /// across the gap. `latest` is cleared (its readings are now stale) and the
+    /// configured refresh interval is re-sent to the fresh child. `status` ends
+    /// as [`Status::Running`] only if the respawn succeeded; a failed spawn is
+    /// logged and leaves it [`Status::SensordDown`].
+    pub fn respawn_sensord(&mut self, ctx: &egui::Context) {
+        // Drop the old child *before* spawning: its `Drop` removes the temp
+        // exe that `Sensord::spawn` is about to rewrite (see doc comment).
+        self.sensord = None;
+
+        let repaint_ctx = ctx.clone();
+        self.sensord = Sensord::spawn(move || repaint_ctx.request_repaint())
+            .inspect_err(|e| eprintln!("PerfWindow: failed to restart sensord: {e}"))
+            .ok();
+
+        self.status = if self.sensord.is_some() {
+            Status::Running
+        } else {
+            Status::SensordDown
+        };
+        self.latest = None;
+        if let Some(sensord) = &mut self.sensord {
+            sensord.set_interval(self.config.refresh.as_millis());
+        }
+    }
+
     /// Re-apply the current `config` after the user changes a setting.
     ///
     /// Recomputes the effective theme (honouring `follow_windows`), pushes it

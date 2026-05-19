@@ -250,7 +250,20 @@ fn foot_item(ui: &mut egui::Ui, theme: &Theme, text: &str) {
 /// Sensors and Network cards. The column count adapts to the available width
 /// (4 / 3 / 2). When no snapshot has arrived yet, a single centred dimmed line
 /// is shown instead of the grid.
+///
+/// When the sensor feed has died ([`Status::SensordDown`]) the grid is replaced
+/// wholesale by [`error_overlay`] — the stale panels are not drawn behind it.
 pub fn card_grid(ui: &mut egui::Ui, app: &mut PerfApp) {
+    // Feed down: replace the whole grid with the error overlay. Handled before
+    // the immutable reborrow below, since `error_overlay` needs `&mut app` to
+    // wire up its respawn button. `card_grid` takes no `Context`, so clone the
+    // one egui threads through the `Ui`.
+    if app.status == Status::SensordDown {
+        let ctx = ui.ctx().clone();
+        error_overlay(ui, app, &ctx);
+        return;
+    }
+
     // The grid is read-only; reborrow `app` immutably so the snapshot can be
     // borrowed (rather than cloned) for the lifetime of the layout.
     let app: &PerfApp = app;
@@ -425,6 +438,101 @@ fn waiting_note(ui: &mut egui::Ui, theme: &Theme) {
                 .color(theme.dim),
         );
     });
+}
+
+/// Width of the `sensord`-down error card (snug around its text + button).
+const ERROR_CARD_WIDTH: f32 = 320.0;
+/// Space dropped above the error card so it sits a little below centre.
+const ERROR_CARD_TOP_GAP: f32 = 48.0;
+/// `RESPAWN` button padding — chunkier than the title-bar `.pw-chip`.
+const RESPAWN_PAD: Vec2 = Vec2::new(16.0, 9.0);
+
+/// Draw the sensor-feed-down state: a centred card explaining that `sensord`
+/// has exited, with a one-click `RESPAWN` control.
+///
+/// Shown by [`card_grid`] in place of the whole grid whenever
+/// [`Status::SensordDown`] is set — the stale panels are not painted behind it.
+/// The card carries a `hot` heading, a `dim` explanatory line and an
+/// `accent`-bordered button; clicking the button calls
+/// [`PerfApp::respawn_sensord`], which restarts the child and (on success)
+/// flips `status` back to [`Status::Running`] so the next frame draws the grid.
+pub fn error_overlay(ui: &mut egui::Ui, app: &mut PerfApp, ctx: &egui::Context) {
+    let theme = app.theme.clone();
+    let mut respawn = false;
+
+    // Centre the fixed-width card horizontally (`waiting_note`'s approach),
+    // nudged below the top edge so it reads as the body's focal point.
+    ui.vertical_centered(|ui| {
+        ui.add_space(ERROR_CARD_TOP_GAP);
+        ui.allocate_ui_with_layout(
+            Vec2::new(ERROR_CARD_WIDTH, 0.0),
+            Layout::top_down(Align::Center),
+            |ui| {
+                ui.set_width(ERROR_CARD_WIDTH);
+                panels::card(ui, &theme, |ui| {
+                    // `hot` heading — the alarm line, in the display font.
+                    ui.label(
+                        RichText::new(letter_spaced("SENSOR FEED STOPPED"))
+                            .family(theme.font_display.egui())
+                            .size(13.0)
+                            .color(theme.hot),
+                    );
+                    // `dim` explanatory line, wrapped to the card width.
+                    ui.label(
+                        RichText::new("The sensor process exited. Hardware readings are paused.")
+                            .family(theme.font_data.egui())
+                            .size(11.0)
+                            .color(theme.dim),
+                    );
+                    if respawn_button(ui, &theme).clicked() {
+                        respawn = true;
+                    }
+                });
+            },
+        );
+    });
+
+    // Applied after the layout closures so `app` is borrowed mutably just once.
+    if respawn {
+        app.respawn_sensord(ctx);
+    }
+}
+
+/// Draw the `RESPAWN` button: a bordered clickable box, like the title-bar
+/// [`chip`] but larger and `accent`-bordered, filling `accent` on hover.
+/// Returns its click-sensing response.
+fn respawn_button(ui: &mut egui::Ui, theme: &Theme) -> egui::Response {
+    let font = FontId::new(11.0, theme.font_data.egui());
+    let galley = ui
+        .painter()
+        .layout_no_wrap(letter_spaced("RESPAWN"), font, theme.accent);
+
+    let size = galley.size() + RESPAWN_PAD * 2.0;
+    let (rect, response) = ui.allocate_exact_size(size, Sense::click());
+
+    if ui.is_rect_visible(rect) {
+        let painter = ui.painter_at(rect);
+        // Idle: `accent`-outlined with `accent` text. Hover: `accent` fill with
+        // `bg` text, echoing the title-bar chip's active look (and `close_button`).
+        let hovered = response.hovered();
+        let text_color = if hovered { theme.bg } else { theme.accent };
+        if hovered {
+            painter.rect_filled(rect, 0.0, theme.accent);
+        }
+        painter.rect_stroke(
+            rect,
+            0.0,
+            Stroke::new(1.0, theme.accent),
+            egui::StrokeKind::Inside,
+        );
+        // The galley was laid out in `accent`; recolour it to follow the
+        // hover state (egui tints a single-colour galley to `text_color`).
+        painter.galley(rect.min + RESPAWN_PAD, galley, text_color);
+    }
+    if response.hovered() {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+    }
+    response
 }
 
 /// Advance a theme through the fixed four-theme cycle.
