@@ -1,18 +1,15 @@
-//! The retro CRT atmosphere overlay: a faint background grid, scanlines and a
-//! vignette.
+//! The retro CRT atmosphere: a faint background grid, scanlines and a vignette.
 //!
-//! [`paint_effects`] is the last thing the render method does each frame. All
-//! three effects are pure [`egui::Painter`] work — no real bloom, no textures —
-//! and every one is theme-parameterised and individually guarded, so the Light
-//! theme (which sets all three parameters at or near zero) renders genuinely
-//! effect-free with no wasted painter calls.
+//! [`paint_grid`] draws the 25 px grid. It is called inside the central panel,
+//! after the body fill but before the cards, so the opaque card frames paint
+//! over it and it shows only through the inter-card gaps — like the mockup's
+//! grid `background-image`. [`paint_effects`] draws the scanlines and vignette
+//! on a foreground layer as the last thing the render method does each frame,
+//! so they sit on top of everything.
 //!
-//! The grid is drawn on a [`egui::Order::Background`] layer so it sits behind
-//! the panels; the scanlines and vignette are drawn on a
-//! [`egui::Order::Foreground`] layer so they sit on top of everything. This
-//! mirrors the mockup's `docs/mockups/dashboard-layout.html`, where the grid is
-//! a `background-image` on `.pw-mock` and the scanline / vignette pseudo-
-//! elements carry high `z-index` values.
+//! Every effect is theme-parameterised and guarded: the Light theme sets
+//! `scanline_opacity` and `vignette` to (near) zero, so it shows no CRT
+//! atmosphere — only the faint base grid, exactly as the mockup does.
 
 use crate::theme::Theme;
 use egui::{Color32, Id, LayerId, Order, Rect, Stroke, StrokeKind};
@@ -27,70 +24,71 @@ const GRID_ALPHA: f32 = 0.05;
 const SCANLINE_STEP: f32 = 4.0;
 /// Number of concentric vignette strokes drawn inward from the window edge.
 const VIGNETTE_RINGS: usize = 14;
-/// Peak alpha, in 0..255, of the innermost-decaying vignette ring at
+/// Peak alpha, in 0..255, of the outermost vignette ring at
 /// `theme.vignette == 1.0`. The mockup's vignette is a soft 110 px inset
 /// shadow; a short stack of fading 1 px strokes approximates that band without
 /// any blur work.
 const VIGNETTE_MAX_ALPHA: f32 = 80.0;
 
-/// Paint the grid / scanline / vignette overlay for `theme` over the whole
-/// window.
+/// Draw the faint 25 px background grid into `ui`.
 ///
-/// Each effect is skipped entirely when its driving parameter is zero, so a
-/// theme that disables an effect pays no painter cost for it at all.
-pub fn paint_effects(ctx: &egui::Context, theme: &Theme) {
-    // `content_rect` is the whole window area safe for rendering — egui 0.34
-    // split the former `screen_rect` into this and `viewport_rect`, and this is
-    // the documented replacement for a full-window content overlay.
-    let screen = ctx.content_rect();
-    if screen.width() <= 0.0 || screen.height() <= 0.0 {
-        return;
-    }
-
-    background_grid(ctx, theme, screen);
-    scanlines(ctx, theme, screen);
-    vignette(ctx, theme, screen);
-}
-
-/// Draw the faint 25 px background grid on a background layer, behind the
-/// panels.
-///
-/// The lines are `theme.border` faded to ~5 % alpha — just enough texture to
-/// read as a grid without competing with panel content. It is drawn on an
-/// [`egui::Order::Background`] layer (rather than the foreground) precisely so
-/// the opaque panel cards paint over it: a foreground grid would lay hairlines
-/// across every gauge and readout and hurt legibility, whereas the mockup's
-/// grid is a `background-image` showing only through the inter-card gaps.
-fn background_grid(ctx: &egui::Context, theme: &Theme, screen: Rect) {
+/// Called inside the central panel — after its body fill, before the cards —
+/// so the opaque card frames paint over it and it shows only through the
+/// inter-card gaps and body padding, mirroring the mockup's grid
+/// `background-image`. The lines are `theme.border` faded to ~5 % alpha: just
+/// enough texture to read as a grid without competing with panel content.
+pub fn paint_grid(ui: &egui::Ui, theme: &Theme) {
     let color = theme.border.gamma_multiply(GRID_ALPHA);
     // `gamma_multiply` can land on a fully transparent colour; nothing to draw.
     if color == Color32::TRANSPARENT {
         return;
     }
-    let painter = ctx.layer_painter(LayerId::new(Order::Background, Id::new("pw_grid")));
+    let rect = ui.max_rect();
+    if !rect.is_finite() || rect.width() <= 0.0 || rect.height() <= 0.0 {
+        return;
+    }
+    let painter = ui.painter();
     let stroke = Stroke::new(1.0, color);
 
-    // Vertical lines, then horizontal lines, stepping across the full window.
-    let mut x = screen.left();
-    while x <= screen.right() {
-        painter.vline(x, screen.y_range(), stroke);
+    // Vertical lines, then horizontal lines, stepping across the body.
+    let mut x = rect.left();
+    while x <= rect.right() {
+        painter.vline(x, rect.y_range(), stroke);
         x += GRID_STEP;
     }
-    let mut y = screen.top();
-    while y <= screen.bottom() {
-        painter.hline(screen.x_range(), y, stroke);
+    let mut y = rect.top();
+    while y <= rect.bottom() {
+        painter.hline(rect.x_range(), y, stroke);
         y += GRID_STEP;
     }
+}
+
+/// Paint the scanline + vignette overlay for `theme` over the whole window.
+///
+/// Both effects are skipped entirely when their driving parameter is zero, so
+/// a theme that disables an effect pays no painter cost for it at all. They
+/// share one foreground layer, so their draw order is fixed: scanlines first,
+/// then the vignette over them.
+pub fn paint_effects(ctx: &egui::Context, theme: &Theme) {
+    // `content_rect` is the whole window area safe for rendering — egui 0.34
+    // split the former `screen_rect` into this and `viewport_rect`, and this is
+    // the documented replacement for a full-window content overlay.
+    let screen = ctx.content_rect();
+    if !screen.is_finite() || screen.width() <= 0.0 || screen.height() <= 0.0 {
+        return;
+    }
+
+    let painter = ctx.layer_painter(LayerId::new(Order::Foreground, Id::new("pw_overlay")));
+    scanlines(&painter, theme, screen);
+    vignette(&painter, theme, screen);
 }
 
 /// Draw horizontal scanlines every 4 px across the whole window.
 ///
 /// Skipped unless `theme.scanline_opacity > 0` (the Light theme sets it to 0).
 /// Each line is solid black at `scanline_opacity` alpha, matching the mockup's
-/// `repeating-linear-gradient(..., rgba(0,0,0,var(--scanA)) 2px 4px)`. Drawn on
-/// a foreground layer so the lines fall over the panels, as the mockup's
-/// high-`z-index` `::after` pseudo-element does.
-fn scanlines(ctx: &egui::Context, theme: &Theme, screen: Rect) {
+/// `repeating-linear-gradient(..., rgba(0,0,0,var(--scanA)) 2px 4px)`.
+fn scanlines(painter: &egui::Painter, theme: &Theme, screen: Rect) {
     if theme.scanline_opacity <= 0.0 {
         return;
     }
@@ -98,7 +96,6 @@ fn scanlines(ctx: &egui::Context, theme: &Theme, screen: Rect) {
     if alpha == 0 {
         return;
     }
-    let painter = ctx.layer_painter(LayerId::new(Order::Foreground, Id::new("pw_scanlines")));
     let stroke = Stroke::new(1.0, Color32::from_black_alpha(alpha));
 
     let mut y = screen.top();
@@ -115,14 +112,11 @@ fn scanlines(ctx: &egui::Context, theme: &Theme, screen: Rect) {
 /// alpha is highest at the outermost ring and decays linearly to zero, scaled
 /// overall by `theme.vignette`. This is the cheap painter equivalent of the
 /// mockup's `box-shadow: inset 0 0 110px 16px rgba(0,0,0,var(--vig))` — a dark
-/// band hugging the frame, no blur pass required. Drawn on a foreground layer
-/// so it darkens the panel edges too.
-fn vignette(ctx: &egui::Context, theme: &Theme, screen: Rect) {
+/// band hugging the frame, no blur pass required.
+fn vignette(painter: &egui::Painter, theme: &Theme, screen: Rect) {
     if theme.vignette <= 0.0 {
         return;
     }
-    let painter = ctx.layer_painter(LayerId::new(Order::Foreground, Id::new("pw_vignette")));
-
     for ring in 0..VIGNETTE_RINGS {
         // `ring` 0 is the outermost, full-strength ring; strength fades to 0
         // at the innermost ring so the band dissolves into the centre.

@@ -114,6 +114,8 @@ impl eframe::App for PerfApp {
         egui::CentralPanel::default()
             .frame(egui::Frame::NONE.fill(self.theme.bg))
             .show_inside(ui, |ui| {
+                // The faint grid sits on the body background, behind the cards.
+                crate::ui::effects::paint_grid(ui, &self.theme);
                 egui::ScrollArea::vertical()
                     .auto_shrink([false, false])
                     .show(ui, |ui| {
@@ -125,8 +127,9 @@ impl eframe::App for PerfApp {
         // `egui::Window` and so takes the `Context`, not a nested `Ui`.
         crate::ui::settings::settings_modal(&ctx, self);
 
-        // The CRT effects overlay — grid, scanlines, vignette — paints last so
-        // the scanlines and vignette sit on top of every panel and the modal.
+        // The scanline + vignette overlay paints last so it sits on top of
+        // every panel and the modal. (The grid is drawn earlier, inside the
+        // central panel, so the opaque cards cover it.)
         crate::ui::effects::paint_effects(&ctx, &self.theme);
 
         // Watchdog repaint a little past the refresh interval; new snapshots
