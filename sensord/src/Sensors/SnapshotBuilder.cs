@@ -96,7 +96,7 @@ public static class SnapshotBuilder
             {
                 kind    = info.Kind;
                 totalGb = info.TotalGb;
-                usedGb  = usedPct.HasValue ? info.TotalGb * usedPct.Value / 100.0 : null;
+                usedGb  = (info.TotalGb.HasValue && usedPct.HasValue) ? info.TotalGb.Value * usedPct.Value / 100.0 : null;
             }
             else
             {

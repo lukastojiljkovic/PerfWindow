@@ -3,7 +3,7 @@ using System.Management;
 namespace Sensord.Sensors;
 
 /// <summary>Per-physical-disk geometry and media type sourced from <c>MSFT_PhysicalDisk</c> WMI.</summary>
-public readonly record struct PhysicalDiskInfo(string Kind, double TotalGb);
+public readonly record struct PhysicalDiskInfo(string Kind, double? TotalGb);
 
 /// <summary>Reads physical-disk metadata from the Windows Storage WMI namespace once at startup.</summary>
 public static class DiskInfoReader
@@ -19,14 +19,13 @@ public static class DiskInfoReader
         try
         {
             var scope = new ManagementScope(@"\\.\root\Microsoft\Windows\Storage");
-            scope.Connect();
 
             using var searcher = new ManagementObjectSearcher(
                 scope,
                 new ObjectQuery("SELECT DeviceId, Size, MediaType, BusType FROM MSFT_PhysicalDisk"));
 
             using var collection = searcher.Get();
-            foreach (ManagementBaseObject obj in collection)
+            foreach (ManagementObject obj in collection)
             {
                 using (obj)
                 {
@@ -38,15 +37,16 @@ public static class DiskInfoReader
                     var mediaType = obj["MediaType"]  is ushort mt ? mt : (ushort)0;
                     var sizeBytes = obj["Size"]       is ulong  sz ? sz : 0UL;
 
-                    string kind    = ClassifyDisk(busType, mediaType);
-                    double totalGb = sizeBytes / 1024.0 / 1024.0 / 1024.0;
+                    string kind      = ClassifyDisk(busType, mediaType);
+                    double? totalGb  = sizeBytes > 0 ? sizeBytes / 1024.0 / 1024.0 / 1024.0 : null;
 
                     result[diskIndex] = new PhysicalDiskInfo(kind, totalGb);
                 }
             }
         }
-        catch
+        catch (Exception ex)
         {
+            Console.Error.WriteLine($"sensord: disk WMI error: {ex.GetType().Name}: {ex.Message}");
             // WMI unavailable, access denied, timeout, etc. — return whatever we collected so far
             // (which may be empty).
         }
