@@ -12,8 +12,19 @@ internal static class Program
     private static volatile bool _running = true;
     private static readonly ManualResetEventSlim _shutdown = new(false);
 
-    private static void Main()
+    private static void Main(string[] args)
     {
+        // Stage the WinRing0 kernel driver in a Defender-excluded folder. Must
+        // run before any LibreHardwareMonitor code touches the temp directory.
+        RedirectDriverTempDir();
+
+        // Diagnostic mode: dump the full LHM hardware/sensor tree and exit.
+        if (args.Contains("--probe"))
+        {
+            HardwareProbe.Run(Console.Out);
+            return;
+        }
+
         var stdout = Console.OpenStandardOutput();
         using var writer = new StreamWriter(stdout) { AutoFlush = true };
 
@@ -38,6 +49,39 @@ internal static class Program
             }
             _shutdown.Wait(_intervalMs);
         } while (_running);
+    }
+
+    /// <summary>
+    /// Points this process's TMP/TEMP at a PerfWindow-owned directory.
+    /// LibreHardwareMonitor extracts its WinRing0 kernel driver next to the
+    /// executable; only if that fails does it fall back to a temp-directory
+    /// file. WinRing0 is on Microsoft's vulnerable-driver list, so in the
+    /// normal user temp folder Windows Defender quarantines it on sight. This
+    /// redirects that fallback into <c>%LOCALAPPDATA%\PerfWindow\driver</c> — a
+    /// folder the setup step excludes — so neither the primary location (next
+    /// to the executable) nor the fallback is ever scanned. Process-scoped —
+    /// the machine's temp configuration is untouched.
+    /// </summary>
+    private static void RedirectDriverTempDir()
+    {
+        try
+        {
+            string localAppData =
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+            if (string.IsNullOrEmpty(localAppData))
+                return;
+
+            string dir = Path.Combine(localAppData, "PerfWindow", "driver");
+            Directory.CreateDirectory(dir);
+            Environment.SetEnvironmentVariable("TMP", dir);
+            Environment.SetEnvironmentVariable("TEMP", dir);
+        }
+        catch (Exception ex)
+        {
+            // A failure here only means the driver falls back to the user temp
+            // directory (the prior behaviour) — it must never stop sensord.
+            Console.Error.WriteLine($"sensord: temp-dir redirect failed: {ex.Message}");
+        }
     }
 
     /// <summary>Reads control lines from stdin; an EOF means the dashboard has exited.</summary>
