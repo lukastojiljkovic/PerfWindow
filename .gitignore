@@ -1,0 +1,26 @@
+# Brainstorming / visual companion (session artifacts)
+.superpowers/
+
+# Original hand sketch — kept locally, not version-controlled
+skica/
+
+# Rust — dashboard
+/dashboard/target/
+**/*.rs.bk
+
+# .NET — sensord
+/sensord/bin/
+/sensord/obj/
+/sensord/**/publish/
+
+# Build output
+/build/out/
+/dist/
+
+# OS / editor
+Thumbs.db
+.DS_Store
+.vs/
+.idea/
+*.user
+*.swp

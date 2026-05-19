@@ -1,0 +1,430 @@
+<!DOCTYPE html>
+<html lang="sr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PerfWindow — Vizuelni stil</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=Chakra+Petch:wght@500;600;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+<style>
+*{box-sizing:border-box;margin:0;padding:0;}
+html,body{background:#08090c;}
+body{font-family:'IBM Plex Mono',ui-monospace,monospace;color:#e8e8ea;-webkit-font-smoothing:antialiased;padding-bottom:30px;}
+
+.intro{max-width:1140px;margin:0 auto;padding:42px 30px 16px;}
+.intro .kick{font:600 11px/1 'IBM Plex Mono';letter-spacing:3.5px;color:#586273;}
+.intro h1{font:700 28px/1.15 'Chakra Petch',sans-serif;color:#fff;margin:13px 0 9px;letter-spacing:.5px;}
+.intro p{font:13px/1.7 'IBM Plex Mono';color:#868f9e;max-width:730px;}
+.intro b{color:#cdd5e0;font-weight:600;}
+
+.skins{display:flex;flex-direction:column;margin-top:20px;}
+
+.sk{padding:34px 30px 42px;cursor:pointer;position:relative;border-top:1px solid rgba(255,255,255,.05);
+  opacity:0;transform:translateY(18px);animation:rise .6s cubic-bezier(.2,.7,.3,1) forwards;}
+.sk:nth-child(1){animation-delay:.05s;}
+.sk:nth-child(2){animation-delay:.17s;}
+.sk:nth-child(3){animation-delay:.29s;}
+@keyframes rise{to{opacity:1;transform:none;}}
+.sk.selected{box-shadow:inset 0 0 0 3px var(--accent);}
+
+.sk-head{max-width:1140px;margin:0 auto 22px;display:flex;align-items:center;gap:22px;flex-wrap:wrap;}
+.sk-num{font:700 48px/1 var(--font-disp),monospace;color:var(--accent);opacity:.3;flex:none;letter-spacing:-1px;}
+.sk-titles{flex:1;min-width:260px;}
+.sk-titles h2{font:700 22px/1.1 var(--font-disp),monospace;color:var(--accent);letter-spacing:1.8px;
+  text-shadow:0 0 var(--glow) var(--glow-c);}
+.sk-titles .concept{font:13px/1.6 'IBM Plex Mono';color:var(--dim);margin-top:7px;max-width:600px;}
+.sk-meta{display:flex;flex-direction:column;gap:9px;align-items:flex-end;flex:none;}
+.sw{display:flex;gap:3px;}
+.sw i{width:17px;height:17px;display:block;border:1px solid rgba(255,255,255,.14);}
+.sk-font{font:11px/1 'IBM Plex Mono';color:var(--dim);letter-spacing:.5px;}
+.sk-pick{font:600 10px/1 'IBM Plex Mono';letter-spacing:1.5px;color:var(--dim);
+  border:1px solid var(--border);padding:7px 11px;transition:.15s;}
+.sk.selected .sk-pick{color:var(--bg);background:var(--accent);border-color:var(--accent);}
+.sk.selected .sk-pick::before{content:"\2713 ";}
+
+.dash{max-width:1140px;margin:0 auto;}
+
+.pw-mock{position:relative;background:var(--bg);border:1px solid var(--border);overflow:hidden;font-family:var(--font-data),monospace;}
+.sk-slate .pw-mock{background-image:linear-gradient(rgba(52,224,208,.035) 1px,transparent 1px),linear-gradient(90deg,rgba(52,224,208,.035) 1px,transparent 1px);background-size:25px 25px;}
+.pw-mock::after{content:"";position:absolute;inset:0;pointer-events:none;z-index:8;
+  background:repeating-linear-gradient(0deg,transparent 0 2px,rgba(0,0,0,var(--scanA)) 2px 4px);}
+.pw-mock::before{content:"";position:absolute;inset:0;pointer-events:none;z-index:9;
+  box-shadow:inset 0 0 110px 16px rgba(0,0,0,var(--vig));}
+
+.pw-tb{display:flex;align-items:center;justify-content:space-between;padding:9px 13px;
+  background:rgba(0,0,0,.34);border-bottom:1px solid var(--border);}
+.pw-logo{font:700 13px/1 var(--font-disp),monospace;color:var(--accent);letter-spacing:2.5px;
+  text-shadow:0 0 var(--glow) var(--glow-c);}
+.cur{animation:blink 1.1s steps(1) infinite;}
+@keyframes blink{50%{opacity:0;}}
+.pw-tbr{display:flex;gap:6px;}
+.pw-chip{font:10px/1 var(--font-data),monospace;color:var(--dim);border:1px solid var(--border);padding:5px 8px;letter-spacing:.5px;}
+.pw-chip.on{color:var(--bg);background:var(--accent);border-color:var(--accent);font-weight:600;}
+
+.pw-body{padding:13px;}
+.pw-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;}
+.span2{grid-column:span 2;}
+
+.pw-panel{background:var(--panel);border:1px solid var(--border);border-top:2px solid var(--accent);
+  padding:11px;display:flex;flex-direction:column;gap:10px;}
+.pw-pt{display:flex;justify-content:space-between;align-items:baseline;
+  font:600 12px/1 var(--font-disp),monospace;color:var(--accent);letter-spacing:1.8px;}
+.pw-sub{font:400 9px/1 var(--font-data),monospace;color:var(--faint);letter-spacing:1px;}
+.pw-row{display:flex;gap:12px;align-items:center;}
+
+.pw-gauge{width:86px;height:86px;flex:none;border-radius:50%;position:relative;display:grid;place-items:center;
+  background:conic-gradient(var(--accent) 0 calc(var(--v,0)*1%),var(--track) calc(var(--v,0)*1%) 100%);}
+.pw-gauge::before{content:"";position:absolute;inset:8px;border-radius:50%;background:var(--panel);}
+.pw-gv{position:relative;font:600 22px/1 var(--font-data),monospace;color:var(--ink);text-shadow:0 0 var(--glow) var(--glow-c);}
+.pw-gv i{font-style:normal;font-size:11px;color:var(--dim);}
+.pw-glab{position:relative;font:8px/1 var(--font-data),monospace;color:var(--dim);letter-spacing:2px;margin-top:3px;}
+
+.pw-stats{flex:1;display:flex;flex-direction:column;gap:7px;}
+.pw-stat{display:flex;justify-content:space-between;align-items:baseline;border-bottom:1px solid var(--border);padding-bottom:4px;}
+.pw-stat label{font:9px/1 var(--font-data),monospace;color:var(--dim);letter-spacing:1px;}
+.pw-stat b{font:600 14px/1 var(--font-data),monospace;color:var(--ink);}
+.pw-stat b i{font-style:normal;font-size:9px;color:var(--dim);}
+.t-ok{color:var(--c-ok)!important;}.t-warn{color:var(--c-warn)!important;}.t-hot{color:var(--c-hot)!important;}
+
+.pw-cores{display:flex;gap:3px;align-items:flex-end;height:26px;}
+.pw-cores i{flex:1;background:var(--accent);opacity:.7;min-height:2px;}
+
+.pw-bar{height:6px;background:var(--track);overflow:hidden;}
+.pw-bar>i{display:block;height:100%;background:var(--accent);}
+.pw-bar.warn>i{background:var(--c-warn);}
+
+.pw-swap{display:flex;align-items:center;gap:9px;height:26px;}
+.pw-swap-l{font:9px/1 var(--font-data),monospace;color:var(--dim);letter-spacing:1.5px;flex:none;}
+.pw-swap .pw-bar{flex:1;}
+.pw-swap-v{font:10px/1 var(--font-data),monospace;color:var(--ink);flex:none;}
+
+.pw-spark{height:30px;}
+.pw-spark svg{width:100%;height:100%;display:block;}
+.pw-spark polyline{fill:none;stroke:var(--accent);stroke-width:1.8;}
+.pw-spark polygon{fill:var(--accent);opacity:.12;}
+
+.pw-disk-h,.pw-disk{display:grid;grid-template-columns:1.7fr 42px 1fr 80px;gap:11px;align-items:center;}
+.pw-disk-h{font:8px/1 var(--font-data),monospace;color:var(--faint);letter-spacing:1px;padding-bottom:4px;}
+.pw-disk{font:11px/1 var(--font-data),monospace;padding:7px 0;border-top:1px solid var(--border);}
+.pw-dn{color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.pw-dt{font-weight:600;text-align:center;}
+.pw-dc{color:var(--dim);text-align:right;}
+
+.pw-readout{display:grid;grid-template-columns:1fr 1fr;gap:8px 18px;}
+.pw-ro{display:flex;justify-content:space-between;font:11px/1 var(--font-data),monospace;border-bottom:1px solid var(--border);padding-bottom:5px;}
+.pw-ro label{color:var(--dim);letter-spacing:.5px;}
+.pw-ro b{color:var(--ink);font-weight:600;}
+
+.pw-foot{display:flex;gap:15px;flex-wrap:wrap;padding:7px 13px;background:rgba(0,0,0,.34);
+  border-top:1px solid var(--border);font:10px/1 var(--font-data),monospace;color:var(--dim);}
+.pw-foot .pw-live{color:var(--c-ok);}
+
+.endnote{max-width:1140px;margin:30px auto 0;padding:0 30px;font:12px/1.7 'IBM Plex Mono';color:#7a8494;}
+.endnote b{color:#aeb7c4;font-weight:600;}
+
+.sk-amber{
+  --bg:#100b04;--panel:#1c1409;--border:#48360f;--track:#2f2410;
+  --ink:#f1ddb0;--dim:#a98f57;--faint:#6f5a32;
+  --accent:#ffa31a;--accent-soft:#ffce6e;
+  --c-ok:#ffb733;--c-warn:#ffd277;--c-hot:#ff5535;
+  --font-disp:'IBM Plex Mono';--font-data:'IBM Plex Mono';
+  --scanA:.16;--vig:.5;--glow:7px;--glow-c:rgba(255,163,26,.5);
+  background:#0a0703;
+}
+.sk-slate{
+  --bg:#0a0e15;--panel:#121823;--border:#243144;--track:#1c2530;
+  --ink:#d6dde8;--dim:#6d7989;--faint:#48515f;
+  --accent:#34e0d0;--accent-soft:#7af0e4;
+  --c-ok:#3ed089;--c-warn:#f5a524;--c-hot:#fb5b4e;
+  --font-disp:'Chakra Petch';--font-data:'IBM Plex Mono';
+  --scanA:.04;--vig:.34;--glow:5px;--glow-c:rgba(52,224,208,.42);
+  background:#070a0f;
+}
+.sk-green{
+  --bg:#060a07;--panel:#0d150e;--border:#21401f;--track:#152119;
+  --ink:#c7e9c6;--dim:#5f8a62;--faint:#3f5e42;
+  --accent:#3edc62;--accent-soft:#86f29a;
+  --c-ok:#3edc62;--c-warn:#e8b53a;--c-hot:#ff4d3d;
+  --font-disp:'Space Mono';--font-data:'Space Mono';
+  --scanA:.18;--vig:.5;--glow:8px;--glow-c:rgba(62,220,98,.5);
+  background:#040703;
+}
+</style>
+</head>
+<body>
+
+<div class="intro">
+  <div class="kick">PERFWINDOW &middot; KORAK 2 — VIZUELNI STIL</div>
+  <h1>Tri estetička pravca</h1>
+  <p>Isti raspored (Varijanta A, zaključan), tri kompletne estetike — <b>paleta, tipografija, atmosfera</b>. Sve su tamna tema; svetla i „prati Windows" dolaze čim izaberemo pravac. Skroluj, pa <b>klikni jedan</b> — ili reci u terminalu šta da kombinujem.</p>
+</div>
+
+<div class="skins">
+
+  <!-- ===== 01 AMBER MAINFRAME ===== -->
+  <div class="sk sk-amber" data-choice="amber" onclick="toggleSelect(this)">
+    <div class="sk-head">
+      <div class="sk-num">01</div>
+      <div class="sk-titles">
+        <h2>AMBER MAINFRAME</h2>
+        <div class="concept">Amber-fosforni mainframe terminal — IBM 3270 / DEC VT energija. Topla nostalgija, monohromatska disciplina: sve je u amber tonu, samo alarmi (85&deg;+) idu crveno. Skenlajn + blagi sjaj.</div>
+      </div>
+      <div class="sk-meta">
+        <div class="sw"><i style="background:#100b04"></i><i style="background:#1c1409"></i><i style="background:#ffa31a"></i><i style="background:#ffce6e"></i></div>
+        <div class="sk-font">IBM Plex Mono</div>
+        <div class="sk-pick">KLIKNI ZA IZBOR</div>
+      </div>
+    </div>
+    <div class="dash">
+      <div class="pw-mock">
+        <div class="pw-tb">
+          <span class="pw-logo">&#9626; PERFWINDOW<span class="cur">&#9646;</span></span>
+          <span class="pw-tbr"><span class="pw-chip on">&deg;C</span><span class="pw-chip">&deg;F</span><span class="pw-chip">&#9680; TEMA</span><span class="pw-chip">&#9881;</span></span>
+        </div>
+        <div class="pw-body">
+          <div class="pw-grid">
+            <div class="pw-panel">
+              <div class="pw-pt"><span>CPU</span><span class="pw-sub">RYZEN 7 5800X</span></div>
+              <div class="pw-row">
+                <div class="pw-gauge" style="--v:34"><span class="pw-gv">34<i>%</i></span><span class="pw-glab">LOAD</span></div>
+                <div class="pw-stats">
+                  <div class="pw-stat"><label>TEMP</label><b class="t-ok">58&deg;</b></div>
+                  <div class="pw-stat"><label>TAKT</label><b>4.10<i>GHz</i></b></div>
+                  <div class="pw-stat"><label>SNAGA</label><b>76<i>W</i></b></div>
+                </div>
+              </div>
+              <div class="pw-cores"><i style="height:38%"></i><i style="height:55%"></i><i style="height:30%"></i><i style="height:64%"></i><i style="height:42%"></i><i style="height:71%"></i><i style="height:35%"></i><i style="height:50%"></i></div>
+              <div class="pw-spark"><svg viewBox="0 0 240 30" preserveAspectRatio="none"><polygon points="0,21 17,17 34,23 51,12 68,19 85,8 102,16 119,13 136,22 153,10 170,18 187,7 204,15 221,11 240,17 240,30 0,30"/><polyline points="0,21 17,17 34,23 51,12 68,19 85,8 102,16 119,13 136,22 153,10 170,18 187,7 204,15 221,11 240,17"/></svg></div>
+            </div>
+            <div class="pw-panel">
+              <div class="pw-pt"><span>GPU</span><span class="pw-sub">RTX 4070</span></div>
+              <div class="pw-row">
+                <div class="pw-gauge" style="--v:51"><span class="pw-gv">51<i>%</i></span><span class="pw-glab">LOAD</span></div>
+                <div class="pw-stats">
+                  <div class="pw-stat"><label>TEMP</label><b class="t-warn">71&deg;</b></div>
+                  <div class="pw-stat"><label>VRAM</label><b>6.2<i>/12 GB</i></b></div>
+                  <div class="pw-stat"><label>VENT</label><b>1480<i>rpm</i></b></div>
+                </div>
+              </div>
+              <div class="pw-cores"><i style="height:60%"></i><i style="height:48%"></i><i style="height:66%"></i><i style="height:52%"></i><i style="height:70%"></i><i style="height:44%"></i><i style="height:58%"></i><i style="height:62%"></i></div>
+              <div class="pw-spark"><svg viewBox="0 0 240 30" preserveAspectRatio="none"><polygon points="0,16 17,20 34,12 51,18 68,10 85,17 102,9 119,15 136,7 153,14 170,11 187,19 204,10 221,16 240,12 240,30 0,30"/><polyline points="0,16 17,20 34,12 51,18 68,10 85,17 102,9 119,15 136,7 153,14 170,11 187,19 204,10 221,16 240,12"/></svg></div>
+            </div>
+            <div class="pw-panel">
+              <div class="pw-pt"><span>RAM</span><span class="pw-sub">32 GB DDR4-3600</span></div>
+              <div class="pw-row">
+                <div class="pw-gauge" style="--v:47"><span class="pw-gv">47<i>%</i></span><span class="pw-glab">USED</span></div>
+                <div class="pw-stats">
+                  <div class="pw-stat"><label>UPOTREBA</label><b>15.1<i>GB</i></b></div>
+                  <div class="pw-stat"><label>SLOBODNO</label><b>16.9<i>GB</i></b></div>
+                  <div class="pw-stat"><label>CACHED</label><b>4.3<i>GB</i></b></div>
+                </div>
+              </div>
+              <div class="pw-swap"><span class="pw-swap-l">SWAP</span><div class="pw-bar"><i style="width:26%"></i></div><span class="pw-swap-v">2.1 / 8.0 GB</span></div>
+              <div class="pw-spark"><svg viewBox="0 0 240 30" preserveAspectRatio="none"><polygon points="0,19 17,18 34,20 51,17 68,19 85,16 102,18 119,15 136,17 153,16 170,18 187,15 204,17 221,16 240,17 240,30 0,30"/><polyline points="0,19 17,18 34,20 51,17 68,19 85,16 102,18 119,15 136,17 153,16 170,18 187,15 204,17 221,16 240,17"/></svg></div>
+            </div>
+            <div class="pw-panel span2">
+              <div class="pw-pt"><span>SKLADIŠTE</span><span class="pw-sub">3 DISKA</span></div>
+              <div class="pw-disk-h"><span>DISK</span><span>TEMP</span><span>AKTIVNOST</span><span>KAPACITET</span></div>
+              <div class="pw-disk"><span class="pw-dn">NVMe &middot; Samsung 980 Pro</span><span class="pw-dt t-ok">48&deg;</span><div class="pw-bar"><i style="width:22%"></i></div><span class="pw-dc">412/931 GB</span></div>
+              <div class="pw-disk"><span class="pw-dn">SSD &middot; Crucial MX500</span><span class="pw-dt t-ok">41&deg;</span><div class="pw-bar"><i style="width:6%"></i></div><span class="pw-dc">198/465 GB</span></div>
+              <div class="pw-disk"><span class="pw-dn">HDD &middot; Seagate BarraCuda</span><span class="pw-dt t-warn">52&deg;</span><div class="pw-bar warn"><i style="width:64%"></i></div><span class="pw-dc">1.42/1.81 TB</span></div>
+            </div>
+            <div class="pw-panel">
+              <div class="pw-pt"><span>PLOČA &amp; SENZORI</span></div>
+              <div class="pw-readout">
+                <div class="pw-ro"><label>PLOČA</label><b class="t-ok">38&deg;</b></div>
+                <div class="pw-ro"><label>VRM</label><b class="t-warn">61&deg;</b></div>
+                <div class="pw-ro"><label>VENT CPU</label><b>920</b></div>
+                <div class="pw-ro"><label>VENT SYS</label><b>760</b></div>
+                <div class="pw-ro"><label>+12V</label><b>12.08</b></div>
+                <div class="pw-ro"><label>VCORE</label><b>1.21</b></div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="pw-foot"><span class="pw-live">&#9679; LIVE</span><span>osvežavanje 1.0 s</span><span>CPU 34%</span><span>GPU 51%</span><span>RAM 47%</span><span>SWAP 2.1 GB</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== 02 CYBER SLATE ===== -->
+  <div class="sk sk-slate" data-choice="slate" onclick="toggleSelect(this)">
+    <div class="sk-head">
+      <div class="sk-num">02</div>
+      <div class="sk-titles">
+        <h2>CYBER SLATE</h2>
+        <div class="concept">Čist moderni sci-fi HUD — kontrolna ploča letelice, ali oštro i čitljivo. Hladna ploča, tirkizni akcenat, amber za toplotu, puno bojno kodiranje. Najmanje efekata, najviše „dev-tool".</div>
+      </div>
+      <div class="sk-meta">
+        <div class="sw"><i style="background:#0a0e15"></i><i style="background:#121823"></i><i style="background:#34e0d0"></i><i style="background:#f5a524"></i></div>
+        <div class="sk-font">Chakra Petch + IBM Plex Mono</div>
+        <div class="sk-pick">KLIKNI ZA IZBOR</div>
+      </div>
+    </div>
+    <div class="dash">
+      <div class="pw-mock">
+        <div class="pw-tb">
+          <span class="pw-logo">&#9626; PERFWINDOW<span class="cur">&#9646;</span></span>
+          <span class="pw-tbr"><span class="pw-chip on">&deg;C</span><span class="pw-chip">&deg;F</span><span class="pw-chip">&#9680; TEMA</span><span class="pw-chip">&#9881;</span></span>
+        </div>
+        <div class="pw-body">
+          <div class="pw-grid">
+            <div class="pw-panel">
+              <div class="pw-pt"><span>CPU</span><span class="pw-sub">RYZEN 7 5800X</span></div>
+              <div class="pw-row">
+                <div class="pw-gauge" style="--v:34"><span class="pw-gv">34<i>%</i></span><span class="pw-glab">LOAD</span></div>
+                <div class="pw-stats">
+                  <div class="pw-stat"><label>TEMP</label><b class="t-ok">58&deg;</b></div>
+                  <div class="pw-stat"><label>TAKT</label><b>4.10<i>GHz</i></b></div>
+                  <div class="pw-stat"><label>SNAGA</label><b>76<i>W</i></b></div>
+                </div>
+              </div>
+              <div class="pw-cores"><i style="height:38%"></i><i style="height:55%"></i><i style="height:30%"></i><i style="height:64%"></i><i style="height:42%"></i><i style="height:71%"></i><i style="height:35%"></i><i style="height:50%"></i></div>
+              <div class="pw-spark"><svg viewBox="0 0 240 30" preserveAspectRatio="none"><polygon points="0,21 17,17 34,23 51,12 68,19 85,8 102,16 119,13 136,22 153,10 170,18 187,7 204,15 221,11 240,17 240,30 0,30"/><polyline points="0,21 17,17 34,23 51,12 68,19 85,8 102,16 119,13 136,22 153,10 170,18 187,7 204,15 221,11 240,17"/></svg></div>
+            </div>
+            <div class="pw-panel">
+              <div class="pw-pt"><span>GPU</span><span class="pw-sub">RTX 4070</span></div>
+              <div class="pw-row">
+                <div class="pw-gauge" style="--v:51"><span class="pw-gv">51<i>%</i></span><span class="pw-glab">LOAD</span></div>
+                <div class="pw-stats">
+                  <div class="pw-stat"><label>TEMP</label><b class="t-warn">71&deg;</b></div>
+                  <div class="pw-stat"><label>VRAM</label><b>6.2<i>/12 GB</i></b></div>
+                  <div class="pw-stat"><label>VENT</label><b>1480<i>rpm</i></b></div>
+                </div>
+              </div>
+              <div class="pw-cores"><i style="height:60%"></i><i style="height:48%"></i><i style="height:66%"></i><i style="height:52%"></i><i style="height:70%"></i><i style="height:44%"></i><i style="height:58%"></i><i style="height:62%"></i></div>
+              <div class="pw-spark"><svg viewBox="0 0 240 30" preserveAspectRatio="none"><polygon points="0,16 17,20 34,12 51,18 68,10 85,17 102,9 119,15 136,7 153,14 170,11 187,19 204,10 221,16 240,12 240,30 0,30"/><polyline points="0,16 17,20 34,12 51,18 68,10 85,17 102,9 119,15 136,7 153,14 170,11 187,19 204,10 221,16 240,12"/></svg></div>
+            </div>
+            <div class="pw-panel">
+              <div class="pw-pt"><span>RAM</span><span class="pw-sub">32 GB DDR4-3600</span></div>
+              <div class="pw-row">
+                <div class="pw-gauge" style="--v:47"><span class="pw-gv">47<i>%</i></span><span class="pw-glab">USED</span></div>
+                <div class="pw-stats">
+                  <div class="pw-stat"><label>UPOTREBA</label><b>15.1<i>GB</i></b></div>
+                  <div class="pw-stat"><label>SLOBODNO</label><b>16.9<i>GB</i></b></div>
+                  <div class="pw-stat"><label>CACHED</label><b>4.3<i>GB</i></b></div>
+                </div>
+              </div>
+              <div class="pw-swap"><span class="pw-swap-l">SWAP</span><div class="pw-bar"><i style="width:26%"></i></div><span class="pw-swap-v">2.1 / 8.0 GB</span></div>
+              <div class="pw-spark"><svg viewBox="0 0 240 30" preserveAspectRatio="none"><polygon points="0,19 17,18 34,20 51,17 68,19 85,16 102,18 119,15 136,17 153,16 170,18 187,15 204,17 221,16 240,17 240,30 0,30"/><polyline points="0,19 17,18 34,20 51,17 68,19 85,16 102,18 119,15 136,17 153,16 170,18 187,15 204,17 221,16 240,17"/></svg></div>
+            </div>
+            <div class="pw-panel span2">
+              <div class="pw-pt"><span>SKLADIŠTE</span><span class="pw-sub">3 DISKA</span></div>
+              <div class="pw-disk-h"><span>DISK</span><span>TEMP</span><span>AKTIVNOST</span><span>KAPACITET</span></div>
+              <div class="pw-disk"><span class="pw-dn">NVMe &middot; Samsung 980 Pro</span><span class="pw-dt t-ok">48&deg;</span><div class="pw-bar"><i style="width:22%"></i></div><span class="pw-dc">412/931 GB</span></div>
+              <div class="pw-disk"><span class="pw-dn">SSD &middot; Crucial MX500</span><span class="pw-dt t-ok">41&deg;</span><div class="pw-bar"><i style="width:6%"></i></div><span class="pw-dc">198/465 GB</span></div>
+              <div class="pw-disk"><span class="pw-dn">HDD &middot; Seagate BarraCuda</span><span class="pw-dt t-warn">52&deg;</span><div class="pw-bar warn"><i style="width:64%"></i></div><span class="pw-dc">1.42/1.81 TB</span></div>
+            </div>
+            <div class="pw-panel">
+              <div class="pw-pt"><span>PLOČA &amp; SENZORI</span></div>
+              <div class="pw-readout">
+                <div class="pw-ro"><label>PLOČA</label><b class="t-ok">38&deg;</b></div>
+                <div class="pw-ro"><label>VRM</label><b class="t-warn">61&deg;</b></div>
+                <div class="pw-ro"><label>VENT CPU</label><b>920</b></div>
+                <div class="pw-ro"><label>VENT SYS</label><b>760</b></div>
+                <div class="pw-ro"><label>+12V</label><b>12.08</b></div>
+                <div class="pw-ro"><label>VCORE</label><b>1.21</b></div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="pw-foot"><span class="pw-live">&#9679; LIVE</span><span>osvežavanje 1.0 s</span><span>CPU 34%</span><span>GPU 51%</span><span>RAM 47%</span><span>SWAP 2.1 GB</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== 03 PHOSPHOR TACTICAL ===== -->
+  <div class="sk sk-green" data-choice="green" onclick="toggleSelect(this)">
+    <div class="sk-head">
+      <div class="sk-num">03</div>
+      <div class="sk-titles">
+        <h2>PHOSPHOR TACTICAL</h2>
+        <div class="concept">Vojno-taktički zeleni fosfor — radarska / operaterska konzola. Najviše „hakerski terminal": izraženiji skenlajn, zeleni sjaj, amber i crveno za toplotnu eskalaciju.</div>
+      </div>
+      <div class="sk-meta">
+        <div class="sw"><i style="background:#060a07"></i><i style="background:#0d150e"></i><i style="background:#3edc62"></i><i style="background:#e8b53a"></i></div>
+        <div class="sk-font">Space Mono</div>
+        <div class="sk-pick">KLIKNI ZA IZBOR</div>
+      </div>
+    </div>
+    <div class="dash">
+      <div class="pw-mock">
+        <div class="pw-tb">
+          <span class="pw-logo">&#9626; PERFWINDOW<span class="cur">&#9646;</span></span>
+          <span class="pw-tbr"><span class="pw-chip on">&deg;C</span><span class="pw-chip">&deg;F</span><span class="pw-chip">&#9680; TEMA</span><span class="pw-chip">&#9881;</span></span>
+        </div>
+        <div class="pw-body">
+          <div class="pw-grid">
+            <div class="pw-panel">
+              <div class="pw-pt"><span>CPU</span><span class="pw-sub">RYZEN 7 5800X</span></div>
+              <div class="pw-row">
+                <div class="pw-gauge" style="--v:34"><span class="pw-gv">34<i>%</i></span><span class="pw-glab">LOAD</span></div>
+                <div class="pw-stats">
+                  <div class="pw-stat"><label>TEMP</label><b class="t-ok">58&deg;</b></div>
+                  <div class="pw-stat"><label>TAKT</label><b>4.10<i>GHz</i></b></div>
+                  <div class="pw-stat"><label>SNAGA</label><b>76<i>W</i></b></div>
+                </div>
+              </div>
+              <div class="pw-cores"><i style="height:38%"></i><i style="height:55%"></i><i style="height:30%"></i><i style="height:64%"></i><i style="height:42%"></i><i style="height:71%"></i><i style="height:35%"></i><i style="height:50%"></i></div>
+              <div class="pw-spark"><svg viewBox="0 0 240 30" preserveAspectRatio="none"><polygon points="0,21 17,17 34,23 51,12 68,19 85,8 102,16 119,13 136,22 153,10 170,18 187,7 204,15 221,11 240,17 240,30 0,30"/><polyline points="0,21 17,17 34,23 51,12 68,19 85,8 102,16 119,13 136,22 153,10 170,18 187,7 204,15 221,11 240,17"/></svg></div>
+            </div>
+            <div class="pw-panel">
+              <div class="pw-pt"><span>GPU</span><span class="pw-sub">RTX 4070</span></div>
+              <div class="pw-row">
+                <div class="pw-gauge" style="--v:51"><span class="pw-gv">51<i>%</i></span><span class="pw-glab">LOAD</span></div>
+                <div class="pw-stats">
+                  <div class="pw-stat"><label>TEMP</label><b class="t-warn">71&deg;</b></div>
+                  <div class="pw-stat"><label>VRAM</label><b>6.2<i>/12 GB</i></b></div>
+                  <div class="pw-stat"><label>VENT</label><b>1480<i>rpm</i></b></div>
+                </div>
+              </div>
+              <div class="pw-cores"><i style="height:60%"></i><i style="height:48%"></i><i style="height:66%"></i><i style="height:52%"></i><i style="height:70%"></i><i style="height:44%"></i><i style="height:58%"></i><i style="height:62%"></i></div>
+              <div class="pw-spark"><svg viewBox="0 0 240 30" preserveAspectRatio="none"><polygon points="0,16 17,20 34,12 51,18 68,10 85,17 102,9 119,15 136,7 153,14 170,11 187,19 204,10 221,16 240,12 240,30 0,30"/><polyline points="0,16 17,20 34,12 51,18 68,10 85,17 102,9 119,15 136,7 153,14 170,11 187,19 204,10 221,16 240,12"/></svg></div>
+            </div>
+            <div class="pw-panel">
+              <div class="pw-pt"><span>RAM</span><span class="pw-sub">32 GB DDR4-3600</span></div>
+              <div class="pw-row">
+                <div class="pw-gauge" style="--v:47"><span class="pw-gv">47<i>%</i></span><span class="pw-glab">USED</span></div>
+                <div class="pw-stats">
+                  <div class="pw-stat"><label>UPOTREBA</label><b>15.1<i>GB</i></b></div>
+                  <div class="pw-stat"><label>SLOBODNO</label><b>16.9<i>GB</i></b></div>
+                  <div class="pw-stat"><label>CACHED</label><b>4.3<i>GB</i></b></div>
+                </div>
+              </div>
+              <div class="pw-swap"><span class="pw-swap-l">SWAP</span><div class="pw-bar"><i style="width:26%"></i></div><span class="pw-swap-v">2.1 / 8.0 GB</span></div>
+              <div class="pw-spark"><svg viewBox="0 0 240 30" preserveAspectRatio="none"><polygon points="0,19 17,18 34,20 51,17 68,19 85,16 102,18 119,15 136,17 153,16 170,18 187,15 204,17 221,16 240,17 240,30 0,30"/><polyline points="0,19 17,18 34,20 51,17 68,19 85,16 102,18 119,15 136,17 153,16 170,18 187,15 204,17 221,16 240,17"/></svg></div>
+            </div>
+            <div class="pw-panel span2">
+              <div class="pw-pt"><span>SKLADIŠTE</span><span class="pw-sub">3 DISKA</span></div>
+              <div class="pw-disk-h"><span>DISK</span><span>TEMP</span><span>AKTIVNOST</span><span>KAPACITET</span></div>
+              <div class="pw-disk"><span class="pw-dn">NVMe &middot; Samsung 980 Pro</span><span class="pw-dt t-ok">48&deg;</span><div class="pw-bar"><i style="width:22%"></i></div><span class="pw-dc">412/931 GB</span></div>
+              <div class="pw-disk"><span class="pw-dn">SSD &middot; Crucial MX500</span><span class="pw-dt t-ok">41&deg;</span><div class="pw-bar"><i style="width:6%"></i></div><span class="pw-dc">198/465 GB</span></div>
+              <div class="pw-disk"><span class="pw-dn">HDD &middot; Seagate BarraCuda</span><span class="pw-dt t-warn">52&deg;</span><div class="pw-bar warn"><i style="width:64%"></i></div><span class="pw-dc">1.42/1.81 TB</span></div>
+            </div>
+            <div class="pw-panel">
+              <div class="pw-pt"><span>PLOČA &amp; SENZORI</span></div>
+              <div class="pw-readout">
+                <div class="pw-ro"><label>PLOČA</label><b class="t-ok">38&deg;</b></div>
+                <div class="pw-ro"><label>VRM</label><b class="t-warn">61&deg;</b></div>
+                <div class="pw-ro"><label>VENT CPU</label><b>920</b></div>
+                <div class="pw-ro"><label>VENT SYS</label><b>760</b></div>
+                <div class="pw-ro"><label>+12V</label><b>12.08</b></div>
+                <div class="pw-ro"><label>VCORE</label><b>1.21</b></div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="pw-foot"><span class="pw-live">&#9679; LIVE</span><span>osvežavanje 1.0 s</span><span>CPU 34%</span><span>GPU 51%</span><span>RAM 47%</span><span>SWAP 2.1 GB</span></div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<div class="endnote">
+  <b>Izvodljivost u egui (Rust):</b> boje, oštar HUD ram, skenlajn i tekstura su jeftini. Pravi „bloom" sjaj je skup — finalni izgled nosi boja, kontrast i tipografija, sjaj ostaje suptilan. Poklapa se sa „lagano, ne preterano".&nbsp; <b>Sledeće:</b> izabran pravac → svetla tema + „prati Windows" + fino doterivanje → pišem spec.
+</div>
+
+</body>
+</html>
