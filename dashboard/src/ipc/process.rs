@@ -1,5 +1,6 @@
 use crate::ipc::{parse_snapshot, Snapshot};
 use std::io::{BufRead, BufReader, Write};
+use std::os::windows::process::CommandExt;
 use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
@@ -35,10 +36,14 @@ impl Sensord {
             std::env::temp_dir().join(format!("PerfWindow-sensord-{}.exe", std::process::id()));
         std::fs::write(&exe_path, SENSORD_BYTES)?;
 
+        // sensord is a console-subsystem process; without CREATE_NO_WINDOW
+        // Windows opens a console window for the spawned child.
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
         let mut child = Command::new(&exe_path)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
+            .creation_flags(CREATE_NO_WINDOW)
             .spawn()?;
 
         let stdout = child.stdout.take().expect("piped stdout");
