@@ -1,0 +1,78 @@
+//! The GPU component panel (also used for integrated GPUs).
+
+use super::{card, panel_title};
+use crate::format::{format_temp, TempUnit};
+use crate::history::RingBuffer;
+use crate::ipc::GpuInfo;
+use crate::theme::Theme;
+use crate::widgets::gauge::donut;
+use crate::widgets::sparkline::sparkline;
+use crate::widgets::stat::stat_row;
+use crate::widgets::{temp_color, TempKind};
+
+/// Render a GPU card: title, a load donut beside temp/VRAM/fan stats and a
+/// load-history sparkline.
+///
+/// The card adapts to `gpu.kind`: a `"discrete"` GPU is titled `"GPU"` and
+/// shows used/total VRAM and a fan speed; an `"integrated"` GPU is titled
+/// `"iGPU"`, shows `"shared"` VRAM and has no fan. There is deliberately no
+/// per-unit strip — GPUs do not expose per-core loads. Every absent (`None`)
+/// reading renders as `"—"`; nothing here can panic.
+pub fn gpu_panel(
+    ui: &mut egui::Ui,
+    theme: &Theme,
+    gpu: &GpuInfo,
+    history: Option<&RingBuffer>,
+    unit: TempUnit,
+) {
+    let integrated = gpu.kind == "integrated";
+    let title = if integrated { "iGPU" } else { "GPU" };
+
+    card(ui, theme, |ui| {
+        panel_title(ui, theme, title, Some(&gpu.name));
+
+        // Load donut on the left, three stat rows on the right.
+        ui.horizontal(|ui| {
+            donut(ui, theme, gpu.load.unwrap_or(0.0) as f32, "%", "LOAD");
+            ui.vertical(|ui| {
+                let temp_value = format_temp(gpu.temp, unit);
+                let temp_col = gpu.temp.map(|t| temp_color(t, TempKind::Processor, theme));
+                stat_row(ui, theme, "TEMP", &temp_value, temp_col);
+
+                let vram = if integrated {
+                    "shared".to_string()
+                } else {
+                    format_vram(gpu.vram_used_mb, gpu.vram_total_mb)
+                };
+                stat_row(ui, theme, "VRAM", &vram, None);
+
+                stat_row(ui, theme, "FAN", &format_fan(gpu.fan_rpm), None);
+            });
+        });
+
+        // Load-history sparkline (no per-core strip for GPUs).
+        let samples: Vec<f32> = history
+            .map(|h| h.iter_oldest_first().collect())
+            .unwrap_or_default();
+        sparkline(ui, theme, &samples, 100.0);
+    });
+}
+
+/// Used/total VRAM rendered as `"6.2 / 12 GB"`, or `"—"` when either value is
+/// absent.
+fn format_vram(used_mb: Option<f64>, total_mb: Option<f64>) -> String {
+    match (used_mb, total_mb) {
+        (Some(used), Some(total)) => {
+            format!("{:.1} / {:.0} GB", used / 1024.0, total / 1024.0)
+        }
+        _ => "—".to_string(),
+    }
+}
+
+/// Fan speed rendered as `"1480 rpm"`, or `"—"` when absent.
+fn format_fan(fan_rpm: Option<f64>) -> String {
+    match fan_rpm {
+        Some(rpm) => format!("{} rpm", rpm.round() as i64),
+        None => "—".to_string(),
+    }
+}

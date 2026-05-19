@@ -6,6 +6,7 @@ mod config;
 mod format;
 mod history;
 mod ipc;
+mod panels;
 mod theme;
 mod widgets;
 
