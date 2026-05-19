@@ -121,6 +121,10 @@ impl eframe::App for PerfApp {
                     });
             });
 
+        // The settings modal floats above the panels; it is a free-floating
+        // `egui::Window` and so takes the `Context`, not a nested `Ui`.
+        crate::ui::settings::settings_modal(&ctx, self);
+
         // Watchdog repaint a little past the refresh interval; new snapshots
         // already wake the UI via request_repaint from the reader thread, and
         // the blinking cursor needs steady frames regardless.

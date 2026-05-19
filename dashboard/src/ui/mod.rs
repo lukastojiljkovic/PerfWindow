@@ -5,6 +5,11 @@
 //! in the central scroll area. The grid simply orders the [`crate::panels`]
 //! cards from the latest snapshot and places them; each panel paints its own
 //! [`crate::panels::card`] frame, so the grid never wraps a cell itself.
+//!
+//! The [`settings`] submodule adds the floating settings modal, drawn on top of
+//! everything else when the title-bar gear is toggled on.
+
+pub mod settings;
 
 use crate::app::{PerfApp, Status};
 use crate::config::ThemeId;
