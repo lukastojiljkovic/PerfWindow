@@ -1,12 +1,13 @@
 pub mod system;
 
 use crate::config::ThemeId;
-use egui::Color32;
+use egui::{Color32, FontData, FontDefinitions};
 
 /// Which bundled font family a theme uses for a role.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FontFamily {
     PlexMono,
+    PlexMonoBold,
     ChakraPetch,
     SpaceMono,
 }
@@ -157,8 +158,6 @@ impl Theme {
     }
 }
 
-use egui::{FontData, FontDefinitions};
-
 /// Register the three bundled families with egui. Call once at startup.
 pub fn install_fonts(ctx: &egui::Context) {
     let mut fonts = FontDefinitions::default();
@@ -185,6 +184,9 @@ pub fn install_fonts(ctx: &egui::Context) {
         .insert(Name("plex".into()), vec!["plex".into()]);
     fonts
         .families
+        .insert(Name("plex-bold".into()), vec!["plex-bold".into()]);
+    fonts
+        .families
         .insert(Name("chakra".into()), vec!["chakra".into()]);
     fonts
         .families
@@ -203,6 +205,7 @@ impl FontFamily {
     pub fn egui(self) -> egui::FontFamily {
         match self {
             FontFamily::PlexMono => egui::FontFamily::Name("plex".into()),
+            FontFamily::PlexMonoBold => egui::FontFamily::Name("plex-bold".into()),
             FontFamily::ChakraPetch => egui::FontFamily::Name("chakra".into()),
             FontFamily::SpaceMono => egui::FontFamily::Name("space".into()),
         }

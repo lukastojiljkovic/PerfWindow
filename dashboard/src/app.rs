@@ -31,7 +31,15 @@ impl PerfApp {
         theme.apply(&cc.egui_ctx);
 
         let ctx = cc.egui_ctx.clone();
-        let sensord = Sensord::spawn(move || ctx.request_repaint()).ok();
+        let sensord = Sensord::spawn(move || ctx.request_repaint())
+            .inspect_err(|e| eprintln!("PerfWindow: failed to start sensord: {e}"))
+            .ok();
+
+        let status = if sensord.is_some() {
+            Status::Running
+        } else {
+            Status::SensordDown
+        };
 
         let mut app = Self {
             config,
@@ -39,7 +47,7 @@ impl PerfApp {
             history: History::default(),
             sensord,
             latest: None,
-            status: Status::Running,
+            status,
             settings_open: false,
             os_is_light,
         };
@@ -62,8 +70,8 @@ impl PerfApp {
             if let Some(snap) = &state.latest {
                 if self.latest.as_ref().map(|p| p.ts) != Some(snap.ts) {
                     self.history.record(snap);
+                    self.latest = Some(snap.clone());
                 }
-                self.latest = Some(snap.clone());
             }
         }
     }
