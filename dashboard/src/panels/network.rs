@@ -1,10 +1,11 @@
 //! The network component panel: two link-utilisation arrow meters.
 
-use super::{card, panel_title};
-use crate::format::format_bytes_per_sec;
+use super::{card, empty_note, panel_title};
+use crate::format::{finite, format_bytes_per_sec};
 use crate::ipc::NetInfo;
-use crate::theme::Theme;
+use crate::theme::{FontFamily, Theme};
 use egui::{Color32, FontId, Pos2, Rect, Sense, Shape, Stroke, Vec2};
+use std::sync::Arc;
 
 /// Width of one arrow meter box (mockup `.pw-arrow { width: 72px }`).
 const ARROW_W: f32 = 72.0;
@@ -13,6 +14,13 @@ const ARROW_H: f32 = 86.0;
 /// Horizontal gap between the download and upload columns
 /// (mockup `.pw-arrows { gap: 18px }`).
 const COLUMN_GAP: f32 = 18.0;
+/// Vertical gap between an arrow, its label and its value
+/// (mockup `.pw-arrow-col { gap: 9px }`).
+const STACK_GAP: f32 = 9.0;
+/// Font size of the letter-spaced direction label.
+const LABEL_SIZE: f32 = 9.0;
+/// Font size of the throughput value (mockup `.pw-arrow-val { font: 600 17px }`).
+const VALUE_SIZE: f32 = 17.0;
 
 /// Direction an arrow points; selects which rect+triangle decomposition to use.
 #[derive(Clone, Copy)]
@@ -25,84 +33,153 @@ enum ArrowDir {
 /// height to the link-utilisation percentage.
 ///
 /// With no active adapter (`net` is `None`) a single dimmed line is shown
-/// instead. Absent throughput / utilisation fields are treated as zero; nothing
-/// here panics.
+/// instead. Absent or non-finite throughput / utilisation fields are treated as
+/// zero; nothing here panics.
 pub fn network_panel(ui: &mut egui::Ui, theme: &Theme, net: Option<&NetInfo>) {
     card(ui, theme, |ui| {
         panel_title(ui, theme, "NETWORK", net.map(|n| n.adapter.as_str()));
 
         let Some(net) = net else {
-            empty_state(ui, theme);
+            empty_note(ui, theme, "No active network adapter");
             return;
         };
 
-        // Two arrow columns side by side, centred in the card body.
-        let pair_w = ARROW_W * 2.0 + COLUMN_GAP;
-        ui.horizontal(|ui| {
-            let pad = ((ui.available_width() - pair_w) / 2.0).max(0.0);
-            ui.add_space(pad);
-
-            ui.spacing_mut().item_spacing.x = COLUMN_GAP;
-
-            arrow_column(
-                ui,
-                theme,
-                ArrowDir::Down,
-                theme.accent,
-                "DOWNLOAD",
-                &format_bytes_per_sec(net.down_bps.unwrap_or(0.0)),
-                net.down_pct.unwrap_or(0.0),
-            );
-            arrow_column(
-                ui,
-                theme,
-                ArrowDir::Up,
-                theme.accent_soft,
-                "UPLOAD",
-                &format_bytes_per_sec(net.up_bps.unwrap_or(0.0)),
-                net.up_pct.unwrap_or(0.0),
-            );
-        });
+        arrows_row(ui, theme, net);
     });
 }
 
-/// Draw one arrow column: the arrow meter on top, a letter-spaced label, then
-/// the throughput value (mockup `.pw-arrow-col`).
-fn arrow_column(
-    ui: &mut egui::Ui,
-    theme: &Theme,
+/// Lay out the download and upload columns, centred as a pair in the card body.
+fn arrows_row(ui: &mut egui::Ui, theme: &Theme, net: &NetInfo) {
+    let down = ArrowColumn::measure(
+        ui,
+        theme,
+        ArrowDir::Down,
+        theme.accent,
+        "DOWNLOAD",
+        &format_bytes_per_sec(finite(net.down_bps).unwrap_or(0.0)),
+        finite(net.down_pct),
+    );
+    let up = ArrowColumn::measure(
+        ui,
+        theme,
+        ArrowDir::Up,
+        theme.accent_soft,
+        "UPLOAD",
+        &format_bytes_per_sec(finite(net.up_bps).unwrap_or(0.0)),
+        finite(net.up_pct),
+    );
+
+    let pair_w = down.width + COLUMN_GAP + up.width;
+    let row_h = down.height.max(up.height);
+    let (rect, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), row_h), Sense::hover());
+    if !ui.is_rect_visible(rect) {
+        return;
+    }
+    let painter = ui.painter_at(rect);
+
+    // Centre the pair in the row; paint each column around its own centre x.
+    let mut cx = rect.center().x - pair_w / 2.0 + down.width / 2.0;
+    down.paint(&painter, theme, Pos2::new(cx, rect.min.y));
+    cx += down.width / 2.0 + COLUMN_GAP + up.width / 2.0;
+    up.paint(&painter, theme, Pos2::new(cx, rect.min.y));
+}
+
+/// One measured arrow column: the meter's direction and fill plus the
+/// pre-laid-out label and value galleys, ready to paint around a centre point.
+struct ArrowColumn {
     dir: ArrowDir,
     fill_color: Color32,
-    label: &str,
-    value: &str,
-    util_pct: f64,
-) {
-    ui.vertical(|ui| {
-        ui.spacing_mut().item_spacing.y = 9.0;
+    /// Bottom-up fill fraction, in `0.0..=1.0`.
+    fill: f32,
+    label: Arc<egui::Galley>,
+    value: Arc<egui::Galley>,
+    /// Widest of the arrow box and the two galleys — spaces the pair.
+    width: f32,
+    /// Stacked height of arrow + label + value.
+    height: f32,
+}
 
-        // --- arrow meter (72 × 86 box) ---
-        let (rect, _) = ui.allocate_exact_size(Vec2::new(ARROW_W, ARROW_H), Sense::hover());
-        if ui.is_rect_visible(rect) {
-            let fill = (util_pct / 100.0).clamp(0.0, 1.0) as f32;
-            draw_arrow(ui, rect, dir, fill_color, fill, theme.track);
+impl ArrowColumn {
+    /// Lay out a column's text and compute its footprint. `util_pct` is the
+    /// link-utilisation percentage (0–100), or `None` when the link speed is
+    /// unknown — then the meter shows empty but the value still shows.
+    fn measure(
+        ui: &egui::Ui,
+        theme: &Theme,
+        dir: ArrowDir,
+        fill_color: Color32,
+        label: &str,
+        value: &str,
+        util_pct: Option<f64>,
+    ) -> Self {
+        let painter = ui.painter();
+        let label_galley = painter.layout_no_wrap(
+            letter_spaced(label),
+            FontId::new(LABEL_SIZE, theme.font_data.egui()),
+            theme.dim,
+        );
+        // The value uses the data font's bold sibling where one exists
+        // (mockup `.pw-arrow-val { font-weight: 600 }`).
+        let value_family = match theme.font_data {
+            FontFamily::PlexMono => FontFamily::PlexMonoBold,
+            other => other,
+        };
+        let value_galley = painter.layout_no_wrap(
+            value.to_owned(),
+            FontId::new(VALUE_SIZE, value_family.egui()),
+            theme.ink,
+        );
+
+        let width = ARROW_W
+            .max(label_galley.size().x)
+            .max(value_galley.size().x);
+        let height =
+            ARROW_H + STACK_GAP + label_galley.size().y + STACK_GAP + value_galley.size().y;
+        let fill = util_pct
+            .map(|p| (p / 100.0).clamp(0.0, 1.0) as f32)
+            .unwrap_or(0.0);
+
+        Self {
+            dir,
+            fill_color,
+            fill,
+            label: label_galley,
+            value: value_galley,
+            width,
+            height,
         }
+    }
 
-        // --- label, centred, dim, letter-spaced ---
-        centered_label(
-            ui,
-            &letter_spaced(label),
-            FontId::new(9.0, theme.font_data.egui()),
+    /// Paint the arrow, label and value, all horizontally centred on
+    /// `top_center.x` and stacked downward from `top_center.y`.
+    fn paint(&self, painter: &egui::Painter, theme: &Theme, top_center: Pos2) {
+        let arrow_rect = Rect::from_min_size(
+            Pos2::new(top_center.x - ARROW_W / 2.0, top_center.y),
+            Vec2::new(ARROW_W, ARROW_H),
+        );
+        draw_arrow(
+            painter,
+            arrow_rect,
+            self.dir,
+            self.fill_color,
+            self.fill,
+            theme.track,
+        );
+
+        let label_y = arrow_rect.max.y + STACK_GAP;
+        painter.galley(
+            Pos2::new(top_center.x - self.label.size().x / 2.0, label_y),
+            self.label.clone(),
             theme.dim,
         );
 
-        // --- throughput value, centred, ink ---
-        centered_label(
-            ui,
-            value,
-            FontId::new(13.0, theme.font_data.egui()),
+        let value_y = label_y + self.label.size().y + STACK_GAP;
+        painter.galley(
+            Pos2::new(top_center.x - self.value.size().x / 2.0, value_y),
+            self.value.clone(),
             theme.ink,
         );
-    });
+    }
 }
 
 /// Draw an arrow meter inside `rect`.
@@ -115,7 +192,7 @@ fn arrow_column(
 ///   2. the whole arrow filled with `fill_color` but clipped to only the bottom
 ///      `fill`-fraction of the box, so the meter fills upward from the bottom.
 fn draw_arrow(
-    ui: &egui::Ui,
+    painter: &egui::Painter,
     rect: Rect,
     dir: ArrowDir,
     fill_color: Color32,
@@ -123,16 +200,14 @@ fn draw_arrow(
     track_color: Color32,
 ) {
     // Pass 1: empty track-coloured arrow.
-    let painter = ui.painter_at(rect);
-    paint_arrow_shapes(&painter, rect, dir, track_color);
+    paint_arrow_shapes(painter, rect, dir, track_color);
 
     // Pass 2: fill-coloured arrow, clipped to the bottom `fill`-fraction.
     let fill = fill.clamp(0.0, 1.0);
     if fill > 0.0 {
         let fill_h = fill * rect.height();
         let clip = Rect::from_min_max(Pos2::new(rect.min.x, rect.max.y - fill_h), rect.max);
-        let clipped = ui.painter_at(rect).with_clip_rect(clip);
-        paint_arrow_shapes(&clipped, rect, dir, fill_color);
+        paint_arrow_shapes(&painter.with_clip_rect(clip), rect, dir, fill_color);
     }
 }
 
@@ -170,29 +245,11 @@ fn paint_arrow_shapes(painter: &egui::Painter, rect: Rect, dir: ArrowDir, color:
     painter.add(Shape::convex_polygon(head, color, Stroke::NONE));
 }
 
-/// Draw `text` horizontally centred on its own row.
-fn centered_label(ui: &mut egui::Ui, text: &str, font: FontId, color: Color32) {
-    let w = ui.available_width();
-    let (rect, _) = ui.allocate_exact_size(Vec2::new(w, font.size + 2.0), Sense::hover());
-    if !ui.is_rect_visible(rect) {
-        return;
-    }
-    let painter = ui.painter_at(rect);
-    let galley = painter.layout_no_wrap(text.to_owned(), font, color);
-    painter.galley(
-        Pos2::new(
-            rect.center().x - galley.size().x / 2.0,
-            rect.center().y - galley.size().y / 2.0,
-        ),
-        galley,
-        color,
-    );
-}
-
 /// Insert thin spaces between characters to approximate the mockup's
 /// `letter-spacing` on the arrow labels.
 fn letter_spaced(text: &str) -> String {
-    let mut out = String::with_capacity(text.len() * 2);
+    // Each inter-character gap is a 3-byte thin space; reserve generously.
+    let mut out = String::with_capacity(text.len() * 4);
     for (i, ch) in text.chars().enumerate() {
         if i > 0 {
             out.push('\u{2009}'); // thin space
@@ -200,24 +257,4 @@ fn letter_spaced(text: &str) -> String {
         out.push(ch);
     }
     out
-}
-
-/// Draw the centred dimmed line shown when there is no active network adapter.
-fn empty_state(ui: &mut egui::Ui, theme: &Theme) {
-    let total_w = ui.available_width();
-    let (rect, _) = ui.allocate_exact_size(Vec2::new(total_w, 22.0), Sense::hover());
-    if !ui.is_rect_visible(rect) {
-        return;
-    }
-    let painter = ui.painter_at(rect);
-    let font = FontId::new(11.0, theme.font_data.egui());
-    let galley = painter.layout_no_wrap("No active network adapter".to_string(), font, theme.dim);
-    painter.galley(
-        Pos2::new(
-            rect.center().x - galley.size().x / 2.0,
-            rect.center().y - galley.size().y / 2.0,
-        ),
-        galley,
-        theme.dim,
-    );
 }

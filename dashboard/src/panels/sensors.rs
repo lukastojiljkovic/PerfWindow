@@ -1,7 +1,7 @@
 //! The motherboard / fans / voltages component panel.
 
-use super::{card, panel_title};
-use crate::format::{format_temp, TempUnit};
+use super::{card, empty_note, panel_title};
+use crate::format::{finite, format_temp, TempUnit};
 use crate::ipc::{BoardInfo, FanInfo, VoltageInfo};
 use crate::theme::{FontFamily, Theme};
 use crate::widgets::{temp_color, TempKind};
@@ -43,7 +43,7 @@ pub fn sensors_panel(
         let rows = collect_readouts(theme, board, fans, voltages, unit);
 
         if rows.is_empty() {
-            empty_state(ui, theme);
+            empty_note(ui, theme, "No motherboard sensors on this machine");
         } else {
             readout_grid(ui, theme, &rows);
         }
@@ -62,14 +62,14 @@ fn collect_readouts(
     let mut rows: Vec<Readout> = Vec::new();
 
     if let Some(board) = board {
-        if let Some(temp) = board.temp {
+        if let Some(temp) = finite(board.temp) {
             rows.push(Readout {
                 label: "TEMP".to_string(),
                 value: format_temp(Some(temp), unit),
                 color: Some(temp_color(temp, TempKind::Board, theme)),
             });
         }
-        if let Some(vrm) = board.vrm_temp {
+        if let Some(vrm) = finite(board.vrm_temp) {
             rows.push(Readout {
                 label: "VRM".to_string(),
                 value: format_temp(Some(vrm), unit),
@@ -79,7 +79,7 @@ fn collect_readouts(
     }
 
     for fan in fans {
-        if let Some(rpm) = fan.rpm {
+        if let Some(rpm) = finite(fan.rpm) {
             rows.push(Readout {
                 label: fan.name.clone(),
                 value: format!("{}", rpm.round() as i64),
@@ -89,7 +89,7 @@ fn collect_readouts(
     }
 
     for voltage in voltages {
-        if let Some(volts) = voltage.volts {
+        if let Some(volts) = finite(voltage.volts) {
             rows.push(Readout {
                 label: voltage.name.clone(),
                 value: format!("{:.2}", volts),
@@ -166,28 +166,4 @@ fn readout_grid(ui: &mut egui::Ui, theme: &Theme, rows: &[Readout]) {
             Stroke::new(1.0, theme.border),
         ));
     }
-}
-
-/// Draw the centred dimmed line shown when no motherboard sensors are readable.
-fn empty_state(ui: &mut egui::Ui, theme: &Theme) {
-    let total_w = ui.available_width();
-    let (rect, _) = ui.allocate_exact_size(Vec2::new(total_w, READOUT_ROW_H), Sense::hover());
-    if !ui.is_rect_visible(rect) {
-        return;
-    }
-    let painter = ui.painter_at(rect);
-    let font = FontId::new(11.0, theme.font_data.egui());
-    let galley = painter.layout_no_wrap(
-        "No motherboard sensors on this machine".to_string(),
-        font,
-        theme.dim,
-    );
-    painter.galley(
-        Pos2::new(
-            rect.center().x - galley.size().x / 2.0,
-            rect.center().y - galley.size().y / 2.0,
-        ),
-        galley,
-        theme.dim,
-    );
 }

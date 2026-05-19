@@ -13,7 +13,7 @@ pub mod sensors;
 pub mod storage;
 
 use crate::theme::Theme;
-use egui::{Frame, Margin, RichText, Stroke, Vec2};
+use egui::{FontId, Frame, Margin, Pos2, RichText, Sense, Stroke, Vec2};
 
 /// Inner padding of a panel card, in pixels (mockup `.pw-panel { padding: 11px }`).
 const CARD_PADDING: i8 = 11;
@@ -22,6 +22,8 @@ const CARD_ITEM_SPACING: f32 = 10.0;
 /// Thickness of the accent line along the card's top edge
 /// (mockup `.pw-panel { border-top: 2px solid var(--accent) }`).
 const TOP_ACCENT_THICKNESS: f32 = 2.0;
+/// Height of a panel's empty-state row — a single centred dimmed line.
+const EMPTY_NOTE_H: f32 = 22.0;
 
 /// Draw the standard panel card and run `contents` inside it.
 ///
@@ -69,4 +71,30 @@ pub fn panel_title(ui: &mut egui::Ui, theme: &Theme, title: &str, sub: Option<&s
             });
         }
     });
+}
+
+/// Draw a panel's empty-state: one centred, dimmed line of `text`.
+///
+/// Used by panels that legitimately have nothing to show — a machine with no
+/// readable motherboard sensors, or no active network adapter. It fabricates
+/// nothing and cannot panic.
+pub fn empty_note(ui: &mut egui::Ui, theme: &Theme, text: &str) {
+    let (rect, _) = ui.allocate_exact_size(
+        Vec2::new(ui.available_width(), EMPTY_NOTE_H),
+        Sense::hover(),
+    );
+    if !ui.is_rect_visible(rect) {
+        return;
+    }
+    let painter = ui.painter_at(rect);
+    let font = FontId::new(11.0, theme.font_data.egui());
+    let galley = painter.layout_no_wrap(text.to_owned(), font, theme.dim);
+    painter.galley(
+        Pos2::new(
+            rect.center().x - galley.size().x / 2.0,
+            rect.center().y - galley.size().y / 2.0,
+        ),
+        galley,
+        theme.dim,
+    );
 }

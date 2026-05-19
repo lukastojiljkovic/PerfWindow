@@ -57,6 +57,13 @@ pub fn format_gb_pair(used_mb: Option<f64>, total_mb: Option<f64>) -> String {
     }
 }
 
+/// Discard a non-finite (`NaN` or infinite) reading. A sensor that returns
+/// garbage must degrade to "absent" rather than render as a confident value or
+/// a literal `"NaN"`. A `Some` finite value passes through unchanged.
+pub fn finite(x: Option<f64>) -> Option<f64> {
+    x.filter(|v| v.is_finite())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -93,5 +100,14 @@ mod tests {
         assert_eq!(format_gb_pair(Some(6348.0), Some(12288.0)), "6.2 / 12.0 GB");
         assert_eq!(format_gb_pair(None, Some(12288.0)), "—");
         assert_eq!(format_gb_pair(Some(6348.0), None), "—");
+    }
+
+    #[test]
+    fn finite_discards_non_finite_readings() {
+        assert_eq!(finite(Some(42.0)), Some(42.0));
+        assert_eq!(finite(Some(f64::NAN)), None);
+        assert_eq!(finite(Some(f64::INFINITY)), None);
+        assert_eq!(finite(Some(f64::NEG_INFINITY)), None);
+        assert_eq!(finite(None), None);
     }
 }

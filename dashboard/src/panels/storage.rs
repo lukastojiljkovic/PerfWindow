@@ -1,7 +1,7 @@
 //! The storage component panel: a per-disk table.
 
 use super::{card, panel_title};
-use crate::format::{format_temp, TempUnit};
+use crate::format::{finite, format_temp, TempUnit};
 use crate::ipc::StorageInfo;
 use crate::theme::Theme;
 use crate::widgets::bars::bar_meter;
@@ -48,6 +48,11 @@ pub fn storage_panel(ui: &mut egui::Ui, theme: &Theme, disks: &[StorageInfo], un
 /// Split the available row width into the four column widths
 /// (`DISK`, `TEMP`, `ACTIVITY`, `CAPACITY`) honouring the `1.7fr / 42 / 1fr / 80`
 /// grid and the 11 px inter-column gaps.
+///
+/// The flexible pool is floored at zero, so every returned width is
+/// non-negative. If `total_w` is narrower than the fixed columns the cells
+/// simply sum to more than `total_w`; the per-row `painter_at` clip in
+/// `disk_row` trims that overflow harmlessly.
 fn column_widths(total_w: f32) -> [f32; 4] {
     let flexible = (total_w - TEMP_COL_W - CAP_COL_W - 3.0 * COL_GAP).max(0.0);
     let disk_w = flexible * (DISK_FR / (DISK_FR + 1.0));
@@ -102,24 +107,19 @@ fn disk_row(ui: &mut egui::Ui, theme: &Theme, disk: &StorageInfo, unit: TempUnit
 
     let center_y = rect.center().y;
 
-    // --- DISK: "<KIND> · <name>", ink, ellipsis-truncated. ---
-    let name = format!("{} · {}", disk.kind.to_uppercase(), disk.name);
+    // --- DISK: "<Kind> · <name>", ink. Laid out with a hard wrap width and an
+    // ellipsis so a long disk name never spills into the TEMP column. ---
+    let name = format!("{} · {}", kind_label(&disk.kind), disk.name);
     let name_font = FontId::new(11.0, theme.font_data.egui());
-    let mut name_galley = painter.layout_no_wrap(name.clone(), name_font.clone(), theme.ink);
-    if name_galley.size().x > widths[0] {
-        // Re-layout with a hard wrap width and an ellipsis so a long disk name
-        // never spills into the TEMP column.
-        let job = ellipsised_job(&name, name_font, theme.ink, widths[0]);
-        name_galley = painter.layout_job(job);
-    }
+    let name_galley = painter.layout_job(ellipsised_job(&name, name_font, theme.ink, widths[0]));
     let name_y = center_y - name_galley.size().y / 2.0;
     painter.galley(Pos2::new(rect.min.x, name_y), name_galley, theme.ink);
 
     // --- TEMP: centred, temperature-coloured when present. ---
     let temp_x0 = rect.min.x + widths[0] + COL_GAP;
-    let temp_str = format_temp(disk.temp, unit);
-    let temp_color = disk
-        .temp
+    let temp = finite(disk.temp);
+    let temp_str = format_temp(temp, unit);
+    let temp_color = temp
         .map(|t| temp_color(t, TempKind::Disk, theme))
         .unwrap_or(theme.dim);
     let temp_font = FontId::new(11.0, theme.font_data.egui());
@@ -133,7 +133,7 @@ fn disk_row(ui: &mut egui::Ui, theme: &Theme, disk: &StorageInfo, unit: TempUnit
 
     // --- ACTIVITY: a bar_meter filled to activity/100, warn when high. ---
     let act_x0 = temp_x0 + widths[1] + COL_GAP;
-    let activity = disk.activity.unwrap_or(0.0);
+    let activity = finite(disk.activity).unwrap_or(0.0);
     let fraction = (activity / 100.0).clamp(0.0, 1.0) as f32;
     let warn = activity >= ACTIVITY_WARN;
     {
@@ -151,7 +151,7 @@ fn disk_row(ui: &mut egui::Ui, theme: &Theme, disk: &StorageInfo, unit: TempUnit
 
     // --- CAPACITY: right-aligned, dim. ---
     let cap_x0 = act_x0 + widths[2] + COL_GAP;
-    let cap_str = format_capacity(disk.used_gb, disk.total_gb);
+    let cap_str = format_capacity(finite(disk.used_gb), finite(disk.total_gb));
     let cap_font = FontId::new(11.0, theme.font_data.egui());
     let cap_galley = painter.layout_no_wrap(cap_str, cap_font, theme.dim);
     let cap_x = cap_x0 + widths[3] - cap_galley.size().x;
@@ -176,6 +176,18 @@ fn format_capacity(used_gb: Option<f64>, total_gb: Option<f64>) -> String {
             }
         }
         _ => "—".to_string(),
+    }
+}
+
+/// Display form of a disk `kind` tag. `sensord` emits lower-case tags
+/// (`"nvme"`, `"ssd"`, `"hdd"`); this restores their conventional casing to
+/// match the mockup. An unrecognised tag is upper-cased as a fallback.
+fn kind_label(kind: &str) -> String {
+    match kind.to_ascii_lowercase().as_str() {
+        "nvme" => "NVMe".to_string(),
+        "ssd" => "SSD".to_string(),
+        "hdd" => "HDD".to_string(),
+        _ => kind.to_uppercase(),
     }
 }
 
