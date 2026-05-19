@@ -37,7 +37,7 @@ const SECTION_INNER_GAP: f32 = 10.0;
 /// Gap between the four theme cards (mockup `.theme-grid { gap: 8px }`).
 const THEME_CARD_GAP: f32 = 8.0;
 /// Inner padding of one theme card (mockup `.tcard { padding: 8px }`).
-const THEME_CARD_PADDING: f32 = 8.0;
+const THEME_CARD_PADDING: i8 = 8;
 /// Height of a theme card's preview strip (mockup `.tcard-prev { height: 52px }`).
 const THEME_PREVIEW_H: f32 = 52.0;
 /// Diameter of the preview ring (mockup `.pv-ring { width: 28px }`).
@@ -58,8 +58,7 @@ const TOGGLE_DOT: f32 = 12.0;
 /// Segmented-control segment padding (mockup `.seg-i { padding: 8px 15px }`).
 const SEG_PADDING_X: f32 = 15.0;
 const SEG_PADDING_Y: f32 = 8.0;
-/// Letter-spacing applied to section labels and tags, as a thin-space count
-/// is not enough; the existing helper inserts one thin space per gap.
+/// Section-label and hint font size (mockup `.cfg-label` / `.cfg-hint`).
 const LABEL_FONT_SIZE: f32 = 10.0;
 
 /// A pending change to `app.config`, queued by a control and applied after the
@@ -107,7 +106,9 @@ pub fn settings_modal(ctx: &egui::Context, app: &mut PerfApp) {
         .title_bar(false)
         .collapsible(false)
         .resizable(false)
-        .fixed_size(Vec2::new(WINDOW_WIDTH, 0.0))
+        // Width fixed to 600; height unconstrained (`f32::INFINITY`) so the
+        // window auto-sizes to its content.
+        .fixed_size(Vec2::new(WINDOW_WIDTH, f32::INFINITY))
         .anchor(Align2::CENTER_CENTER, Vec2::ZERO)
         .frame(frame)
         .show(ctx, |ui| {
@@ -154,8 +155,7 @@ pub fn settings_modal(ctx: &egui::Context, app: &mut PerfApp) {
 /// `border` bottom rule. Returns the close button's click response. Matches
 /// `.cfg-tb` / `.cfg-x` in the mockup.
 fn title_bar(ui: &mut egui::Ui, theme: &Theme) -> Response {
-    let mut close = None;
-    egui::Frame::NONE
+    let inner = egui::Frame::NONE
         .fill(theme.chrome)
         .inner_margin(Margin::symmetric(TB_PADDING_X, TB_PADDING_Y))
         .show(ui, |ui| {
@@ -167,12 +167,20 @@ fn title_bar(ui: &mut egui::Ui, theme: &Theme) -> Response {
                         .color(theme.accent),
                 );
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    close = Some(close_button(ui, theme));
-                });
-            });
+                    close_button(ui, theme)
+                })
+                .inner
+            })
+            .inner
         });
-    // The closure always runs, so `close` is always `Some` here.
-    close.expect("close button is allocated unconditionally")
+
+    // 1 px `border` rule along the strip's bottom edge (mockup `.cfg-tb`).
+    let rect = inner.response.rect;
+    ui.painter().add(egui::Shape::line_segment(
+        [rect.left_bottom(), rect.right_bottom()],
+        Stroke::new(1.0, theme.border),
+    ));
+    inner.inner
 }
 
 /// Draw the `✕` close button: a `dim` glyph inside a 1 px `border` box that
@@ -296,7 +304,7 @@ fn theme_card(
             1.0,
             if selected { theme.accent } else { theme.border },
         ))
-        .inner_margin(Margin::same(THEME_CARD_PADDING as i8));
+        .inner_margin(Margin::same(THEME_CARD_PADDING));
 
     let inner = frame.show(ui, |ui| {
         ui.spacing_mut().item_spacing.y = 7.0;
@@ -386,7 +394,13 @@ fn preview_ring(painter: &egui::Painter, preview: &Theme, center: Pos2) {
             Stroke::new(PREVIEW_RING_THICK, color),
         ));
     };
-    arc(0.0, 1.0, preview.track);
+    // The full track ring is a plain stroked circle — an open polyline would
+    // leave a hairline seam where its ends meet; the accent is a partial arc.
+    painter.circle_stroke(
+        center,
+        mid_r,
+        Stroke::new(PREVIEW_RING_THICK, preview.track),
+    );
     arc(0.0, 0.64, preview.accent);
     painter.circle_filled(center, radius - PREVIEW_RING_THICK, preview.panel);
 }
@@ -536,15 +550,13 @@ fn segmented(ui: &mut egui::Ui, theme: &Theme, segments: &[(&str, bool)]) -> Opt
     let font = FontId::new(11.0, theme.font_data.egui());
 
     // Lay every segment's text out first so the row height (and each segment's
-    // width) can be derived before any allocation.
-    let galleys: Vec<egui::Galley> = segments
+    // width) can be derived before any allocation. `layout_no_wrap` returns a
+    // cache-shared `Arc<Galley>`; keep the `Arc` rather than deep-cloning it.
+    let galleys: Vec<std::sync::Arc<egui::Galley>> = segments
         .iter()
         .map(|(label, _)| {
-            std::sync::Arc::unwrap_or_clone(ui.painter().layout_no_wrap(
-                (*label).to_owned(),
-                font.clone(),
-                theme.dim,
-            ))
+            ui.painter()
+                .layout_no_wrap((*label).to_owned(), font.clone(), theme.dim)
         })
         .collect();
     let text_h = galleys.iter().map(|g| g.size().y).fold(0.0_f32, f32::max);
@@ -562,7 +574,6 @@ fn segmented(ui: &mut egui::Ui, theme: &Theme, segments: &[(&str, bool)]) -> Opt
         let painter = ui.painter_at(rect);
         let mut x = rect.min.x;
         for (i, ((label, on), galley)) in segments.iter().zip(galleys).enumerate() {
-            let _ = label;
             let seg_rect =
                 Rect::from_min_size(Pos2::new(x, rect.min.y), Vec2::new(seg_widths[i], seg_h));
 
@@ -575,7 +586,7 @@ fn segmented(ui: &mut egui::Ui, theme: &Theme, segments: &[(&str, bool)]) -> Opt
                 seg_rect.center().x - galley.size().x / 2.0,
                 seg_rect.center().y - galley.size().y / 2.0,
             );
-            painter.galley(text_pos, std::sync::Arc::new(galley), text_color);
+            painter.galley(text_pos, galley, text_color);
 
             // Divider rule between this segment and the next (mockup
             // `.seg-i { border-right: 1px solid var(--border) }`).
