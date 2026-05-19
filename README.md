@@ -1,8 +1,8 @@
 # PerfWindow
 
 A lightweight, open-source Windows hardware monitor — real-time **usage and
-temperatures** for CPU, GPU, RAM, storage, motherboard, fans and voltages, in a
-single retro-utilitarian dashboard.
+temperatures** for CPU, GPU, RAM, storage, motherboard, fans, voltages and
+network throughput, in a single retro-utilitarian dashboard.
 
 > **Status: design phase.** The design specification is complete; implementation
 > has not started. See
