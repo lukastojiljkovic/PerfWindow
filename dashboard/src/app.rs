@@ -57,6 +57,19 @@ impl PerfApp {
         app
     }
 
+    /// Re-apply the current `config` after the user changes a setting.
+    ///
+    /// Recomputes the effective theme (honouring `follow_windows`), pushes it
+    /// into egui's visuals and forwards the refresh interval to `sensord`. The
+    /// caller is responsible for persisting `config` via [`Config::save`].
+    pub fn apply_config_change(&mut self, ctx: &egui::Context) {
+        self.theme = Theme::for_id(system::effective_theme_id(&self.config, self.os_is_light));
+        self.theme.apply(ctx);
+        if let Some(sensord) = &mut self.sensord {
+            sensord.set_interval(self.config.refresh.as_millis());
+        }
+    }
+
     /// Pull the newest snapshot out of the shared state and update history.
     fn ingest(&mut self) {
         let Some(sensord) = &self.sensord else {
@@ -82,22 +95,28 @@ impl eframe::App for PerfApp {
         let ctx = ui.ctx().clone();
         self.ingest();
 
-        ui.heading(self.theme.name);
-        match self.status {
-            Status::Running => {
-                if let Some(snap) = &self.latest {
-                    ui.label(format!("snapshot ts={}", snap.ts));
-                } else {
-                    ui.label("waiting for sensord\u{2026}");
-                }
-            }
-            Status::SensordDown => {
-                ui.colored_label(self.theme.hot, "sensord stopped");
-            }
-        }
+        // Title bar on top, footer on the bottom, the card grid filling the
+        // scrollable centre. Panels are nested with `show_inside` because we
+        // are already rendering into a `Ui`, not a fresh `Context`.
+        // `egui::Panel::top`/`bottom` is the non-deprecated form of the old
+        // `TopBottomPanel` alias.
+        egui::Panel::top("pw_title_bar").show_inside(ui, |ui| {
+            crate::ui::title_bar(ui, self);
+        });
+        egui::Panel::bottom("pw_footer").show_inside(ui, |ui| {
+            crate::ui::footer(ui, self);
+        });
+        egui::CentralPanel::default().show_inside(ui, |ui| {
+            egui::ScrollArea::vertical()
+                .auto_shrink([false, false])
+                .show(ui, |ui| {
+                    crate::ui::card_grid(ui, self);
+                });
+        });
 
         // Watchdog repaint a little past the refresh interval; new snapshots
-        // already wake the UI via request_repaint from the reader thread.
+        // already wake the UI via request_repaint from the reader thread, and
+        // the blinking cursor needs steady frames regardless.
         ctx.request_repaint_after(std::time::Duration::from_millis(
             self.config.refresh.as_millis() as u64 + 500,
         ));

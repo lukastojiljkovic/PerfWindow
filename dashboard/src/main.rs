@@ -8,6 +8,7 @@ mod history;
 mod ipc;
 mod panels;
 mod theme;
+mod ui;
 mod widgets;
 
 use app::PerfApp;
