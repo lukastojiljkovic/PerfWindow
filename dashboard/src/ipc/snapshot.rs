@@ -1,0 +1,138 @@
+use serde::Deserialize;
+
+/// One NDJSON snapshot from `sensord`. Sections are absent when the hardware is.
+#[derive(Debug, Clone, Deserialize)]
+pub struct Snapshot {
+    pub v: i32,
+    pub ts: i64,
+    pub cpu: Option<CpuInfo>,
+    pub gpu: Option<Vec<GpuInfo>>,
+    pub ram: Option<RamInfo>,
+    pub storage: Option<Vec<StorageInfo>>,
+    pub board: Option<BoardInfo>,
+    pub fans: Option<Vec<FanInfo>>,
+    pub voltages: Option<Vec<VoltageInfo>>,
+    pub net: Option<NetInfo>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct CpuInfo {
+    pub name: String,
+    pub load: Option<f64>,
+    pub cores: Option<Vec<f64>>,
+    pub temp: Option<f64>,
+    pub clock_mhz: Option<f64>,
+    pub power_w: Option<f64>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct GpuInfo {
+    pub name: String,
+    pub kind: String,
+    pub load: Option<f64>,
+    pub temp: Option<f64>,
+    pub vram_used_mb: Option<f64>,
+    pub vram_total_mb: Option<f64>,
+    pub clock_mhz: Option<f64>,
+    pub fan_rpm: Option<f64>,
+    pub power_w: Option<f64>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct RamInfo {
+    pub used_mb: Option<f64>,
+    pub total_mb: Option<f64>,
+    pub available_mb: Option<f64>,
+    pub load: Option<f64>,
+    pub cached_mb: Option<f64>,
+    pub pagefile_used_mb: Option<f64>,
+    pub pagefile_total_mb: Option<f64>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct StorageInfo {
+    pub name: String,
+    pub kind: String,
+    pub temp: Option<f64>,
+    pub activity: Option<f64>,
+    pub used_gb: Option<f64>,
+    pub total_gb: Option<f64>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct BoardInfo {
+    pub temp: Option<f64>,
+    pub vrm_temp: Option<f64>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct FanInfo {
+    pub name: String,
+    pub rpm: Option<f64>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct VoltageInfo {
+    pub name: String,
+    pub volts: Option<f64>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct NetInfo {
+    pub adapter: String,
+    pub down_bps: Option<f64>,
+    pub up_bps: Option<f64>,
+    pub link_bps: Option<i64>,
+    pub down_pct: Option<f64>,
+    pub up_pct: Option<f64>,
+}
+
+/// Parse one NDJSON line. Returns `None` for blank or malformed input — a bad
+/// line must never crash the reader thread.
+pub fn parse_snapshot(line: &str) -> Option<Snapshot> {
+    let line = line.trim();
+    if line.is_empty() {
+        return None;
+    }
+    serde_json::from_str(line).ok()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const FULL: &str = r#"{"v":1,"ts":1747645200,
+      "cpu":{"name":"Test CPU","load":34.2,"cores":[38.1,55.0],"temp":58.0,"clock_mhz":4400,"power_w":52.0},
+      "gpu":[{"name":"RTX 4070","kind":"discrete","load":51.0,"temp":71.0,"vram_used_mb":6348,"vram_total_mb":12288,"clock_mhz":2610,"fan_rpm":1480,"power_w":140.0}],
+      "ram":{"used_mb":15462,"total_mb":32768,"available_mb":17306,"load":47.2,"cached_mb":4403,"pagefile_used_mb":2150,"pagefile_total_mb":8192},
+      "storage":[{"name":"Samsung 980 Pro","kind":"nvme","temp":48.0,"activity":22.0,"used_gb":412.0,"total_gb":931.5}],
+      "board":{"temp":38.0,"vrm_temp":61.0},
+      "fans":[{"name":"CPU","rpm":920}],
+      "voltages":[{"name":"+12V","volts":12.08}],
+      "net":{"adapter":"Ethernet","down_bps":4404019,"up_bps":629145,"link_bps":1000000000,"down_pct":35.2,"up_pct":5.0}}"#;
+
+    #[test]
+    fn parses_a_full_snapshot() {
+        let s = parse_snapshot(FULL).expect("should parse");
+        assert_eq!(s.v, 1);
+        assert_eq!(s.cpu.as_ref().unwrap().name, "Test CPU");
+        assert_eq!(s.cpu.as_ref().unwrap().cores.as_ref().unwrap().len(), 2);
+        assert_eq!(s.gpu.as_ref().unwrap()[0].kind, "discrete");
+        assert_eq!(s.net.as_ref().unwrap().link_bps, Some(1_000_000_000));
+    }
+
+    #[test]
+    fn parses_a_snapshot_with_sections_omitted() {
+        let s = parse_snapshot(r#"{"v":1,"ts":1,"cpu":{"name":"X","load":1.0}}"#)
+            .expect("should parse");
+        assert!(s.gpu.is_none());
+        assert!(s.storage.is_none());
+        assert!(s.cpu.as_ref().unwrap().temp.is_none());
+    }
+
+    #[test]
+    fn rejects_malformed_input() {
+        assert!(parse_snapshot("not json").is_none());
+        assert!(parse_snapshot("").is_none());
+    }
+}

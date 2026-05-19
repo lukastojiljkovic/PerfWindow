@@ -1,4 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+#![allow(dead_code)]
+
+mod ipc;
 
 fn main() -> eframe::Result {
     let options = eframe::NativeOptions {
