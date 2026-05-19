@@ -37,14 +37,27 @@ pub fn sparkline(ui: &mut egui::Ui, theme: &Theme, samples: &[f32], max: f32) {
         })
         .collect();
 
-    // --- filled polygon: line points + bottom-right + bottom-left ---
+    // --- area fill: one trapezoid per line segment ---
+    // The data polyline zig-zags, so a single area polygon would be non-convex
+    // and `convex_polygon` (fan triangulation) would render it wrong. Instead,
+    // tile the area with per-segment trapezoids — each is genuinely convex.
     let [r, g, b, _] = theme.accent.to_array();
     let fill_color = Color32::from_rgba_unmultiplied(r, g, b, (255.0 * 0.12) as u8);
 
-    let mut poly = points.clone();
-    poly.push(Pos2::new(rect.max.x, rect.max.y)); // bottom-right
-    poly.push(Pos2::new(rect.min.x, rect.max.y)); // bottom-left
-    painter.add(Shape::convex_polygon(poly, fill_color, Stroke::NONE));
+    let baseline_y = rect.max.y;
+    let trapezoids: Vec<Shape> = points
+        .windows(2)
+        .map(|seg| {
+            let quad = vec![
+                seg[0],
+                seg[1],
+                Pos2::new(seg[1].x, baseline_y),
+                Pos2::new(seg[0].x, baseline_y),
+            ];
+            Shape::convex_polygon(quad, fill_color, Stroke::NONE)
+        })
+        .collect();
+    painter.add(Shape::Vec(trapezoids));
 
     // --- polyline on top ---
     painter.add(Shape::line(points, Stroke::new(1.8, theme.accent)));
