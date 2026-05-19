@@ -7,8 +7,11 @@
 //! [`crate::panels::card`] frame, so the grid never wraps a cell itself.
 //!
 //! The [`settings`] submodule adds the floating settings modal, drawn on top of
-//! everything else when the title-bar gear is toggled on.
+//! everything else when the title-bar gear is toggled on. The [`effects`]
+//! submodule paints the retro CRT overlay — grid, scanlines, vignette — last of
+//! all each frame.
 
+pub mod effects;
 pub mod settings;
 
 use crate::app::{PerfApp, Status};

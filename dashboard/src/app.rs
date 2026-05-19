@@ -125,6 +125,10 @@ impl eframe::App for PerfApp {
         // `egui::Window` and so takes the `Context`, not a nested `Ui`.
         crate::ui::settings::settings_modal(&ctx, self);
 
+        // The CRT effects overlay — grid, scanlines, vignette — paints last so
+        // the scanlines and vignette sit on top of every panel and the modal.
+        crate::ui::effects::paint_effects(&ctx, &self.theme);
+
         // Watchdog repaint a little past the refresh interval; new snapshots
         // already wake the UI via request_repaint from the reader thread, and
         // the blinking cursor needs steady frames regardless.
