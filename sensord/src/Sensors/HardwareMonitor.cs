@@ -26,7 +26,7 @@ public sealed class HardwareMonitor : IDisposable
     public IReadOnlyList<IHardware> Refresh()
     {
         _computer.Accept(_visitor);
-        return (IReadOnlyList<IHardware>)_computer.Hardware;
+        return _computer.Hardware.ToArray();
     }
 
     public void Dispose() => _computer.Close();

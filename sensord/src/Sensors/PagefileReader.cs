@@ -2,7 +2,7 @@ using System.Runtime.InteropServices;
 
 namespace Sensord.Sensors;
 
-public readonly record struct PagefileInfo(double UsedMb, double TotalMb);
+public readonly record struct PagefileInfo(double UsedMb, double TotalMb, double CachedMb);
 
 public static class PagefileReader
 {
@@ -10,7 +10,7 @@ public static class PagefileReader
     {
         var pi = new PerformanceInformation { cb = (uint)Marshal.SizeOf<PerformanceInformation>() };
         if (!GetPerformanceInfo(ref pi, pi.cb))
-            return new PagefileInfo(0, 0);
+            return new PagefileInfo(0, 0, 0);
 
         double pageBytes = (double)pi.PageSize;
         // Commit limit beyond physical RAM is pagefile-backed.
@@ -18,13 +18,15 @@ public static class PagefileReader
         // Commit charge beyond resident physical memory ~= what is paged out.
         double residentPages = (double)pi.PhysicalTotal - pi.PhysicalAvailable;
         double usedMb = Math.Max(0, ((double)pi.CommitTotal - residentPages) * pageBytes) / (1024 * 1024);
-        return new PagefileInfo(Math.Min(usedMb, totalMb), totalMb);
+        // SystemCache is in pages; PageSize is bytes/page — gives system file-cache size in MB.
+        double cachedMb = (double)pi.SystemCache * pi.PageSize / (1024 * 1024);
+        return new PagefileInfo(Math.Min(usedMb, totalMb), totalMb, cachedMb);
     }
 
     [StructLayout(LayoutKind.Sequential)]
     private struct PerformanceInformation
     {
-        public uint cb;
+        public uint cb; // Win32 struct field name (PerformanceInformation.cb)
         public nint CommitTotal, CommitLimit, CommitPeak;
         public nint PhysicalTotal, PhysicalAvailable, SystemCache;
         public nint KernelTotal, KernelPaged, KernelNonpaged;

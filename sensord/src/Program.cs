@@ -10,6 +10,7 @@ internal static class Program
 {
     private static volatile int _intervalMs = 1000;
     private static volatile bool _running = true;
+    private static readonly ManualResetEventSlim _shutdown = new(false);
 
     private static void Main()
     {
@@ -23,7 +24,7 @@ internal static class Program
         var diskInfo = DiskInfoReader.Read();
 
         using var monitor = new HardwareMonitor();
-        while (_running)
+        do
         {
             try
             {
@@ -35,8 +36,8 @@ internal static class Program
             {
                 Console.Error.WriteLine($"sensord: poll error: {ex.Message}");
             }
-            Thread.Sleep(_intervalMs);
-        }
+            _shutdown.Wait(_intervalMs);
+        } while (_running);
     }
 
     /// <summary>Reads control lines from stdin; an EOF means the dashboard has exited.</summary>
@@ -50,10 +51,14 @@ internal static class Program
                 _intervalMs = ms;
         }
         _running = false;   // stdin closed -> stop the poll loop
+        _shutdown.Set();    // interrupt the interval wait for a prompt exit
     }
 
     private static Dictionary<string, long> LinkSpeeds()
     {
+        // Keys on NetworkInterface.Name, which BuildNet looks up by IHardware.Name.
+        // The two names match on this dev machine; an unmatched adapter degrades
+        // gracefully to link_bps: null and null down_pct/up_pct.
         var map = new Dictionary<string, long>();
         foreach (var ni in NetworkInterface.GetAllNetworkInterfaces())
             if (ni.OperationalStatus == OperationalStatus.Up)

@@ -67,7 +67,7 @@ public static class SnapshotBuilder
             TotalMb: usedGb is double ut && availGb is double a ? (ut + a) * 1024 : null,
             AvailableMb: availGb is double av ? av * 1024 : null,
             Load: memory?.Val(SensorType.Load, "Memory"),
-            CachedMb: null,
+            CachedMb: pf.CachedMb,
             PagefileUsedMb: pf.UsedMb,
             PagefileTotalMb: pf.TotalMb);
     }
@@ -122,7 +122,7 @@ public static class SnapshotBuilder
     /// Fallback kind classification using the LHM identifier prefix
     /// (<c>/nvme/…</c>, <c>/ssd/…</c>, <c>/hdd/…</c>) when WMI data is unavailable.
     /// </summary>
-    private static string ClassifyDiskByIdentifier(string identifier)
+    internal static string ClassifyDiskByIdentifier(string identifier)
     {
         if (identifier.Contains("/nvme/", StringComparison.OrdinalIgnoreCase)) return "nvme";
         if (identifier.Contains("/ssd/",  StringComparison.OrdinalIgnoreCase)) return "ssd";
@@ -178,8 +178,8 @@ public static class SnapshotBuilder
             DownBps: downBps,
             UpBps: upBps,
             LinkBps: linkBps > 0 ? linkBps : null,
-            DownPct: NetUtil.Utilisation(downBps, linkBps),
-            UpPct: NetUtil.Utilisation(upBps, linkBps));
+            DownPct: linkBps > 0 ? NetUtil.Utilisation(downBps, linkBps) : null,
+            UpPct:   linkBps > 0 ? NetUtil.Utilisation(upBps, linkBps)   : null);
     }
 
     public static Snapshot Build(IReadOnlyList<IHardware> hardware, PagefileInfo pf,
