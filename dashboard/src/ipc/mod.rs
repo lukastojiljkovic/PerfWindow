@@ -1,5 +1,5 @@
 #[allow(unused_imports)]
-pub use process::{Sensord, SensorState, SharedState};
+pub use process::{SensorState, Sensord, SharedState};
 #[allow(unused_imports)]
 pub use snapshot::{
     parse_snapshot, BoardInfo, CpuInfo, FanInfo, GpuInfo, NetInfo, RamInfo, Snapshot, StorageInfo,

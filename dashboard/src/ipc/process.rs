@@ -31,8 +31,8 @@ impl Sensord {
     /// start the reader thread. `repaint` is called whenever a new snapshot
     /// arrives so the UI wakes up.
     pub fn spawn(repaint: impl Fn() + Send + 'static) -> std::io::Result<Sensord> {
-        let exe_path = std::env::temp_dir()
-            .join(format!("PerfWindow-sensord-{}.exe", std::process::id()));
+        let exe_path =
+            std::env::temp_dir().join(format!("PerfWindow-sensord-{}.exe", std::process::id()));
         std::fs::write(&exe_path, SENSORD_BYTES)?;
 
         let mut child = Command::new(&exe_path)
