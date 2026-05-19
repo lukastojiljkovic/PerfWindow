@@ -48,6 +48,15 @@ pub fn format_gb_from_mb(mb: Option<f64>) -> String {
     }
 }
 
+/// A megabytes pair rendered as `"<used> / <total> GB"`, one decimal each, or
+/// `"—"` when either value is absent.
+pub fn format_gb_pair(used_mb: Option<f64>, total_mb: Option<f64>) -> String {
+    match (used_mb, total_mb) {
+        (Some(u), Some(t)) => format!("{:.1} / {:.1} GB", u / 1024.0, t / 1024.0),
+        _ => "—".to_string(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -77,5 +86,12 @@ mod tests {
     fn formats_gigabytes_from_megabytes() {
         assert_eq!(format_gb_from_mb(Some(15462.0)), "15.1");
         assert_eq!(format_gb_from_mb(None), "—");
+    }
+
+    #[test]
+    fn formats_a_gb_pair() {
+        assert_eq!(format_gb_pair(Some(6348.0), Some(12288.0)), "6.2 / 12.0 GB");
+        assert_eq!(format_gb_pair(None, Some(12288.0)), "—");
+        assert_eq!(format_gb_pair(Some(6348.0), None), "—");
     }
 }

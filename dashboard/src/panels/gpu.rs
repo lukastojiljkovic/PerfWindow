@@ -1,7 +1,7 @@
 //! The GPU component panel (also used for integrated GPUs).
 
 use super::{card, panel_title};
-use crate::format::{format_temp, TempUnit};
+use crate::format::{format_gb_pair, format_temp, TempUnit};
 use crate::history::RingBuffer;
 use crate::ipc::GpuInfo;
 use crate::theme::Theme;
@@ -42,7 +42,7 @@ pub fn gpu_panel(
                 let vram = if integrated {
                     "shared".to_string()
                 } else {
-                    format_vram(gpu.vram_used_mb, gpu.vram_total_mb)
+                    format_gb_pair(gpu.vram_used_mb, gpu.vram_total_mb)
                 };
                 stat_row(ui, theme, "VRAM", &vram, None);
 
@@ -56,17 +56,6 @@ pub fn gpu_panel(
             .unwrap_or_default();
         sparkline(ui, theme, &samples, 100.0);
     });
-}
-
-/// Used/total VRAM rendered as `"6.2 / 12 GB"`, or `"—"` when either value is
-/// absent.
-fn format_vram(used_mb: Option<f64>, total_mb: Option<f64>) -> String {
-    match (used_mb, total_mb) {
-        (Some(used), Some(total)) => {
-            format!("{:.1} / {:.0} GB", used / 1024.0, total / 1024.0)
-        }
-        _ => "—".to_string(),
-    }
 }
 
 /// Fan speed rendered as `"1480 rpm"`, or `"—"` when absent.

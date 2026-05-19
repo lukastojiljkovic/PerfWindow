@@ -1,7 +1,7 @@
 //! The RAM component panel.
 
 use super::{card, panel_title};
-use crate::format::format_gb_from_mb;
+use crate::format::{format_gb_from_mb, format_gb_pair};
 use crate::history::RingBuffer;
 use crate::ipc::RamInfo;
 use crate::theme::Theme;
@@ -45,9 +45,13 @@ pub fn ram_panel(ui: &mut egui::Ui, theme: &Theme, ram: &RamInfo, history: Optio
     });
 }
 
-/// `format_gb_from_mb` with the `" GB"` suffix appended.
+/// `format_gb_from_mb` with the `" GB"` suffix appended; a bare `"—"` when the
+/// value is absent.
 fn gb(mb: Option<f64>) -> String {
-    format!("{} GB", format_gb_from_mb(mb))
+    match mb {
+        Some(_) => format!("{} GB", format_gb_from_mb(mb)),
+        None => "—".to_string(),
+    }
 }
 
 /// Draw the SWAP row: a `SWAP` label, a pagefile fill bar taking the middle and
@@ -67,7 +71,7 @@ fn swap_row(ui: &mut egui::Ui, theme: &Theme, used_mb: Option<f64>, total_mb: Op
     let value_font = FontId::new(10.0, theme.font_data.egui());
 
     let value_text = if active {
-        format!("{:.1} / {:.1} GB", used / 1024.0, total / 1024.0)
+        format_gb_pair(used_mb, total_mb)
     } else {
         "—".to_string()
     };
