@@ -5,9 +5,6 @@ use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 
-/// The embedded sensord executable, staged into OUT_DIR by build.rs.
-const SENSORD_BYTES: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/sensord.exe"));
-
 /// Shared between the reader thread and the UI: the most recent snapshot, and
 /// whether the sensor process is still alive.
 #[derive(Default)]
@@ -27,11 +24,11 @@ pub struct Sensord {
 }
 
 impl Sensord {
-    /// Stage the embedded executable into `%LOCALAPPDATA%\PerfWindow`, spawn
-    /// it, and start the reader thread. `repaint` is called whenever a new
-    /// snapshot arrives so the UI wakes up.
+    /// Spawn the bundled `sensord.exe` (installed alongside `PerfWindow.exe`)
+    /// and start the reader thread. `repaint` is called whenever a new snapshot
+    /// arrives so the UI wakes up.
     pub fn spawn(repaint: impl Fn() + Send + 'static) -> std::io::Result<Sensord> {
-        let exe_path = stage_sensord()?;
+        let exe_path = sensord_path()?;
 
         // sensord is a console-subsystem process; without CREATE_NO_WINDOW
         // Windows opens a console window for the spawned child.
@@ -94,30 +91,28 @@ impl Sensord {
     }
 }
 
-/// `%LOCALAPPDATA%\PerfWindow` — the per-user directory the staged `sensord`
-/// executable lives in.
-fn sensord_dir() -> std::io::Result<std::path::PathBuf> {
-    std::env::var_os("LOCALAPPDATA")
-        .map(|base| std::path::PathBuf::from(base).join("PerfWindow"))
-        .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "LOCALAPPDATA is not set"))
-}
-
-/// Write the embedded `sensord` executable to its per-user location and return
-/// the path. The bytes are rewritten on every launch so the staged copy always
-/// matches this build; if another PerfWindow instance is already running it
-/// (so the file is locked), the existing identical copy is reused instead.
-fn stage_sensord() -> std::io::Result<std::path::PathBuf> {
-    let dir = sensord_dir()?;
-    std::fs::create_dir_all(&dir)?;
+/// Locate the bundled `sensord.exe`. The installer ships it next to
+/// `PerfWindow.exe` and `build.rs` places it next to the dev build output, so
+/// it is always a sibling of the running executable.
+fn sensord_path() -> std::io::Result<std::path::PathBuf> {
+    let exe = std::env::current_exe()?;
+    let dir = exe.parent().ok_or_else(|| {
+        std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            "PerfWindow.exe has no parent directory",
+        )
+    })?;
     let path = dir.join("sensord.exe");
-    match std::fs::write(&path, SENSORD_BYTES) {
-        Ok(()) => Ok(path),
-        Err(e) if path.exists() => {
-            eprintln!("PerfWindow: reusing the staged sensord ({e})");
-            Ok(path)
-        }
-        Err(e) => Err(e),
+    if !path.is_file() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            format!(
+                "sensord.exe not found next to PerfWindow.exe ({})",
+                path.display()
+            ),
+        ));
     }
+    Ok(path)
 }
 
 impl Drop for Sensord {
@@ -137,7 +132,5 @@ impl Drop for Sensord {
         if let Some(reader) = self.reader.take() {
             let _ = reader.join();
         }
-        // The staged executable in %LOCALAPPDATA% is left in place — the next
-        // launch reuses it (and re-stages it on demand).
     }
 }
