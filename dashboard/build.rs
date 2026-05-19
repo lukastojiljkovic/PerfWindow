@@ -8,13 +8,12 @@ fn main() {
         Path::new("../sensord/src/bin/Release/net8.0-windows/win-x64/publish/sensord.exe");
     let dest = Path::new(&out_dir).join("sensord.exe");
 
-    if sensord.exists() {
-        std::fs::copy(sensord, &dest).expect("copy sensord.exe");
-    } else if !dest.exists() {
+    if !sensord.exists() {
         panic!(
             "sensord.exe not found at {} — run: dotnet publish sensord/src -c Release -r win-x64 --self-contained",
             sensord.display()
         );
     }
+    std::fs::copy(sensord, &dest).expect("copy sensord.exe");
     println!("cargo:rerun-if-changed={}", sensord.display());
 }

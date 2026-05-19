@@ -31,7 +31,8 @@ impl Sensord {
     /// start the reader thread. `repaint` is called whenever a new snapshot
     /// arrives so the UI wakes up.
     pub fn spawn(repaint: impl Fn() + Send + 'static) -> std::io::Result<Sensord> {
-        let exe_path = std::env::temp_dir().join("PerfWindow-sensord.exe");
+        let exe_path = std::env::temp_dir()
+            .join(format!("PerfWindow-sensord-{}.exe", std::process::id()));
         std::fs::write(&exe_path, SENSORD_BYTES)?;
 
         let mut child = Command::new(&exe_path)
@@ -49,16 +50,21 @@ impl Sensord {
 
         let reader_state = Arc::clone(&state);
         let reader = std::thread::spawn(move || {
-            let mut lines = BufReader::new(stdout).lines();
-            while let Some(Ok(line)) = lines.next() {
-                if let Some(snap) = parse_snapshot(&line) {
-                    if let Ok(mut s) = reader_state.lock() {
-                        s.latest = Some(snap);
+            let lines = BufReader::new(stdout).lines();
+            for line in lines {
+                match line {
+                    Ok(line) => {
+                        if let Some(snap) = parse_snapshot(&line) {
+                            if let Ok(mut s) = reader_state.lock() {
+                                s.latest = Some(snap);
+                            }
+                            repaint();
+                        }
                     }
-                    repaint();
+                    Err(_) => break,
                 }
             }
-            // stdout closed -> sensord exited.
+            // stdout closed or errored -> sensord exited.
             if let Ok(mut s) = reader_state.lock() {
                 s.alive = false;
             }
