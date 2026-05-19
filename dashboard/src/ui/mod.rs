@@ -8,7 +8,7 @@
 
 use crate::app::{PerfApp, Status};
 use crate::config::ThemeId;
-use crate::format::{finite, format_bytes_per_sec, TempUnit};
+use crate::format::{finite, format_bytes_per_sec, format_percent, letter_spaced, TempUnit};
 use crate::panels;
 use crate::theme::Theme;
 use egui::{Align, FontId, Layout, Margin, RichText, Sense, Stroke, Vec2};
@@ -35,24 +35,19 @@ const BREAKPOINT_3_COLS: f32 = 820.0;
 /// it via [`PerfApp::apply_config_change`] and [`crate::config::Config::save`].
 pub fn title_bar(ui: &mut egui::Ui, app: &mut PerfApp) {
     let theme = app.theme.clone();
-    let frame = egui::Frame::NONE.fill(theme.chrome).inner_margin(Margin {
-        left: STRIP_PADDING_X,
-        right: STRIP_PADDING_X,
-        top: STRIP_PADDING_Y_TB,
-        bottom: STRIP_PADDING_Y_TB,
-    });
+    let frame = egui::Frame::NONE
+        .fill(theme.chrome)
+        .inner_margin(Margin::symmetric(STRIP_PADDING_X, STRIP_PADDING_Y_TB));
 
     frame.show(ui, |ui| {
         ui.horizontal(|ui| {
             wordmark(ui, &theme);
             // Chips are laid out from the right edge inward.
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                chip_row(ui, app);
+                chip_row(ui, &theme, app);
             });
         });
     });
-
-    bottom_rule(ui, &theme);
 }
 
 /// Paint the `▚ PERFWINDOW` wordmark with a blinking block cursor.
@@ -63,7 +58,18 @@ pub fn title_bar(ui: &mut egui::Ui, app: &mut PerfApp) {
 fn wordmark(ui: &mut egui::Ui, theme: &Theme) {
     let time = ui.input(|i| i.time);
     // On for the first half of each period, off for the second.
-    let cursor_visible = (time % CURSOR_BLINK_PERIOD) < CURSOR_BLINK_PERIOD / 2.0;
+    let phase = time % CURSOR_BLINK_PERIOD;
+    let cursor_visible = phase < CURSOR_BLINK_PERIOD / 2.0;
+    // egui's `time` only advances when a frame is drawn, and the refresh-rate
+    // watchdog repaints far too slowly for a 1.1 s blink. Schedule a repaint
+    // exactly at the next on/off transition so the cursor keeps proper time.
+    let to_next_edge = if cursor_visible {
+        CURSOR_BLINK_PERIOD / 2.0 - phase
+    } else {
+        CURSOR_BLINK_PERIOD - phase
+    };
+    ui.ctx()
+        .request_repaint_after(std::time::Duration::from_secs_f64(to_next_edge));
 
     ui.spacing_mut().item_spacing.x = 0.0;
     ui.label(
@@ -91,17 +97,16 @@ fn wordmark(ui: &mut egui::Ui, theme: &Theme) {
 ///
 /// The `right_to_left` layout means chips are emitted in reverse visual order:
 /// gear, theme, `°F`, `°C` — yielding `°C  °F  ◐ THEME  ⚙` on screen.
-fn chip_row(ui: &mut egui::Ui, app: &mut PerfApp) {
-    let theme = app.theme.clone();
+fn chip_row(ui: &mut egui::Ui, theme: &Theme, app: &mut PerfApp) {
     ui.spacing_mut().item_spacing.x = 6.0;
 
     // Settings gear.
-    if chip(ui, &theme, "\u{2699}", false).clicked() {
+    if chip(ui, theme, "\u{2699}", false).clicked() {
         app.settings_open = !app.settings_open;
     }
 
     // Theme cycler.
-    if chip(ui, &theme, "\u{25d0} THEME", false).clicked() {
+    if chip(ui, theme, "\u{25d0} THEME", false).clicked() {
         let ctx = ui.ctx().clone();
         app.config.theme = next_theme(app.config.theme);
         app.apply_config_change(&ctx);
@@ -110,7 +115,7 @@ fn chip_row(ui: &mut egui::Ui, app: &mut PerfApp) {
 
     // Fahrenheit / Celsius — the active unit is filled.
     let unit = app.config.unit;
-    if chip(ui, &theme, "\u{00b0}F", unit == TempUnit::Fahrenheit).clicked()
+    if chip(ui, theme, "\u{00b0}F", unit == TempUnit::Fahrenheit).clicked()
         && unit != TempUnit::Fahrenheit
     {
         let ctx = ui.ctx().clone();
@@ -118,7 +123,7 @@ fn chip_row(ui: &mut egui::Ui, app: &mut PerfApp) {
         app.apply_config_change(&ctx);
         app.config.save();
     }
-    if chip(ui, &theme, "\u{00b0}C", unit == TempUnit::Celsius).clicked()
+    if chip(ui, theme, "\u{00b0}C", unit == TempUnit::Celsius).clicked()
         && unit != TempUnit::Celsius
     {
         let ctx = ui.ctx().clone();
@@ -171,14 +176,9 @@ fn chip(ui: &mut egui::Ui, theme: &Theme, label: &str, on: bool) -> egui::Respon
 /// `.pw-foot` in the mockup.
 pub fn footer(ui: &mut egui::Ui, app: &PerfApp) {
     let theme = &app.theme;
-    top_rule(ui, theme);
-
-    let frame = egui::Frame::NONE.fill(theme.chrome).inner_margin(Margin {
-        left: STRIP_PADDING_X,
-        right: STRIP_PADDING_X,
-        top: STRIP_PADDING_Y_FOOT,
-        bottom: STRIP_PADDING_Y_FOOT,
-    });
+    let frame = egui::Frame::NONE
+        .fill(theme.chrome)
+        .inner_margin(Margin::symmetric(STRIP_PADDING_X, STRIP_PADDING_Y_FOOT));
 
     frame.show(ui, |ui| {
         ui.horizontal(|ui| {
@@ -208,11 +208,11 @@ pub fn footer(ui: &mut egui::Ui, app: &PerfApp) {
             // Headline snapshot figures.
             if let Some(snap) = &app.latest {
                 if let Some(cpu) = &snap.cpu {
-                    foot_item(ui, theme, &format!("CPU {}%", pct(cpu.load)));
+                    foot_item(ui, theme, &format!("CPU {}%", format_percent(cpu.load)));
                 }
                 if let Some(gpus) = &snap.gpu {
                     if let Some(gpu) = gpus.first() {
-                        foot_item(ui, theme, &format!("GPU {}%", pct(gpu.load)));
+                        foot_item(ui, theme, &format!("GPU {}%", format_percent(gpu.load)));
                     }
                 }
                 if let Some(net) = &snap.net {
@@ -233,14 +233,6 @@ fn foot_item(ui: &mut egui::Ui, theme: &Theme, text: &str) {
             .size(10.0)
             .color(theme.dim),
     );
-}
-
-/// Round an `Option<f64>` load to a whole-percent string; absent renders `"—"`.
-fn pct(load: Option<f64>) -> String {
-    match finite(load) {
-        Some(v) => format!("{}", v.round() as i64),
-        None => "\u{2014}".to_string(),
-    }
 }
 
 /// Render the adaptive card grid into `ui`.
@@ -427,22 +419,6 @@ fn waiting_note(ui: &mut egui::Ui, theme: &Theme) {
     });
 }
 
-/// Paint a 1 px `border` rule along the bottom edge of the strip just drawn.
-fn bottom_rule(ui: &mut egui::Ui, theme: &Theme) {
-    let rect = ui.min_rect();
-    let y = rect.max.y;
-    ui.painter()
-        .hline(rect.x_range(), y, Stroke::new(1.0, theme.border));
-}
-
-/// Paint a 1 px `border` rule along the top edge of the strip about to be drawn.
-fn top_rule(ui: &mut egui::Ui, theme: &Theme) {
-    let rect = ui.max_rect();
-    let y = rect.min.y;
-    ui.painter()
-        .hline(rect.x_range(), y, Stroke::new(1.0, theme.border));
-}
-
 /// Advance a theme through the fixed four-theme cycle.
 fn next_theme(id: ThemeId) -> ThemeId {
     match id {
@@ -451,17 +427,4 @@ fn next_theme(id: ThemeId) -> ThemeId {
         ThemeId::Phosphor => ThemeId::Light,
         ThemeId::Light => ThemeId::Amber,
     }
-}
-
-/// Insert thin spaces between characters to approximate the mockup's
-/// `letter-spacing` on the wordmark and chips.
-fn letter_spaced(text: &str) -> String {
-    let mut out = String::with_capacity(text.len() * 4);
-    for (i, ch) in text.chars().enumerate() {
-        if i > 0 {
-            out.push('\u{2009}'); // thin space
-        }
-        out.push(ch);
-    }
-    out
 }

@@ -64,6 +64,29 @@ pub fn finite(x: Option<f64>) -> Option<f64> {
     x.filter(|v| v.is_finite())
 }
 
+/// Round a percentage-style `Option<f64>` to a whole-number string; an absent
+/// or non-finite value renders `"—"`.
+pub fn format_percent(load: Option<f64>) -> String {
+    match finite(load) {
+        Some(v) => format!("{}", v.round() as i64),
+        None => "—".to_string(),
+    }
+}
+
+/// Insert thin spaces between characters to approximate CSS `letter-spacing`
+/// on the wordmark, chips and arrow labels.
+pub fn letter_spaced(text: &str) -> String {
+    // Each inter-character gap is a 3-byte thin space; reserve generously.
+    let mut out = String::with_capacity(text.len() * 4);
+    for (i, ch) in text.chars().enumerate() {
+        if i > 0 {
+            out.push('\u{2009}'); // thin space
+        }
+        out.push(ch);
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -109,5 +132,20 @@ mod tests {
         assert_eq!(finite(Some(f64::INFINITY)), None);
         assert_eq!(finite(Some(f64::NEG_INFINITY)), None);
         assert_eq!(finite(None), None);
+    }
+
+    #[test]
+    fn formats_whole_percentages() {
+        assert_eq!(format_percent(Some(34.2)), "34");
+        assert_eq!(format_percent(Some(99.6)), "100");
+        assert_eq!(format_percent(Some(f64::NAN)), "—");
+        assert_eq!(format_percent(None), "—");
+    }
+
+    #[test]
+    fn letter_spaces_with_thin_spaces() {
+        assert_eq!(letter_spaced("AB"), "A\u{2009}B");
+        assert_eq!(letter_spaced("X"), "X");
+        assert_eq!(letter_spaced(""), "");
     }
 }

@@ -1,7 +1,7 @@
 //! The network component panel: two link-utilisation arrow meters.
 
 use super::{card, empty_note, panel_title};
-use crate::format::{finite, format_bytes_per_sec};
+use crate::format::{finite, format_bytes_per_sec, letter_spaced};
 use crate::ipc::NetInfo;
 use crate::theme::{FontFamily, Theme};
 use egui::{Color32, FontId, Pos2, Rect, Sense, Shape, Stroke, Vec2};
@@ -243,18 +243,4 @@ fn paint_arrow_shapes(painter: &egui::Painter, rect: Rect, dir: ArrowDir, color:
 
     painter.add(Shape::convex_polygon(shaft, color, Stroke::NONE));
     painter.add(Shape::convex_polygon(head, color, Stroke::NONE));
-}
-
-/// Insert thin spaces between characters to approximate the mockup's
-/// `letter-spacing` on the arrow labels.
-fn letter_spaced(text: &str) -> String {
-    // Each inter-character gap is a 3-byte thin space; reserve generously.
-    let mut out = String::with_capacity(text.len() * 4);
-    for (i, ch) in text.chars().enumerate() {
-        if i > 0 {
-            out.push('\u{2009}'); // thin space
-        }
-        out.push(ch);
-    }
-    out
 }

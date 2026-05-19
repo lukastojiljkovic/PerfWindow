@@ -96,23 +96,30 @@ impl eframe::App for PerfApp {
         self.ingest();
 
         // Title bar on top, footer on the bottom, the card grid filling the
-        // scrollable centre. Panels are nested with `show_inside` because we
-        // are already rendering into a `Ui`, not a fresh `Context`.
-        // `egui::Panel::top`/`bottom` is the non-deprecated form of the old
-        // `TopBottomPanel` alias.
-        egui::Panel::top("pw_title_bar").show_inside(ui, |ui| {
-            crate::ui::title_bar(ui, self);
-        });
-        egui::Panel::bottom("pw_footer").show_inside(ui, |ui| {
-            crate::ui::footer(ui, self);
-        });
-        egui::CentralPanel::default().show_inside(ui, |ui| {
-            egui::ScrollArea::vertical()
-                .auto_shrink([false, false])
-                .show(ui, |ui| {
-                    crate::ui::card_grid(ui, self);
-                });
-        });
+        // scrollable centre. Panels are nested with `show_inside` (we render
+        // into a `Ui`, not a fresh `Context`) and given `Frame::NONE`: each
+        // strip paints its own chrome, and egui's default panel frame would
+        // otherwise add a `panel_fill` background and an inset margin under it.
+        // egui still draws the 1 px separator line between the panels.
+        egui::Panel::top("pw_title_bar")
+            .frame(egui::Frame::NONE)
+            .show_inside(ui, |ui| {
+                crate::ui::title_bar(ui, self);
+            });
+        egui::Panel::bottom("pw_footer")
+            .frame(egui::Frame::NONE)
+            .show_inside(ui, |ui| {
+                crate::ui::footer(ui, self);
+            });
+        egui::CentralPanel::default()
+            .frame(egui::Frame::NONE.fill(self.theme.bg))
+            .show_inside(ui, |ui| {
+                egui::ScrollArea::vertical()
+                    .auto_shrink([false, false])
+                    .show(ui, |ui| {
+                        crate::ui::card_grid(ui, self);
+                    });
+            });
 
         // Watchdog repaint a little past the refresh interval; new snapshots
         // already wake the UI via request_repaint from the reader thread, and
