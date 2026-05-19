@@ -19,13 +19,16 @@ internal static class Program
         var stdinThread = new Thread(ReadControl) { IsBackground = true };
         stdinThread.Start();
 
+        // Physical-disk geometry is static; read it once before the poll loop.
+        var diskInfo = DiskInfoReader.Read();
+
         using var monitor = new HardwareMonitor();
         while (_running)
         {
             try
             {
                 var hardware = monitor.Refresh();
-                Snapshot snap = SnapshotBuilder.Build(hardware, PagefileReader.Read(), LinkSpeeds());
+                Snapshot snap = SnapshotBuilder.Build(hardware, PagefileReader.Read(), LinkSpeeds(), diskInfo);
                 writer.WriteLine(JsonSerializer.Serialize(snap, SensordJsonContext.Default.Snapshot));
             }
             catch (Exception ex)

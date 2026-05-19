@@ -72,29 +72,60 @@ public static class SnapshotBuilder
             PagefileTotalMb: pf.TotalMb);
     }
 
-    public static List<StorageInfo> BuildStorage(IEnumerable<IHardware> hardware)
+    public static List<StorageInfo> BuildStorage(IEnumerable<IHardware> hardware,
+                                                  IReadOnlyDictionary<int, PhysicalDiskInfo> diskInfo)
     {
         var list = new List<StorageInfo>();
         foreach (var hw in hardware.Where(h => h.HardwareType == HardwareType.Storage))
         {
             double? usedPct = hw.Val(SensorType.Load, "Used Space");
+
+            // LHM identifier looks like "/nvme/0" or "/hdd/2"; the trailing integer is
+            // the Windows physical-disk number that matches MSFT_PhysicalDisk.DeviceId.
+            string idStr = hw.Identifier.ToString() ?? string.Empty;
+            int lastSlash = idStr.LastIndexOf('/');
+            int diskIndex = -1;
+            bool hasDiskIndex = lastSlash >= 0
+                && int.TryParse(idStr.AsSpan(lastSlash + 1), out diskIndex);
+
+            string kind;
+            double? totalGb;
+            double? usedGb;
+
+            if (hasDiskIndex && diskInfo.TryGetValue(diskIndex, out PhysicalDiskInfo info))
+            {
+                kind    = info.Kind;
+                totalGb = info.TotalGb;
+                usedGb  = usedPct.HasValue ? info.TotalGb * usedPct.Value / 100.0 : null;
+            }
+            else
+            {
+                // WMI data unavailable — fall back to the identifier prefix for kind,
+                // leave capacity null.
+                kind    = ClassifyDiskByIdentifier(idStr);
+                totalGb = null;
+                usedGb  = null;
+            }
+
             list.Add(new StorageInfo(
                 Name: hw.Name,
-                Kind: ClassifyDisk(hw.Name),
+                Kind: kind,
                 Temp: hw.FirstVal(SensorType.Temperature),
                 Activity: hw.Val(SensorType.Load, "Total Activity"),
-                UsedGb: null,
-                TotalGb: null));
-            _ = usedPct;
+                UsedGb: usedGb,
+                TotalGb: totalGb));
         }
         return list;
     }
 
-    private static string ClassifyDisk(string name)
+    /// <summary>
+    /// Fallback kind classification using the LHM identifier prefix
+    /// (<c>/nvme/…</c>, <c>/ssd/…</c>, <c>/hdd/…</c>) when WMI data is unavailable.
+    /// </summary>
+    private static string ClassifyDiskByIdentifier(string identifier)
     {
-        string n = name.ToLowerInvariant();
-        if (n.Contains("nvme")) return "nvme";
-        if (n.Contains("ssd")) return "ssd";
+        if (identifier.Contains("/nvme/", StringComparison.OrdinalIgnoreCase)) return "nvme";
+        if (identifier.Contains("/ssd/",  StringComparison.OrdinalIgnoreCase)) return "ssd";
         return "hdd";
     }
 
@@ -152,14 +183,15 @@ public static class SnapshotBuilder
     }
 
     public static Snapshot Build(IReadOnlyList<IHardware> hardware, PagefileInfo pf,
-                                 IReadOnlyDictionary<string, long> linkSpeeds)
+                                 IReadOnlyDictionary<string, long> linkSpeeds,
+                                 IReadOnlyDictionary<int, PhysicalDiskInfo> diskInfo)
     {
         var cpuHw = hardware.FirstOrDefault(h => h.HardwareType == HardwareType.Cpu);
         var memHw = hardware.FirstOrDefault(h => h.HardwareType == HardwareType.Memory);
         var boardHw = hardware.FirstOrDefault(h => h.HardwareType == HardwareType.Motherboard);
         var (fans, voltages) = BuildBoardSensors(boardHw);
         var gpus = BuildGpus(hardware);
-        var storage = BuildStorage(hardware);
+        var storage = BuildStorage(hardware, diskInfo);
 
         return new Snapshot(
             Version: 1,
