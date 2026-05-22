@@ -2,6 +2,11 @@ use crate::config::Config;
 use crate::history::History;
 use crate::ipc::{Sensord, Snapshot};
 use crate::theme::{self, system, Theme};
+use crate::update::{
+    check::{spawn_check, STARTUP_DELAY_MS},
+    new_shared, GitHubReleaseSource, SharedUpdateState, OWNER, REPO,
+};
+use std::sync::Arc;
 
 /// Whether the sensor feed is healthy.
 #[derive(PartialEq)]
@@ -19,6 +24,11 @@ pub struct PerfApp {
     pub latest: Option<Snapshot>,
     pub status: Status,
     pub settings_open: bool,
+    pub update_state: SharedUpdateState,
+    pub update_banner_dismissed: bool,
+    pub update_modal_open: bool,
+    pub want_quit: bool,
+    update_source: Arc<GitHubReleaseSource>,
     os_is_light: bool,
 }
 
@@ -41,6 +51,19 @@ impl PerfApp {
             Status::SensordDown
         };
 
+        let update_state = new_shared();
+        let update_source = Arc::new(GitHubReleaseSource::new(OWNER, REPO));
+
+        if config.check_updates_on_startup {
+            let ctx = cc.egui_ctx.clone();
+            let source = Arc::clone(&update_source);
+            let state = Arc::clone(&update_state);
+            std::thread::spawn(move || {
+                std::thread::sleep(std::time::Duration::from_millis(STARTUP_DELAY_MS));
+                spawn_check(source, state, false, move || ctx.request_repaint());
+            });
+        }
+
         let mut app = Self {
             config,
             theme,
@@ -49,12 +72,26 @@ impl PerfApp {
             latest: None,
             status,
             settings_open: false,
+            update_state,
+            update_banner_dismissed: false,
+            update_modal_open: false,
+            want_quit: false,
+            update_source,
             os_is_light,
         };
         if let Some(s) = &mut app.sensord {
             s.set_interval(app.config.refresh.as_millis());
         }
         app
+    }
+
+    /// Fire a manual update check, ignoring the cache TTL. Called by the
+    /// Settings → Updates section's "Check for updates now" button.
+    pub fn manual_update_check(&self, ctx: &egui::Context) {
+        let source = Arc::clone(&self.update_source);
+        let state = Arc::clone(&self.update_state);
+        let ctx = ctx.clone();
+        spawn_check(source, state, true, move || ctx.request_repaint());
     }
 
     /// Restart `sensord` after it has died, re-arming the live feed.
@@ -175,5 +212,9 @@ impl eframe::App for PerfApp {
         ctx.request_repaint_after(std::time::Duration::from_millis(
             self.config.refresh.as_millis() as u64 + 500,
         ));
+
+        if self.want_quit {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+        }
     }
 }
