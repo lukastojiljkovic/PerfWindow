@@ -43,7 +43,7 @@ pub fn spawn_check<S: ReleaseSource>(
     repaint: impl Fn() + Send + 'static,
 ) {
     std::thread::spawn(move || {
-        run_check(source.as_ref(), &state, ignore_cache, &repaint);
+        run_check(source.as_ref(), &state, ignore_cache, true, &repaint);
     });
 }
 
@@ -51,6 +51,7 @@ pub(crate) fn run_check<S: ReleaseSource + ?Sized>(
     source: &S,
     state: &SharedUpdateState,
     ignore_cache: bool,
+    persist_cache: bool,
     repaint: &(impl Fn() + ?Sized),
 ) {
     set_state(state, UpdateState::Checking, repaint);
@@ -68,7 +69,7 @@ pub(crate) fn run_check<S: ReleaseSource + ?Sized>(
     match source.fetch_latest() {
         Ok(release) => match evaluate(&release) {
             Some(true) => {
-                Cache {
+                let cache = Cache {
                     checked_at: now,
                     latest_tag: release.tag_name.clone(),
                     latest_name: release.name.clone(),
@@ -81,8 +82,10 @@ pub(crate) fn run_check<S: ReleaseSource + ?Sized>(
                         .installer_asset()
                         .map(|a| a.size)
                         .unwrap_or_default(),
+                };
+                if persist_cache {
+                    cache.save();
                 }
-                .save();
                 set_state(
                     state,
                     UpdateState::Available {
@@ -244,7 +247,9 @@ mod tests {
 
     fn run_sync(source: impl ReleaseSource, ignore_cache: bool) -> UpdateState {
         let state = new_shared();
-        run_check(&source, &state, ignore_cache, &|| {});
+        // `persist_cache = false`: unit tests must not touch the real
+        // `%APPDATA%\PerfWindow\update-cache.json`.
+        run_check(&source, &state, ignore_cache, false, &|| {});
         let g = state.lock().unwrap();
         g.clone()
     }
