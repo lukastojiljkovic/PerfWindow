@@ -316,6 +316,13 @@ pub fn card_grid(ui: &mut egui::Ui, app: &mut PerfApp) {
         }
 
         let avail_w = ui.available_width();
+        // On width change, drop the cached row heights so the next paint
+        // re-measures (cards may have got shorter at a narrower width).
+        if (avail_w - app.prev_grid_width).abs() > 0.5 {
+            app.row_heights.clear();
+        }
+        app.prev_grid_width = avail_w;
+
         let cols = column_count(avail_w);
         let col_width = ((avail_w - GRID_GAP * (cols as f32 - 1.0)) / cols as f32).max(1.0);
 
@@ -381,7 +388,7 @@ fn column_count(avail: f32) -> usize {
 /// that would not fit in the columns left on the current row starts a new row.
 fn layout_cards(
     ui: &mut egui::Ui,
-    app: &PerfApp,
+    app: &mut PerfApp,
     snap: &crate::ipc::Snapshot,
     cards: &[Card],
     spans: &[usize],
@@ -391,6 +398,9 @@ fn layout_cards(
     ui.spacing_mut().item_spacing = Vec2::splat(GRID_GAP);
 
     let mut idx = 0;
+    let mut row_idx = 0;
+    let mut next_row_heights: Vec<f32> = Vec::new();
+
     while idx < cards.len() {
         let mut row_indices: Vec<usize> = Vec::new();
         let mut used = 0;
@@ -404,22 +414,37 @@ fn layout_cards(
             idx += 1;
         }
 
+        // Min height for this row = the previous frame's measured maximum,
+        // or 0 on first frame / after resize. Cards intrinsically taller
+        // than this push the next frame's value up; nothing pushes it
+        // beyond the intrinsic max in the row, so cards never grow blank
+        // space inside.
+        let prev_height = app.row_heights.get(row_idx).copied().unwrap_or(0.0);
+        let mut row_max_height: f32 = 0.0;
+
         ui.horizontal_top(|ui| {
             ui.spacing_mut().item_spacing.x = GRID_GAP;
             for &i in &row_indices {
                 let span = spans[i];
                 let width = col_width * span as f32 + GRID_GAP * (span as f32 - 1.0);
-                ui.allocate_ui_with_layout(
+                let cell = ui.allocate_ui_with_layout(
                     Vec2::new(width, 0.0),
                     Layout::top_down(Align::Min),
                     |ui| {
                         ui.set_width(width);
+                        ui.set_min_height(prev_height);
                         paint_card(ui, app, snap, cards[i]);
                     },
                 );
+                row_max_height = row_max_height.max(cell.response.rect.height());
             }
         });
+
+        next_row_heights.push(row_max_height);
+        row_idx += 1;
     }
+
+    app.row_heights = next_row_heights;
 }
 
 /// Paint a single card by dispatching to its `panels::*` function.

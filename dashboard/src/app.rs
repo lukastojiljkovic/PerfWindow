@@ -43,6 +43,13 @@ pub struct PerfApp {
     pub update_download_progress: crate::update::download::SharedProgress,
     pub update_download_outcome: SharedDownloadOutcome,
     pub want_quit: bool,
+    /// Per-row max card height from the previous frame, used by `card_grid`
+    /// to align cards in the same row to a uniform height. Reset whenever
+    /// the grid width changes so a shrunk window can re-measure.
+    pub row_heights: Vec<f32>,
+    /// Grid width on the previous frame; used to invalidate `row_heights`
+    /// on resize.
+    pub prev_grid_width: f32,
     update_source: Arc<GitHubReleaseSource>,
     os_is_light: bool,
 }
@@ -97,6 +104,8 @@ impl PerfApp {
             )),
             update_download_outcome: Arc::new(std::sync::Mutex::new(None)),
             want_quit: false,
+            row_heights: Vec::new(),
+            prev_grid_width: 0.0,
             update_source,
             os_is_light,
         };
