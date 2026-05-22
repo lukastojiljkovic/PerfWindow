@@ -16,3 +16,12 @@ pub mod install;
 pub mod release;
 pub mod source;
 pub mod state;
+
+/// The GitHub repository this binary belongs to. Hard-coded so a forked or
+/// rebranded build cannot accidentally check the original repository.
+pub const OWNER: &str = "lukastojiljkovic";
+pub const REPO: &str = "PerfWindow";
+
+pub use release::{Release, INSTALLER_ASSET_NAME};
+pub use source::{FetchError, GitHubReleaseSource, ReleaseSource};
+pub use state::{new_shared, SharedUpdateState, UpdateState};
