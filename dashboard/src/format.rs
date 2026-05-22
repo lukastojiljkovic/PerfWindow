@@ -35,6 +35,17 @@ pub fn format_temp_compact(celsius: Option<f64>, unit: TempUnit) -> String {
     }
 }
 
+/// Render a link speed (bits/sec) as `"1 Gbps"` or `"100 Mbps"`. Truncates
+/// toward zero so a marketing `1_000_000_000` bps Ethernet link reads as
+/// `1 Gbps`. Absent or sub-Mbps values render as `"—"`.
+pub fn format_link(bps: Option<i64>) -> String {
+    match bps {
+        Some(b) if b >= 1_000_000_000 => format!("{} Gbps", b / 1_000_000_000),
+        Some(b) if b >= 1_000_000 => format!("{} Mbps", b / 1_000_000),
+        _ => "—".to_string(),
+    }
+}
+
 /// Human throughput, e.g. `"4.2 MB/s"`. Bytes/sec in; 1024-based KB/MB/GB out
 /// (binary, consistent with `format_gb_from_mb` and the mockup).
 pub fn format_bytes_per_sec(bps: f64) -> String {
@@ -120,6 +131,15 @@ mod tests {
         assert_eq!(format_temp_compact(Some(58.0), TempUnit::Celsius), "58°");
         assert_eq!(format_temp_compact(Some(58.0), TempUnit::Fahrenheit), "136°");
         assert_eq!(format_temp_compact(None, TempUnit::Celsius), "—");
+    }
+
+    #[test]
+    fn formats_link_speed() {
+        assert_eq!(format_link(Some(1_000_000_000)), "1 Gbps");
+        assert_eq!(format_link(Some(2_500_000_000)), "2 Gbps");
+        assert_eq!(format_link(Some(100_000_000)), "100 Mbps");
+        assert_eq!(format_link(Some(10_000_000)), "10 Mbps");
+        assert_eq!(format_link(None), "—");
     }
 
     #[test]
