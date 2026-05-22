@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ## [Unreleased]
 
+## [0.2.0] — 2026-05-22
+
 ### Added
 - In-app update detection that polls GitHub Releases on startup and surfaces
   a banner when a newer version is available, with a guided installer
@@ -14,11 +16,31 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 - `CHANGELOG.md` covering the release history from 0.1.0 onward.
 - Settings → Updates section: opt-out toggle, manual "Check for updates now"
   action and last-checked timestamp.
+- GPU dual-line history graph: compute load overlaid with the GPU memory
+  controller load on the same sparkline canvas, with a `MEM USE` stat row.
+- Per-core CPU heat-map, toggled from a new title-bar chip. Each core's
+  cell is coloured by load and labelled with the per-core temperature
+  when available.
+- Per-direction network throughput history feeding a dual-line sparkline.
 
 ### Changed
+- Card grid restructured to a 4-column layout on wide windows: Network
+  joins CPU, GPU and RAM in the top row; Storage spans the second row.
+- The Sensors card is now hidden entirely on machines without readable
+  motherboard / fan / voltage sensors; Storage expands to fill its row.
+- Cards in the same row are aligned to a uniform height from a static
+  per-card-kind table, with sparklines growing to fill the leftover
+  vertical space — no empty band below the grid.
+- The Network panel was rewritten in the dashboard's standard idiom:
+  donut + stat rows (DOWN/UP/LINK) + dual-line throughput sparkline,
+  replacing the previous arrow meters.
+- Empty-state notes inside panels now wrap to the card width instead of
+  being clipped.
 - The build pipeline (`build/build.ps1`, `build/PerfWindow.iss`,
-  `sensord/src/sensord.csproj`) now derives the application version from the
-  single `version` field in `dashboard/Cargo.toml`.
+  `sensord/src/sensord.csproj`) now derives the application version from
+  the single `version` field in `dashboard/Cargo.toml`.
+- Default window size tightened to 1180×580, with a minimum height equal
+  to the default height so the cards can never be clipped.
 
 ## [0.1.0] — 2026-05-19
 
@@ -34,5 +56,6 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   matching uninstaller that removes the exclusions, the `R0sensord` driver
   service, the install directory and the per-user data directory.
 
-[Unreleased]: https://github.com/lukastojiljkovic/PerfWindow/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/lukastojiljkovic/PerfWindow/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/lukastojiljkovic/PerfWindow/releases/tag/v0.2.0
 [0.1.0]: https://github.com/lukastojiljkovic/PerfWindow/releases/tag/v0.1.0
