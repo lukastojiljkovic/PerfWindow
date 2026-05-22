@@ -1,8 +1,12 @@
 use crate::theme::Theme;
 use egui::{Pos2, Sense, Shape, Stroke, Vec2};
 
-/// Height of the sparkline widget in pixels.
-const HEIGHT: f32 = 30.0;
+/// Minimum vertical footprint of a sparkline, in pixels. Anything below this
+/// is too small to read.
+const MIN_HEIGHT: f32 = 30.0;
+/// Maximum vertical footprint, so a sparkline does not eat an entire stretched
+/// card on a tall window.
+const MAX_HEIGHT: f32 = 160.0;
 
 /// Draw a 30 px-tall area-chart sparkline spanning the available width.
 ///
@@ -12,7 +16,8 @@ const HEIGHT: f32 = 30.0;
 /// is drawn.  Matches the `.pw-spark` element in the mockup.
 pub fn sparkline(ui: &mut egui::Ui, theme: &Theme, samples: &[f32], max: f32) {
     let available_w = ui.available_width();
-    let (rect, _response) = ui.allocate_exact_size(Vec2::new(available_w, HEIGHT), Sense::hover());
+    let height = ui.available_height().clamp(MIN_HEIGHT, MAX_HEIGHT);
+    let (rect, _response) = ui.allocate_exact_size(Vec2::new(available_w, height), Sense::hover());
 
     if samples.len() < 2 || !ui.is_rect_visible(rect) {
         return;
@@ -34,8 +39,8 @@ pub fn sparkline(ui: &mut egui::Ui, theme: &Theme, samples: &[f32], max: f32) {
             // through clamp into a garbage Pos2 vertex — treat it as 0.0.
             let v = if v.is_finite() { v } else { 0.0 };
             let norm = (v / scale).clamp(0.0, 1.0);
-            // y=0 (top) → max value; y=HEIGHT (bottom) → 0 value
-            let y = rect.max.y - norm * HEIGHT;
+            // y=top → max value; y=bottom → 0 value
+            let y = rect.max.y - norm * rect.height();
             Pos2::new(x, y)
         })
         .collect();
@@ -80,7 +85,8 @@ pub fn dual_sparkline(
     max: f32,
 ) {
     let available_w = ui.available_width();
-    let (rect, _response) = ui.allocate_exact_size(Vec2::new(available_w, HEIGHT), Sense::hover());
+    let height = ui.available_height().clamp(MIN_HEIGHT, MAX_HEIGHT);
+    let (rect, _response) = ui.allocate_exact_size(Vec2::new(available_w, height), Sense::hover());
 
     if primary.len() < 2 || !ui.is_rect_visible(rect) {
         return;
@@ -99,7 +105,7 @@ pub fn dual_sparkline(
                 let x = rect.min.x + (i as f32 / (n - 1) as f32) * rect.width();
                 let v = if v.is_finite() { v } else { 0.0 };
                 let norm = (v / scale).clamp(0.0, 1.0);
-                let y = rect.max.y - norm * HEIGHT;
+                let y = rect.max.y - norm * rect.height();
                 Pos2::new(x, y)
             })
             .collect()
