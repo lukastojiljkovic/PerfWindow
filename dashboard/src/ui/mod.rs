@@ -298,11 +298,17 @@ pub fn card_grid(ui: &mut egui::Ui, app: &mut PerfApp) {
         if snap.ram.is_some() {
             cards.push(Card::Ram);
         }
+        cards.push(Card::Network);
         if snap.storage.is_some() {
             cards.push(Card::Storage);
         }
-        cards.push(Card::Sensors);
-        cards.push(Card::Network);
+        if panels::sensors::has_content(
+            snap.board.as_ref(),
+            snap.fans.as_deref().unwrap_or(&[]),
+            snap.voltages.as_deref().unwrap_or(&[]),
+        ) {
+            cards.push(Card::Sensors);
+        }
 
         let avail = ui.available_width();
         let cols = column_count(avail);
