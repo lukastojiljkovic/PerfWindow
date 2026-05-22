@@ -1,6 +1,9 @@
 # Brainstorming / visual companion (session artifacts)
 .superpowers/
 
+# Internal design specifications and implementation plans — kept locally only
+docs/superpowers/
+
 # Original hand sketch — kept locally, not version-controlled
 skica/
 
