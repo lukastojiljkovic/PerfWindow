@@ -446,11 +446,15 @@ fn layout_cards(
             for &i in &row_indices {
                 let span = spans[i];
                 let width = col_width * span as f32 + GRID_GAP * (span as f32 - 1.0);
+                // Allocate sub-UI at the full row height so widgets inside
+                // (sparkline) see the true available_height and can grow to
+                // fill the card without leaving a chin at the bottom.
                 ui.allocate_ui_with_layout(
-                    Vec2::new(width, 0.0),
+                    Vec2::new(width, row_h),
                     Layout::top_down(Align::Min),
                     |ui| {
                         ui.set_width(width);
+                        ui.set_height(row_h);
                         paint_card(ui, app, snap, cards[i], row_h);
                     },
                 );
