@@ -9,6 +9,7 @@ use crate::app::PerfApp;
 use crate::theme::Theme;
 use crate::update::UpdateState;
 use egui::{Align2, Color32, FontId, Margin, Response, Sense, Stroke, StrokeKind, Vec2};
+use std::sync::atomic::Ordering;
 
 const WINDOW_WIDTH: f32 = 520.0;
 const TB_PADDING_X: i8 = 15;
@@ -16,13 +17,14 @@ const TB_PADDING_Y: i8 = 12;
 const BODY_PADDING_X: i8 = 18;
 const BODY_PADDING_Y: i8 = 20;
 const BTN_PAD: Vec2 = Vec2::new(14.0, 8.0);
+const PROGRESS_BAR_H: f32 = 14.0;
 
 /// Which screen the modal is currently showing.
 #[derive(Debug, Clone)]
 pub enum ModalPhase {
     /// "Confirm" screen: changelog + Cancel/Update buttons.
     Confirm,
-    /// "Downloading" screen: progress bar. Wired in a subsequent commit.
+    /// "Downloading" screen: progress bar.
     Downloading { progress: f32, bytes: u64, total: u64 },
     /// "Failed" screen: an error message + browser fallback + retry.
     Failed { message: String },
@@ -50,6 +52,19 @@ pub fn update_modal(ctx: &egui::Context, app: &mut PerfApp) {
             }
         }
     };
+
+    // While downloading, mirror the live byte counter into the phase so the
+    // bar moves frame-by-frame; the background thread only writes into the
+    // progress mutex.
+    if matches!(app.update_modal_phase, ModalPhase::Downloading { .. }) {
+        if let Ok(p) = app.update_download_progress.lock() {
+            app.update_modal_phase = ModalPhase::Downloading {
+                progress: p.fraction(),
+                bytes: p.bytes,
+                total: p.total,
+            };
+        }
+    }
 
     let theme = app.theme.clone();
     let frame = egui::Frame::NONE
@@ -81,14 +96,11 @@ pub fn update_modal(ctx: &egui::Context, app: &mut PerfApp) {
                 .inner_margin(Margin::symmetric(BODY_PADDING_X, BODY_PADDING_Y))
                 .show(ui, |ui| match &phase_snapshot {
                     ModalPhase::Confirm => confirm_screen(ui, &theme, app, &release, &mut close),
-                    ModalPhase::Downloading { .. } => {
-                        ui.label(
-                            egui::RichText::new("Downloading\u{2026}")
-                                .family(theme.font_data.egui())
-                                .size(12.0)
-                                .color(theme.ink),
-                        );
-                    }
+                    ModalPhase::Downloading {
+                        progress,
+                        bytes,
+                        total,
+                    } => downloading_screen(ui, &theme, app, &release, *progress, *bytes, *total),
                     ModalPhase::Failed { message } => {
                         failed_screen(ui, &theme, app, &release, message, &mut close);
                     }
@@ -183,14 +195,7 @@ fn confirm_screen(
 
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             if action_button(ui, theme, "Update now", true).clicked() {
-                app.update_modal_phase = ModalPhase::Downloading {
-                    progress: 0.0,
-                    bytes: 0,
-                    total: release
-                        .installer_asset()
-                        .map(|a| a.size)
-                        .unwrap_or_default(),
-                };
+                start_update_download(ui.ctx(), app, release);
             }
             ui.add_space(8.0);
             if action_button(ui, theme, "Cancel", false).clicked() {
@@ -198,6 +203,66 @@ fn confirm_screen(
             }
         });
     });
+}
+
+fn downloading_screen(
+    ui: &mut egui::Ui,
+    theme: &Theme,
+    app: &mut PerfApp,
+    release: &crate::update::Release,
+    progress: f32,
+    bytes: u64,
+    total: u64,
+) {
+    ui.vertical(|ui| {
+        ui.spacing_mut().item_spacing.y = 14.0;
+
+        ui.label(
+            egui::RichText::new(format!(
+                "Downloading PerfWindow {}\u{2026}",
+                release.tag_name.trim_start_matches('v'),
+            ))
+            .family(theme.font_data.egui())
+            .size(12.0)
+            .color(theme.ink),
+        );
+
+        progress_bar(ui, theme, progress);
+
+        ui.label(
+            egui::RichText::new(format!(
+                "{:.1} MB of {:.1} MB",
+                bytes as f64 / 1_000_000.0,
+                total as f64 / 1_000_000.0,
+            ))
+            .family(theme.font_data.egui())
+            .size(10.0)
+            .color(theme.dim),
+        );
+
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            if action_button(ui, theme, "Cancel", false).clicked() {
+                app.update_download_cancel.store(true, Ordering::SeqCst);
+                app.update_modal_phase = ModalPhase::Confirm;
+            }
+        });
+    });
+}
+
+fn progress_bar(ui: &mut egui::Ui, theme: &Theme, fraction: f32) {
+    let (rect, _) = ui.allocate_exact_size(
+        Vec2::new(ui.available_width(), PROGRESS_BAR_H),
+        Sense::hover(),
+    );
+    if !ui.is_rect_visible(rect) {
+        return;
+    }
+    let painter = ui.painter_at(rect);
+    painter.rect_filled(rect, 0.0, theme.track);
+    let mut fill_rect = rect;
+    fill_rect.max.x = rect.min.x + rect.width() * fraction.clamp(0.0, 1.0);
+    painter.rect_filled(fill_rect, 0.0, theme.accent);
+    painter.rect_stroke(rect, 0.0, Stroke::new(1.0, theme.border), StrokeKind::Inside);
 }
 
 fn failed_screen(
@@ -243,6 +308,61 @@ fn failed_screen(
             }
         });
     });
+}
+
+/// Kick off the background download and transition the modal to its
+/// Downloading screen. Outcome is written to `app.update_download_outcome`
+/// by the worker thread and applied to the UI by
+/// [`PerfApp::poll_download_outcome`] on the next frame.
+fn start_update_download(
+    ctx: &egui::Context,
+    app: &mut PerfApp,
+    release: &crate::update::Release,
+) {
+    let Some(asset) = release.installer_asset().cloned() else {
+        app.update_modal_phase = ModalPhase::Failed {
+            message: "release is missing the installer asset".into(),
+        };
+        return;
+    };
+    let dest = std::env::temp_dir().join(format!(
+        "PerfWindow-Setup-{}.exe",
+        release.tag_name.trim_start_matches('v')
+    ));
+
+    app.update_download_cancel.store(false, Ordering::SeqCst);
+    if let Ok(mut g) = app.update_download_outcome.lock() {
+        *g = None;
+    }
+    app.update_modal_phase = ModalPhase::Downloading {
+        progress: 0.0,
+        bytes: 0,
+        total: asset.size,
+    };
+
+    let progress = std::sync::Arc::clone(&app.update_download_progress);
+    let cancel = std::sync::Arc::clone(&app.update_download_cancel);
+    let outcome = std::sync::Arc::clone(&app.update_download_outcome);
+    let repaint_ctx = ctx.clone();
+    let finish_ctx = ctx.clone();
+
+    crate::update::download::start_download(
+        asset.browser_download_url,
+        dest,
+        asset.size,
+        progress,
+        cancel,
+        move || repaint_ctx.request_repaint(),
+        move |result| {
+            if let Ok(mut g) = outcome.lock() {
+                *g = Some(match result {
+                    Ok(path) => crate::app::DownloadOutcome::Ready(path),
+                    Err(e) => crate::app::DownloadOutcome::Failed(e.to_string()),
+                });
+            }
+            finish_ctx.request_repaint();
+        },
+    );
 }
 
 /// Standard primary/secondary button styled like the banner chip.

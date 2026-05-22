@@ -15,6 +15,17 @@ pub enum Status {
     SensordDown,
 }
 
+/// What a finished download produced.
+pub enum DownloadOutcome {
+    /// The installer was downloaded successfully and is at `path`. The UI
+    /// thread launches it and sets `want_quit`.
+    Ready(std::path::PathBuf),
+    /// The download failed; the modal transitions to its Failed state.
+    Failed(String),
+}
+
+pub type SharedDownloadOutcome = std::sync::Arc<std::sync::Mutex<Option<DownloadOutcome>>>;
+
 /// The PerfWindow application.
 pub struct PerfApp {
     pub config: Config,
@@ -28,6 +39,9 @@ pub struct PerfApp {
     pub update_banner_dismissed: bool,
     pub update_modal_open: bool,
     pub update_modal_phase: crate::ui::update_modal::ModalPhase,
+    pub update_download_cancel: Arc<std::sync::atomic::AtomicBool>,
+    pub update_download_progress: crate::update::download::SharedProgress,
+    pub update_download_outcome: SharedDownloadOutcome,
     pub want_quit: bool,
     update_source: Arc<GitHubReleaseSource>,
     os_is_light: bool,
@@ -77,6 +91,11 @@ impl PerfApp {
             update_banner_dismissed: false,
             update_modal_open: false,
             update_modal_phase: crate::ui::update_modal::ModalPhase::default(),
+            update_download_cancel: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            update_download_progress: Arc::new(std::sync::Mutex::new(
+                crate::update::download::DownloadProgress::default(),
+            )),
+            update_download_outcome: Arc::new(std::sync::Mutex::new(None)),
             want_quit: false,
             update_source,
             os_is_light,
@@ -94,6 +113,30 @@ impl PerfApp {
         let state = Arc::clone(&self.update_state);
         let ctx = ctx.clone();
         spawn_check(source, state, true, move || ctx.request_repaint());
+    }
+
+    /// Apply any download outcome the background thread has left for us.
+    fn poll_download_outcome(&mut self) {
+        let outcome = self
+            .update_download_outcome
+            .lock()
+            .ok()
+            .and_then(|mut g| g.take());
+        let Some(outcome) = outcome else { return };
+        match outcome {
+            DownloadOutcome::Ready(path) => match crate::update::install::launch(&path) {
+                Ok(()) => self.want_quit = true,
+                Err(e) => {
+                    self.update_modal_phase = crate::ui::update_modal::ModalPhase::Failed {
+                        message: format!("could not launch installer: {e}"),
+                    };
+                }
+            },
+            DownloadOutcome::Failed(message) => {
+                self.update_modal_phase =
+                    crate::ui::update_modal::ModalPhase::Failed { message };
+            }
+        }
     }
 
     /// Restart `sensord` after it has died, re-arming the live feed.
@@ -170,6 +213,7 @@ impl eframe::App for PerfApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
         self.ingest();
+        self.poll_download_outcome();
 
         // Title bar on top, footer on the bottom, the card grid filling the
         // scrollable centre. Panels are nested with `show_inside` (we render
