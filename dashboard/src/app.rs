@@ -60,11 +60,12 @@ impl PerfApp {
     /// Restart `sensord` after it has died, re-arming the live feed.
     ///
     /// The old [`Sensord`] is dropped *first* (`self.sensord = None`): its
-    /// [`Drop`] kills the child, joins the reader and removes the temp exe.
-    /// This ordering is mandatory — [`Sensord::spawn`] re-extracts the embedded
-    /// executable to `%TEMP%\PerfWindow-sensord-{pid}.exe`, the *same* path the
-    /// old child still occupies, and Windows refuses to overwrite a running
-    /// `.exe`. Only once the old process is gone do we spawn the replacement.
+    /// [`Drop`] closes stdin so the child exits cleanly, then joins the reader
+    /// thread. Only once the old child has exited is the replacement spawned —
+    /// the new [`Sensord::spawn`] simply launches the sibling `sensord.exe`
+    /// next to `PerfWindow.exe` (located by `ipc::process::sensord_path`), so
+    /// no file is rewritten and the strict ordering is for resource cleanup
+    /// rather than file contention.
     ///
     /// `history` is deliberately kept, so the sparklines carry on uninterrupted
     /// across the gap. `latest` is cleared (its readings are now stale) and the
@@ -72,8 +73,9 @@ impl PerfApp {
     /// as [`Status::Running`] only if the respawn succeeded; a failed spawn is
     /// logged and leaves it [`Status::SensordDown`].
     pub fn respawn_sensord(&mut self, ctx: &egui::Context) {
-        // Drop the old child *before* spawning: its `Drop` removes the temp
-        // exe that `Sensord::spawn` is about to rewrite (see doc comment).
+        // Drop the old child *before* spawning: its `Drop` waits for the
+        // existing reader thread to finish before we hand a fresh stdout
+        // pipe to the replacement.
         self.sensord = None;
 
         let repaint_ctx = ctx.clone();
