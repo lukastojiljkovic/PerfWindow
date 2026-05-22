@@ -316,7 +316,10 @@ pub fn card_grid(ui: &mut egui::Ui, app: &mut PerfApp) {
         }
 
         let avail_w = ui.available_width();
-        let avail_h = ui.available_height();
+        // Use the viewport-bound height captured before the ScrollArea (egui
+        // returns unbounded height inside a ScrollArea). Subtract the grid's
+        // own body padding which the inner Frame applied above this closure.
+        let avail_h = (app.grid_viewport_height - GRID_BODY_PADDING as f32 * 2.0).max(0.0);
         let cols = column_count(avail_w);
         let col_width = ((avail_w - GRID_GAP * (cols as f32 - 1.0)) / cols as f32).max(1.0);
 

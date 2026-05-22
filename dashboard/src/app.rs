@@ -47,6 +47,10 @@ pub struct PerfApp {
     /// `card_grid` to align cards in the same row to a uniform height.
     /// Empty on first frame; a fresh row is appended each render.
     pub row_heights: Vec<f32>,
+    /// Vertical space available to the grid in the central panel, captured
+    /// before the inner `ScrollArea` is entered (`ScrollArea` reports
+    /// unbounded height from inside, so the grid cannot ask).
+    pub grid_viewport_height: f32,
     update_source: Arc<GitHubReleaseSource>,
     os_is_light: bool,
 }
@@ -102,6 +106,7 @@ impl PerfApp {
             update_download_outcome: Arc::new(std::sync::Mutex::new(None)),
             want_quit: false,
             row_heights: Vec::new(),
+            grid_viewport_height: 0.0,
             update_source,
             os_is_light,
         };
@@ -248,6 +253,10 @@ impl eframe::App for PerfApp {
             .show_inside(ui, |ui| {
                 // The faint grid sits on the body background, behind the cards.
                 crate::ui::effects::paint_grid(ui, &self.theme);
+                // Capture the viewport-bound height before entering the
+                // ScrollArea, which reports unbounded available_height from
+                // inside its closure.
+                self.grid_viewport_height = ui.available_height();
                 egui::ScrollArea::vertical()
                     .auto_shrink([false, false])
                     .show(ui, |ui| {
