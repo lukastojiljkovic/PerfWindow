@@ -327,7 +327,7 @@ pub fn card_grid(ui: &mut egui::Ui, app: &mut PerfApp) {
 /// Fixed outer height of the "summary" cards in the top row (CPU, GPU, RAM,
 /// Network). Tuned so GPU's five stat rows + legend + sparkline fill the
 /// card with no chin, and every other card in the row pads up to match.
-const ROW_1_CARD_HEIGHT: f32 = 275.0;
+const ROW_1_CARD_HEIGHT: f32 = 255.0;
 /// Baseline for the Storage card (title row + column header + padding).
 const STORAGE_BASE_HEIGHT: f32 = 72.0;
 /// Per-disk row height inside the Storage card.
