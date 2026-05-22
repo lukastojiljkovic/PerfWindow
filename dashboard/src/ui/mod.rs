@@ -123,6 +123,14 @@ fn chip_row(ui: &mut egui::Ui, theme: &Theme, app: &mut PerfApp) {
         app.config.save();
     }
 
+    // CPU heat-map toggle: `▦` (U+25A6 squared crosshatch).
+    if chip(ui, theme, "\u{25A6}", app.config.cpu_heat_map).clicked() {
+        let ctx = ui.ctx().clone();
+        app.config.cpu_heat_map = !app.config.cpu_heat_map;
+        app.apply_config_change(&ctx);
+        app.config.save();
+    }
+
     // Fahrenheit / Celsius — the active unit is filled.
     let unit = app.config.unit;
     if chip(ui, theme, "\u{00b0}F", unit == TempUnit::Fahrenheit).clicked()
