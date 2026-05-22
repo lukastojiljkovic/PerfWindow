@@ -403,7 +403,14 @@ fn paint_card(ui: &mut egui::Ui, app: &PerfApp, snap: &crate::ipc::Snapshot, car
     match card {
         Card::Cpu => {
             if let Some(cpu) = &snap.cpu {
-                panels::cpu::cpu_panel(ui, theme, cpu, app.history.cpu.as_ref(), unit);
+                panels::cpu::cpu_panel(
+                    ui,
+                    theme,
+                    cpu,
+                    app.history.cpu.as_ref(),
+                    unit,
+                    app.config.cpu_heat_map,
+                );
             }
         }
         Card::Gpu(i) => {
