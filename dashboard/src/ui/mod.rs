@@ -325,16 +325,16 @@ pub fn card_grid(ui: &mut egui::Ui, app: &mut PerfApp) {
 }
 
 /// Fixed outer height of the "summary" cards in the top row (CPU, GPU, RAM,
-/// Network). Set tall enough to hold GPU's five stat rows plus the dual-line
-/// sparkline legend, so every other card in the row pads up to match.
-const ROW_1_CARD_HEIGHT: f32 = 290.0;
+/// Network). Tuned so GPU's five stat rows + legend + sparkline fill the
+/// card with no chin, and every other card in the row pads up to match.
+const ROW_1_CARD_HEIGHT: f32 = 275.0;
 /// Baseline for the Storage card (title row + column header + padding).
-const STORAGE_BASE_HEIGHT: f32 = 80.0;
-/// Per-disk row height inside the Storage card (matches `panels::storage::DISK_ROW_H`).
-const STORAGE_DISK_ROW_HEIGHT: f32 = 32.0;
+const STORAGE_BASE_HEIGHT: f32 = 72.0;
+/// Per-disk row height inside the Storage card.
+const STORAGE_DISK_ROW_HEIGHT: f32 = 28.0;
 /// Fixed outer height of the Sensors card when populated. Wide enough for
 /// up to ~6 readouts in two columns.
-const SENSORS_CARD_HEIGHT: f32 = 220.0;
+const SENSORS_CARD_HEIGHT: f32 = 210.0;
 
 impl Card {
     /// Predicted outer card height for this card given the snapshot data.
