@@ -34,7 +34,8 @@ public record GpuInfo(
     [property: JsonPropertyName("vram_total_mb")] double? VramTotalMb,
     [property: JsonPropertyName("clock_mhz")]     double? ClockMhz,
     [property: JsonPropertyName("fan_rpm")]       double? FanRpm,
-    [property: JsonPropertyName("power_w")]       double? PowerW);
+    [property: JsonPropertyName("power_w")]       double? PowerW,
+    [property: JsonPropertyName("memory_load")]   double? MemoryLoad);
 
 /// <summary>RAM metrics. All sizes in MB. <c>cached_mb</c> = OS file-cache (system cache pages × page size). <c>load</c> = 0–100 %.</summary>
 public record RamInfo(

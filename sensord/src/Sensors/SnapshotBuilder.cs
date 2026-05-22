@@ -53,7 +53,8 @@ public static class SnapshotBuilder
                 VramTotalMb: hw.Val(SensorType.SmallData, "GPU Memory Total"),
                 ClockMhz: hw.Val(SensorType.Clock, "GPU Core"),
                 FanRpm: hw.Val(SensorType.Fan, "GPU"),
-                PowerW: hw.Val(SensorType.Power, "GPU")));
+                PowerW: hw.Val(SensorType.Power, "GPU"),
+                MemoryLoad: hw.Val(SensorType.Load, "GPU Memory Controller")));
         }
         return PreferDiscreteGpus(gpus);
     }
