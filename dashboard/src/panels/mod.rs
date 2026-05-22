@@ -73,10 +73,11 @@ pub fn panel_title(ui: &mut egui::Ui, theme: &Theme, title: &str, sub: Option<&s
     });
 }
 
-/// Draw a panel's empty-state: one centred, dimmed line of `text`.
+/// Draw a panel's empty-state: one centred, dimmed line of `text`, wrapped
+/// to the card's available width.
 ///
-/// Used by panels that legitimately have nothing to show — a machine with no
-/// readable motherboard sensors, or no active network adapter. It fabricates
+/// Used by panels that legitimately have nothing to show (a machine with no
+/// readable motherboard sensors, or no active network adapter). It fabricates
 /// nothing and cannot panic.
 pub fn empty_note(ui: &mut egui::Ui, theme: &Theme, text: &str) {
     let (rect, _) = ui.allocate_exact_size(
@@ -88,7 +89,17 @@ pub fn empty_note(ui: &mut egui::Ui, theme: &Theme, text: &str) {
     }
     let painter = ui.painter_at(rect);
     let font = FontId::new(11.0, theme.font_data.egui());
-    let galley = painter.layout_no_wrap(text.to_owned(), font, theme.dim);
+    let mut job = egui::text::LayoutJob::single_section(
+        text.to_owned(),
+        egui::TextFormat {
+            font_id: font,
+            color: theme.dim,
+            ..Default::default()
+        },
+    );
+    job.wrap.max_width = rect.width();
+    job.halign = egui::Align::Center;
+    let galley = painter.layout_job(job);
     painter.galley(
         Pos2::new(
             rect.center().x - galley.size().x / 2.0,
