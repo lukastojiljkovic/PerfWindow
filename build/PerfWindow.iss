@@ -9,7 +9,9 @@
 ; Build it with  build\build.ps1  (which compiles the app, then runs ISCC).
 
 #define AppName "PerfWindow"
-#define AppVersion "0.1.0"
+#ifndef AppVersion
+  #define AppVersion "0.0.0-dev"
+#endif
 #define AppPublisher "Luka Stojiljkovic"
 
 [Setup]
