@@ -274,16 +274,21 @@ pub fn card_grid(ui: &mut egui::Ui, app: &mut PerfApp) {
         return;
     }
 
-    // The grid is read-only; reborrow `app` immutably so the snapshot can be
-    // borrowed (rather than cloned) for the lifetime of the layout.
-    let app: &PerfApp = app;
-    let frame = egui::Frame::NONE.inner_margin(Margin::same(GRID_BODY_PADDING));
-    frame.show(ui, |ui| {
-        let Some(snap) = &app.latest else {
+    // Clone the snapshot so the layout can hold a `&mut PerfApp` mutably to
+    // write into `row_heights` without conflicting borrows. Snapshot is small
+    // (a handful of Vecs of primitives); a clone per ~17 ms of UI frame is
+    // negligible compared to the Vec allocations done by serde_json's parser
+    // upstream.
+    let snap = match &app.latest {
+        Some(s) => s.clone(),
+        None => {
             waiting_note(ui, &app.theme);
             return;
-        };
+        }
+    };
 
+    let frame = egui::Frame::NONE.inner_margin(Margin::same(GRID_BODY_PADDING));
+    frame.show(ui, |ui| {
         // Build the ordered list of cards to draw. Each variant carries only an
         // index; the panel data is read back out of `snap` / `app` at paint time.
         let mut cards: Vec<Card> = Vec::new();
@@ -315,7 +320,7 @@ pub fn card_grid(ui: &mut egui::Ui, app: &mut PerfApp) {
         let col_width = ((avail - GRID_GAP * (cols as f32 - 1.0)) / cols as f32).max(1.0);
 
         let spans = layout_spans(&cards, cols);
-        layout_cards(ui, app, snap, &cards, &spans, cols, col_width);
+        layout_cards(ui, app, &snap, &cards, &spans, cols, col_width);
     });
 }
 
@@ -376,7 +381,7 @@ fn column_count(avail: f32) -> usize {
 /// that would not fit in the columns left on the current row starts a new row.
 fn layout_cards(
     ui: &mut egui::Ui,
-    app: &PerfApp,
+    app: &mut PerfApp,
     snap: &crate::ipc::Snapshot,
     cards: &[Card],
     spans: &[usize],
@@ -386,6 +391,9 @@ fn layout_cards(
     ui.spacing_mut().item_spacing = Vec2::splat(GRID_GAP);
 
     let mut idx = 0;
+    let mut row_idx = 0;
+    let mut next_row_heights: Vec<f32> = Vec::new();
+
     while idx < cards.len() {
         let mut row_indices: Vec<usize> = Vec::new();
         let mut used = 0;
@@ -399,22 +407,39 @@ fn layout_cards(
             idx += 1;
         }
 
+        // Use the previous frame's max for this row, if known. Falls back to
+        // 0.0 on the first frame; cards then paint to their intrinsic height
+        // and the next frame stretches them.
+        let prev_height = app.row_heights.get(row_idx).copied().unwrap_or(0.0);
+        let mut row_max_height: f32 = 0.0;
+
         ui.horizontal_top(|ui| {
             ui.spacing_mut().item_spacing.x = GRID_GAP;
             for &i in &row_indices {
                 let span = spans[i];
                 let width = col_width * span as f32 + GRID_GAP * (span as f32 - 1.0);
-                ui.allocate_ui_with_layout(
+                let cell = ui.allocate_ui_with_layout(
                     Vec2::new(width, 0.0),
                     Layout::top_down(Align::Min),
                     |ui| {
                         ui.set_width(width);
+                        // Stretch every cell in the row to the previous
+                        // frame's max. Cells whose intrinsic content is
+                        // taller this frame push the new max up; the next
+                        // frame re-aligns to it.
+                        ui.set_min_height(prev_height);
                         paint_card(ui, app, snap, cards[i]);
                     },
                 );
+                row_max_height = row_max_height.max(cell.response.rect.height());
             }
         });
+
+        next_row_heights.push(row_max_height);
+        row_idx += 1;
     }
+
+    app.row_heights = next_row_heights;
 }
 
 /// Paint a single card by dispatching to its `panels::*` function.
