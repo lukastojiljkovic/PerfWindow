@@ -27,6 +27,7 @@ pub struct PerfApp {
     pub update_state: SharedUpdateState,
     pub update_banner_dismissed: bool,
     pub update_modal_open: bool,
+    pub update_modal_phase: crate::ui::update_modal::ModalPhase,
     pub want_quit: bool,
     update_source: Arc<GitHubReleaseSource>,
     os_is_light: bool,
@@ -75,6 +76,7 @@ impl PerfApp {
             update_state,
             update_banner_dismissed: false,
             update_modal_open: false,
+            update_modal_phase: crate::ui::update_modal::ModalPhase::default(),
             want_quit: false,
             update_source,
             os_is_light,
@@ -207,6 +209,7 @@ impl eframe::App for PerfApp {
         // The settings modal floats above the panels; it is a free-floating
         // `egui::Window` and so takes the `Context`, not a nested `Ui`.
         crate::ui::settings::settings_modal(&ctx, self);
+        crate::ui::update_modal::update_modal(&ctx, self);
 
         // The scanline + vignette overlay paints last so it sits on top of
         // every panel and the modal. (The grid is drawn earlier, inside the
