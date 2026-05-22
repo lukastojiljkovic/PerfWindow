@@ -316,19 +316,40 @@ pub fn card_grid(ui: &mut egui::Ui, app: &mut PerfApp) {
         }
 
         let avail_w = ui.available_width();
-        // On width change, drop the cached row heights so the next paint
-        // re-measures (cards may have got shorter at a narrower width).
-        if (avail_w - app.prev_grid_width).abs() > 0.5 {
-            app.row_heights.clear();
-        }
-        app.prev_grid_width = avail_w;
-
         let cols = column_count(avail_w);
         let col_width = ((avail_w - GRID_GAP * (cols as f32 - 1.0)) / cols as f32).max(1.0);
 
         let spans = layout_spans(&cards, cols);
         layout_cards(ui, app, &snap, &cards, &spans, cols, col_width);
     });
+}
+
+/// Fixed outer height of the "summary" cards in the top row (CPU, GPU, RAM,
+/// Network). Set tall enough to hold GPU's five stat rows plus the dual-line
+/// sparkline legend, so every other card in the row pads up to match.
+const ROW_1_CARD_HEIGHT: f32 = 290.0;
+/// Baseline for the Storage card (title row + column header + padding).
+const STORAGE_BASE_HEIGHT: f32 = 80.0;
+/// Per-disk row height inside the Storage card (matches `panels::storage::DISK_ROW_H`).
+const STORAGE_DISK_ROW_HEIGHT: f32 = 32.0;
+/// Fixed outer height of the Sensors card when populated. Wide enough for
+/// up to ~6 readouts in two columns.
+const SENSORS_CARD_HEIGHT: f32 = 220.0;
+
+impl Card {
+    /// Predicted outer card height for this card given the snapshot data.
+    /// Used by `layout_cards` to align every card in the same row to a
+    /// single max height, deterministically (one pass, no memoisation).
+    fn intrinsic_height(self, snap: &crate::ipc::Snapshot) -> f32 {
+        match self {
+            Card::Cpu | Card::Gpu(_) | Card::Ram | Card::Network => ROW_1_CARD_HEIGHT,
+            Card::Storage => {
+                let n = snap.storage.as_ref().map(|s| s.len()).unwrap_or(0) as f32;
+                STORAGE_BASE_HEIGHT + STORAGE_DISK_ROW_HEIGHT * n
+            }
+            Card::Sensors => SENSORS_CARD_HEIGHT,
+        }
+    }
 }
 
 /// One slot in the ordered card list. Indices refer into the snapshot's `gpu`
@@ -388,7 +409,7 @@ fn column_count(avail: f32) -> usize {
 /// that would not fit in the columns left on the current row starts a new row.
 fn layout_cards(
     ui: &mut egui::Ui,
-    app: &mut PerfApp,
+    app: &PerfApp,
     snap: &crate::ipc::Snapshot,
     cards: &[Card],
     spans: &[usize],
@@ -398,10 +419,8 @@ fn layout_cards(
     ui.spacing_mut().item_spacing = Vec2::splat(GRID_GAP);
 
     let mut idx = 0;
-    let mut row_idx = 0;
-    let mut next_row_heights: Vec<f32> = Vec::new();
-
     while idx < cards.len() {
+        // Greedily fill one row, respecting card spans and the column budget.
         let mut row_indices: Vec<usize> = Vec::new();
         let mut used = 0;
         while idx < cards.len() {
@@ -414,36 +433,30 @@ fn layout_cards(
             idx += 1;
         }
 
-        // Min height for this row = the previous frame's measured maximum,
-        // or 0 on first frame / after resize. Cards intrinsically taller
-        // than this push the next frame's value up; nothing pushes it
-        // beyond the intrinsic max in the row, so cards never grow blank
-        // space inside.
-        let prev_height = app.row_heights.get(row_idx).copied().unwrap_or(0.0);
-        let mut row_max_height: f32 = 0.0;
+        // Row height = the tallest intrinsic among the cards in this row.
+        // One-pass computation from the static heights — deterministic, no
+        // feedback loop, no frame-to-frame drift.
+        let row_h = row_indices
+            .iter()
+            .map(|&i| cards[i].intrinsic_height(snap))
+            .fold(0.0_f32, f32::max);
 
         ui.horizontal_top(|ui| {
             ui.spacing_mut().item_spacing.x = GRID_GAP;
             for &i in &row_indices {
                 let span = spans[i];
                 let width = col_width * span as f32 + GRID_GAP * (span as f32 - 1.0);
-                let cell = ui.allocate_ui_with_layout(
+                ui.allocate_ui_with_layout(
                     Vec2::new(width, 0.0),
                     Layout::top_down(Align::Min),
                     |ui| {
                         ui.set_width(width);
-                        paint_card(ui, app, snap, cards[i], prev_height);
+                        paint_card(ui, app, snap, cards[i], row_h);
                     },
                 );
-                row_max_height = row_max_height.max(cell.response.rect.height());
             }
         });
-
-        next_row_heights.push(row_max_height);
-        row_idx += 1;
     }
-
-    app.row_heights = next_row_heights;
 }
 
 /// Paint a single card by dispatching to its `panels::*` function.
