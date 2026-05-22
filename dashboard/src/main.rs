@@ -9,6 +9,7 @@ mod ipc;
 mod panels;
 mod theme;
 mod ui;
+mod update;
 mod widgets;
 
 use app::PerfApp;
