@@ -17,12 +17,13 @@ public record Snapshot(
 
 /// <summary>CPU metrics. <c>load</c>/<c>cores</c> = 0–100 %; <c>temp</c> = °C; <c>clock_mhz</c> = MHz; <c>power_w</c> = watts.</summary>
 public record CpuInfo(
-    [property: JsonPropertyName("name")]      string Name,
-    [property: JsonPropertyName("load")]      double? Load,
-    [property: JsonPropertyName("cores")]     IReadOnlyList<double>? Cores,
-    [property: JsonPropertyName("temp")]      double? Temp,
-    [property: JsonPropertyName("clock_mhz")] double? ClockMhz,
-    [property: JsonPropertyName("power_w")]   double? PowerW);
+    [property: JsonPropertyName("name")]       string Name,
+    [property: JsonPropertyName("load")]       double? Load,
+    [property: JsonPropertyName("cores")]      IReadOnlyList<double>? Cores,
+    [property: JsonPropertyName("temp")]       double? Temp,
+    [property: JsonPropertyName("clock_mhz")]  double? ClockMhz,
+    [property: JsonPropertyName("power_w")]   double? PowerW,
+    [property: JsonPropertyName("core_temps")] IReadOnlyList<double?>? CoreTemps);
 
 /// <summary>GPU metrics. <c>kind</c>: "discrete" | "integrated"; sizes in MB; <c>load</c>/<c>fan_rpm</c>/temps same units as CPU.</summary>
 public record GpuInfo(
