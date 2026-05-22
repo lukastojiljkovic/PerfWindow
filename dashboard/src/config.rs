@@ -56,10 +56,16 @@ pub struct Config {
     pub refresh: RefreshRate,
     #[serde(default = "default_check_updates")]
     pub check_updates_on_startup: bool,
+    #[serde(default = "default_cpu_heat_map")]
+    pub cpu_heat_map: bool,
 }
 
 fn default_check_updates() -> bool {
     true
+}
+
+fn default_cpu_heat_map() -> bool {
+    false
 }
 
 impl Default for Config {
@@ -70,6 +76,7 @@ impl Default for Config {
             unit: TempUnit::Celsius,
             refresh: RefreshRate::S1,
             check_updates_on_startup: true,
+            cpu_heat_map: false,
         }
     }
 }
@@ -125,6 +132,7 @@ mod tests {
             unit: TempUnit::Fahrenheit,
             refresh: RefreshRate::S2,
             check_updates_on_startup: true,
+            cpu_heat_map: false,
         };
         let parsed = Config::from_toml_str(&c.to_toml_string());
         assert_eq!(parsed.theme, ThemeId::Amber);
@@ -159,5 +167,19 @@ mod tests {
         c.check_updates_on_startup = false;
         let parsed = Config::from_toml_str(&c.to_toml_string());
         assert!(!parsed.check_updates_on_startup);
+    }
+
+    #[test]
+    fn cpu_heat_map_defaults_to_false_when_missing() {
+        let parsed = Config::from_toml_str("");
+        assert!(!parsed.cpu_heat_map);
+    }
+
+    #[test]
+    fn cpu_heat_map_round_trips_when_true() {
+        let mut c = Config::default();
+        c.cpu_heat_map = true;
+        let parsed = Config::from_toml_str(&c.to_toml_string());
+        assert!(parsed.cpu_heat_map);
     }
 }
