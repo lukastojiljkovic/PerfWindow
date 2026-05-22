@@ -36,8 +36,9 @@ pub fn sensors_panel(
     fans: &[FanInfo],
     voltages: &[VoltageInfo],
     unit: TempUnit,
+    min_h: f32,
 ) {
-    card(ui, theme, |ui| {
+    card(ui, theme, min_h, |ui| {
         panel_title(ui, theme, "BOARD & SENSORS", None);
 
         let rows = collect_readouts(theme, board, fans, voltages, unit);

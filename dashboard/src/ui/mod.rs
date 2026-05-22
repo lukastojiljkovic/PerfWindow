@@ -432,8 +432,7 @@ fn layout_cards(
                     Layout::top_down(Align::Min),
                     |ui| {
                         ui.set_width(width);
-                        ui.set_min_height(prev_height);
-                        paint_card(ui, app, snap, cards[i]);
+                        paint_card(ui, app, snap, cards[i], prev_height);
                     },
                 );
                 row_max_height = row_max_height.max(cell.response.rect.height());
@@ -451,7 +450,13 @@ fn layout_cards(
 ///
 /// The panel functions wrap themselves in `panels::card`, so this calls them
 /// directly — wrapping again would double the frame.
-fn paint_card(ui: &mut egui::Ui, app: &PerfApp, snap: &crate::ipc::Snapshot, card: Card) {
+fn paint_card(
+    ui: &mut egui::Ui,
+    app: &PerfApp,
+    snap: &crate::ipc::Snapshot,
+    card: Card,
+    min_h: f32,
+) {
     let theme = &app.theme;
     let unit = app.config.unit;
     match card {
@@ -464,22 +469,23 @@ fn paint_card(ui: &mut egui::Ui, app: &PerfApp, snap: &crate::ipc::Snapshot, car
                     app.history.cpu.as_ref(),
                     unit,
                     app.config.cpu_heat_map,
+                    min_h,
                 );
             }
         }
         Card::Gpu(i) => {
             if let Some(gpu) = snap.gpu.as_ref().and_then(|g| g.get(i)) {
-                panels::gpu::gpu_panel(ui, theme, gpu, app.history.gpus.get(i), unit);
+                panels::gpu::gpu_panel(ui, theme, gpu, app.history.gpus.get(i), unit, min_h);
             }
         }
         Card::Ram => {
             if let Some(ram) = &snap.ram {
-                panels::ram::ram_panel(ui, theme, ram, app.history.ram.as_ref());
+                panels::ram::ram_panel(ui, theme, ram, app.history.ram.as_ref(), min_h);
             }
         }
         Card::Storage => {
             if let Some(disks) = &snap.storage {
-                panels::storage::storage_panel(ui, theme, disks, unit);
+                panels::storage::storage_panel(ui, theme, disks, unit, min_h);
             }
         }
         Card::Sensors => {
@@ -490,6 +496,7 @@ fn paint_card(ui: &mut egui::Ui, app: &PerfApp, snap: &crate::ipc::Snapshot, car
                 snap.fans.as_deref().unwrap_or(&[]),
                 snap.voltages.as_deref().unwrap_or(&[]),
                 unit,
+                min_h,
             );
         }
         Card::Network => {
@@ -498,6 +505,7 @@ fn paint_card(ui: &mut egui::Ui, app: &PerfApp, snap: &crate::ipc::Snapshot, car
                 theme,
                 snap.net.as_ref(),
                 app.history.network.as_ref(),
+                min_h,
             );
         }
     }
@@ -545,7 +553,7 @@ pub fn error_overlay(ui: &mut egui::Ui, app: &mut PerfApp, ctx: &egui::Context) 
             Layout::top_down(Align::Center),
             |ui| {
                 ui.set_width(ERROR_CARD_WIDTH);
-                panels::card(ui, &theme, |ui| {
+                panels::card(ui, &theme, 0.0, |ui| {
                     // `hot` heading — the alarm line, in the display font.
                     ui.label(
                         RichText::new(letter_spaced("SENSOR FEED STOPPED"))

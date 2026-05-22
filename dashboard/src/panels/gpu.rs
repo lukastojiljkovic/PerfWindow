@@ -22,11 +22,12 @@ pub fn gpu_panel(
     gpu: &GpuInfo,
     history: Option<&GpuHistory>,
     unit: TempUnit,
+    min_h: f32,
 ) {
     let integrated = gpu.kind == "integrated";
     let title = if integrated { "iGPU" } else { "GPU" };
 
-    card(ui, theme, |ui| {
+    card(ui, theme, min_h, |ui| {
         panel_title(ui, theme, title, Some(&gpu.name));
 
         // Load donut on the left, five stat rows on the right.

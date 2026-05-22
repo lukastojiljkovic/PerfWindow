@@ -23,8 +23,9 @@ pub fn network_panel(
     theme: &Theme,
     net: Option<&NetInfo>,
     history: Option<&NetThroughputHistory>,
+    min_h: f32,
 ) {
-    card(ui, theme, |ui| {
+    card(ui, theme, min_h, |ui| {
         panel_title(ui, theme, "NETWORK", net.map(|n| n.adapter.as_str()));
 
         let Some(net) = net else {

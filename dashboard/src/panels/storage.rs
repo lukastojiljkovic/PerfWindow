@@ -28,8 +28,14 @@ const ACTIVITY_WARN: f64 = 80.0;
 /// previous row by a 1 px rule. With no disks the card still renders its title
 /// (`"0 DISKS"`) and header — that is acceptable and cannot panic. Every absent
 /// (`None`) reading degrades gracefully.
-pub fn storage_panel(ui: &mut egui::Ui, theme: &Theme, disks: &[StorageInfo], unit: TempUnit) {
-    card(ui, theme, |ui| {
+pub fn storage_panel(
+    ui: &mut egui::Ui,
+    theme: &Theme,
+    disks: &[StorageInfo],
+    unit: TempUnit,
+    min_h: f32,
+) {
+    card(ui, theme, min_h, |ui| {
         panel_title(
             ui,
             theme,

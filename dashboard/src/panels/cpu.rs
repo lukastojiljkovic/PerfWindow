@@ -26,8 +26,9 @@ pub fn cpu_panel(
     history: Option<&RingBuffer>,
     unit: TempUnit,
     show_heat_map: bool,
+    min_h: f32,
 ) {
-    card(ui, theme, |ui| {
+    card(ui, theme, min_h, |ui| {
         panel_title(ui, theme, "CPU", Some(&cpu.name));
 
         // Load donut on the left, three stat rows on the right.

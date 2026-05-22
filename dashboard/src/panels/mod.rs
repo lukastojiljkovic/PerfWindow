@@ -31,7 +31,16 @@ const EMPTY_NOTE_H: f32 = 22.0;
 /// inner padding and ~10 px of vertical spacing between stacked items. A 2 px
 /// `theme.accent` line is painted over the card's top edge, matching the
 /// mockup's `border-top: 2px solid var(--accent)`.
-pub fn card(ui: &mut egui::Ui, theme: &Theme, contents: impl FnOnce(&mut egui::Ui)) {
+///
+/// `min_h` is the desired outer card height; when intrinsic content is
+/// shorter the body is padded so all cards in a row come out the same height.
+/// Pass `0.0` for "no minimum".
+pub fn card(
+    ui: &mut egui::Ui,
+    theme: &Theme,
+    min_h: f32,
+    contents: impl FnOnce(&mut egui::Ui),
+) {
     let frame = Frame::NONE
         .fill(theme.panel)
         .stroke(Stroke::new(1.0, theme.border))
@@ -40,6 +49,16 @@ pub fn card(ui: &mut egui::Ui, theme: &Theme, contents: impl FnOnce(&mut egui::U
     let inner = frame.show(ui, |ui| {
         ui.spacing_mut().item_spacing.y = CARD_ITEM_SPACING;
         contents(ui);
+        // Pad the body so the outer card frame reaches `min_h`. The frame's
+        // inner_margin contributes `CARD_PADDING * 2` to the outer height;
+        // subtract it before comparing.
+        if min_h > 0.0 {
+            let body_target = (min_h - CARD_PADDING as f32 * 2.0).max(0.0);
+            let used = ui.min_rect().height();
+            if body_target > used {
+                ui.add_space(body_target - used);
+            }
+        }
     });
 
     // Paint the accent strip over the card's top edge. Drawn after the frame so
