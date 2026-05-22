@@ -13,6 +13,8 @@
 
 pub mod effects;
 pub mod settings;
+pub mod update_banner;
+pub mod update_modal;
 
 use crate::app::{PerfApp, Status};
 use crate::config::ThemeId;

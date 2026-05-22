@@ -180,6 +180,13 @@ impl eframe::App for PerfApp {
             .show_inside(ui, |ui| {
                 crate::ui::title_bar(ui, self);
             });
+        if crate::ui::update_banner::is_visible(self) {
+            egui::Panel::top("pw_update_banner")
+                .frame(egui::Frame::NONE)
+                .show_inside(ui, |ui| {
+                    crate::ui::update_banner::update_banner(ui, self);
+                });
+        }
         egui::Panel::bottom("pw_footer")
             .frame(egui::Frame::NONE)
             .show_inside(ui, |ui| {
