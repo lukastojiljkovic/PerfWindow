@@ -4,9 +4,9 @@ use egui::{Pos2, Sense, Shape, Stroke, Vec2};
 /// Minimum vertical footprint of a sparkline, in pixels. Anything below this
 /// is too small to read.
 const MIN_HEIGHT: f32 = 30.0;
-/// Maximum vertical footprint, so a sparkline does not eat an entire stretched
-/// card on a tall window.
-const MAX_HEIGHT: f32 = 160.0;
+/// Maximum vertical footprint, generous so the sparkline absorbs the extra
+/// space when its parent card is stretched on a tall window.
+const MAX_HEIGHT: f32 = 320.0;
 
 /// Draw a 30 px-tall area-chart sparkline spanning the available width.
 ///

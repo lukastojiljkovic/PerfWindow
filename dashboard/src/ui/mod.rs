@@ -315,13 +315,60 @@ pub fn card_grid(ui: &mut egui::Ui, app: &mut PerfApp) {
             cards.push(Card::Sensors);
         }
 
-        let avail = ui.available_width();
-        let cols = column_count(avail);
-        let col_width = ((avail - GRID_GAP * (cols as f32 - 1.0)) / cols as f32).max(1.0);
+        let avail_w = ui.available_width();
+        let avail_h = ui.available_height();
+        let cols = column_count(avail_w);
+        let col_width = ((avail_w - GRID_GAP * (cols as f32 - 1.0)) / cols as f32).max(1.0);
 
         let spans = layout_spans(&cards, cols);
-        layout_cards(ui, app, &snap, &cards, &spans, cols, col_width);
+
+        // Distribute any extra viewport height evenly across the rows so the
+        // grid fills the window instead of leaving an empty band at the
+        // bottom. Sparklines inside each card absorb the per-row stretch.
+        let num_rows = count_rows(&spans, cols);
+        let used_padding = num_rows.saturating_sub(1) as f32 * GRID_GAP;
+        let prev_total: f32 = app.row_heights.iter().take(num_rows).sum();
+        let extra = (avail_h - prev_total - used_padding).max(0.0);
+        let extra_per_row = if num_rows > 0 {
+            extra / num_rows as f32
+        } else {
+            0.0
+        };
+
+        layout_cards(
+            ui,
+            app,
+            &snap,
+            &cards,
+            &spans,
+            cols,
+            col_width,
+            extra_per_row,
+        );
     });
+}
+
+/// Replay the row-packing logic to count rows ahead of layout. Used by
+/// `card_grid` to distribute the extra viewport height evenly.
+fn count_rows(spans: &[usize], cols: usize) -> usize {
+    let mut rows = 0;
+    let mut used = 0;
+    let mut idx = 0;
+    while idx < spans.len() {
+        let span = spans[idx];
+        if used + span > cols {
+            rows += 1;
+            used = 0;
+            continue;
+        }
+        used += span;
+        idx += 1;
+        if used == cols || idx == spans.len() {
+            rows += 1;
+            used = 0;
+        }
+    }
+    rows
 }
 
 /// One slot in the ordered card list. Indices refer into the snapshot's `gpu`
@@ -387,6 +434,7 @@ fn layout_cards(
     spans: &[usize],
     cols: usize,
     col_width: f32,
+    extra_per_row: f32,
 ) {
     ui.spacing_mut().item_spacing = Vec2::splat(GRID_GAP);
 
@@ -407,10 +455,11 @@ fn layout_cards(
             idx += 1;
         }
 
-        // Use the previous frame's max for this row, if known. Falls back to
-        // 0.0 on the first frame; cards then paint to their intrinsic height
-        // and the next frame stretches them.
+        // Stretch this row to the previous frame's max + the viewport's
+        // share of unused vertical space. The next-frame measurement
+        // includes the stretched height, so the stretch self-stabilises.
         let prev_height = app.row_heights.get(row_idx).copied().unwrap_or(0.0);
+        let row_target_h = prev_height + extra_per_row;
         let mut row_max_height: f32 = 0.0;
 
         ui.horizontal_top(|ui| {
@@ -423,11 +472,7 @@ fn layout_cards(
                     Layout::top_down(Align::Min),
                     |ui| {
                         ui.set_width(width);
-                        // Stretch every cell in the row to the previous
-                        // frame's max. Cells whose intrinsic content is
-                        // taller this frame push the new max up; the next
-                        // frame re-aligns to it.
-                        ui.set_min_height(prev_height);
+                        ui.set_min_height(row_target_h);
                         paint_card(ui, app, snap, cards[i]);
                     },
                 );
