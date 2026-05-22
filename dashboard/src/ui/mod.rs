@@ -314,7 +314,8 @@ pub fn card_grid(ui: &mut egui::Ui, app: &mut PerfApp) {
         let cols = column_count(avail);
         let col_width = ((avail - GRID_GAP * (cols as f32 - 1.0)) / cols as f32).max(1.0);
 
-        layout_cards(ui, app, snap, &cards, cols, col_width);
+        let spans = layout_spans(&cards, cols);
+        layout_cards(ui, app, snap, &cards, &spans, cols, col_width);
     });
 }
 
@@ -331,13 +332,30 @@ enum Card {
 }
 
 impl Card {
-    /// How many grid columns this card spans. Only Storage is double-width.
-    fn span(self) -> usize {
+    /// Base span for this card before context-sensitive adjustments
+    /// (see `layout_spans`).
+    fn base_span(self) -> usize {
         match self {
             Card::Storage => 2,
             _ => 1,
         }
     }
+}
+
+/// Compute the column span for each card given the column budget. Storage
+/// expands to fill the row when nothing else follows it — typically when
+/// Sensors is filtered out on a laptop.
+fn layout_spans(cards: &[Card], cols: usize) -> Vec<usize> {
+    let mut spans: Vec<usize> = cards.iter().map(|c| c.base_span().min(cols)).collect();
+    for i in 0..spans.len() {
+        if matches!(cards[i], Card::Storage) {
+            let following_spans: usize = spans[i + 1..].iter().sum();
+            if following_spans == 0 {
+                spans[i] = cols;
+            }
+        }
+    }
+    spans
 }
 
 /// Choose a column count from the available grid width.
@@ -361,6 +379,7 @@ fn layout_cards(
     app: &PerfApp,
     snap: &crate::ipc::Snapshot,
     cards: &[Card],
+    spans: &[usize],
     cols: usize,
     col_width: f32,
 ) {
@@ -368,30 +387,29 @@ fn layout_cards(
 
     let mut idx = 0;
     while idx < cards.len() {
-        // Greedily fill one row, respecting card spans and the column budget.
-        let mut row: Vec<Card> = Vec::new();
+        let mut row_indices: Vec<usize> = Vec::new();
         let mut used = 0;
         while idx < cards.len() {
-            let span = cards[idx].span().min(cols);
+            let span = spans[idx];
             if used + span > cols {
                 break;
             }
             used += span;
-            row.push(cards[idx]);
+            row_indices.push(idx);
             idx += 1;
         }
 
         ui.horizontal_top(|ui| {
             ui.spacing_mut().item_spacing.x = GRID_GAP;
-            for card in &row {
-                let span = card.span().min(cols);
+            for &i in &row_indices {
+                let span = spans[i];
                 let width = col_width * span as f32 + GRID_GAP * (span as f32 - 1.0);
                 ui.allocate_ui_with_layout(
                     Vec2::new(width, 0.0),
                     Layout::top_down(Align::Min),
                     |ui| {
                         ui.set_width(width);
-                        paint_card(ui, app, snap, *card);
+                        paint_card(ui, app, snap, cards[i]);
                     },
                 );
             }
