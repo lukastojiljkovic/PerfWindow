@@ -439,7 +439,12 @@ fn paint_card(ui: &mut egui::Ui, app: &PerfApp, snap: &crate::ipc::Snapshot, car
             );
         }
         Card::Network => {
-            panels::network::network_panel(ui, theme, snap.net.as_ref());
+            panels::network::network_panel(
+                ui,
+                theme,
+                snap.net.as_ref(),
+                app.history.network.as_ref(),
+            );
         }
     }
 }
