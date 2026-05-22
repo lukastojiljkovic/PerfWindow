@@ -27,6 +27,18 @@ shortcut. The uninstaller deletes every installed file, the per-user
 configuration, the `WinRing0` driver service and the Defender exclusions — the
 machine is left as it was before installation.
 
+## Updates
+
+PerfWindow checks GitHub Releases for a newer version once at launch and
+shows an in-window banner when one is available. The banner links to a
+modal that downloads the installer and hands off to it; closing the
+banner with **Later** suppresses it until the next launch. The check can
+be disabled from **Settings → Updates**, where there is also a manual
+**Check for updates now** action and the timestamp of the last check.
+
+No telemetry is sent. The check is a single anonymous HTTPS request to
+GitHub's public Releases API.
+
 ## Architecture
 
 PerfWindow is two processes shipped as a single file:

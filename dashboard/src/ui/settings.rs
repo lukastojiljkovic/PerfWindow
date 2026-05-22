@@ -68,6 +68,8 @@ enum Change {
     Follow(bool),
     Unit(TempUnit),
     Refresh(RefreshRate),
+    CheckUpdates(bool),
+    ManualCheck,
 }
 
 /// Draw the settings modal when `app.settings_open` is set.
@@ -128,6 +130,7 @@ pub fn settings_modal(ctx: &egui::Context, app: &mut PerfApp) {
                     theme_section(ui, &theme, app, &mut change);
                     unit_section(ui, &theme, app.config.unit, &mut change);
                     refresh_section(ui, &theme, app.config.refresh, &mut change);
+                    updates_section(ui, &theme, app, &mut change);
                 });
 
             footer(ui, &theme);
@@ -136,14 +139,19 @@ pub fn settings_modal(ctx: &egui::Context, app: &mut PerfApp) {
     // Apply the queued change after the closure: writing `config`, re-applying
     // the theme and persisting to disk all happen exactly once per frame.
     if let Some(change) = change {
+        let needs_save = !matches!(change, Change::ManualCheck);
         match change {
             Change::Theme(id) => app.config.theme = id,
             Change::Follow(on) => app.config.follow_windows = on,
             Change::Unit(unit) => app.config.unit = unit,
             Change::Refresh(rate) => app.config.refresh = rate,
+            Change::CheckUpdates(on) => app.config.check_updates_on_startup = on,
+            Change::ManualCheck => app.manual_update_check(ctx),
         }
-        app.apply_config_change(ctx);
-        app.config.save();
+        if needs_save {
+            app.apply_config_change(ctx);
+            app.config.save();
+        }
     }
     if close {
         app.settings_open = false;
@@ -658,4 +666,211 @@ fn footer(ui: &mut egui::Ui, theme: &Theme) {
                 .color(theme.dim),
             );
         });
+}
+
+/// The UPDATES section: current version, opt-out toggle, manual check,
+/// last-checked stamp.
+fn updates_section(
+    ui: &mut egui::Ui,
+    theme: &Theme,
+    app: &PerfApp,
+    change: &mut Option<Change>,
+) {
+    ui.vertical(|ui| {
+        ui.spacing_mut().item_spacing.y = SECTION_INNER_GAP;
+        section_label(ui, theme, "UPDATES");
+
+        ui.label(
+            egui::RichText::new(format!("Current version: {}", env!("CARGO_PKG_VERSION")))
+                .family(theme.font_data.egui())
+                .size(11.0)
+                .color(theme.ink),
+        );
+
+        let on = app.config.check_updates_on_startup;
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 11.0;
+
+            let (track_rect, response) =
+                ui.allocate_exact_size(Vec2::new(TOGGLE_W, TOGGLE_H), Sense::click());
+            if ui.is_rect_visible(track_rect) {
+                let painter = ui.painter_at(track_rect);
+                let (track_fill, track_stroke) = if on {
+                    (theme.accent, theme.accent)
+                } else {
+                    (theme.track, theme.border)
+                };
+                painter.rect_filled(track_rect, 0.0, track_fill);
+                painter.rect_stroke(
+                    track_rect,
+                    0.0,
+                    Stroke::new(1.0, track_stroke),
+                    StrokeKind::Inside,
+                );
+                let knob_x = if on {
+                    track_rect.max.x - 2.0 - TOGGLE_DOT
+                } else {
+                    track_rect.min.x + 2.0
+                };
+                let knob = Rect::from_min_size(
+                    Pos2::new(knob_x, track_rect.min.y + 2.0),
+                    Vec2::splat(TOGGLE_DOT),
+                );
+                let knob_color = if on { theme.bg } else { theme.dim };
+                painter.rect_filled(knob, 0.0, knob_color);
+            }
+            if response.hovered() {
+                ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+            }
+            if response.clicked() {
+                *change = Some(Change::CheckUpdates(!on));
+            }
+            ui.label(
+                egui::RichText::new("Check for updates on startup")
+                    .family(theme.font_data.egui())
+                    .size(11.0)
+                    .color(theme.ink),
+            );
+        });
+
+        ui.horizontal(|ui| {
+            let stamp = format_checked_at(&app.update_state.lock().unwrap());
+            ui.label(
+                egui::RichText::new(format!("Last checked: {stamp}"))
+                    .family(theme.font_data.egui())
+                    .size(10.0)
+                    .color(theme.dim),
+            );
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if check_now_button(ui, theme).clicked() {
+                    *change = Some(Change::ManualCheck);
+                }
+            });
+        });
+    });
+}
+
+fn check_now_button(ui: &mut egui::Ui, theme: &Theme) -> egui::Response {
+    let font = FontId::new(10.0, theme.font_data.egui());
+    let galley = ui
+        .painter()
+        .layout_no_wrap("Check for updates now".to_owned(), font, Color32::PLACEHOLDER);
+    let pad = Vec2::new(10.0, 5.0);
+    let size = galley.size() + pad * 2.0;
+    let (rect, response) = ui.allocate_exact_size(size, Sense::click());
+
+    if ui.is_rect_visible(rect) {
+        let painter = ui.painter_at(rect);
+        let (fill, stroke_color, text_color) = if response.hovered() {
+            (theme.accent, theme.accent, theme.bg)
+        } else {
+            (Color32::TRANSPARENT, theme.border, theme.dim)
+        };
+        if fill != Color32::TRANSPARENT {
+            painter.rect_filled(rect, 0.0, fill);
+        }
+        painter.rect_stroke(rect, 0.0, Stroke::new(1.0, stroke_color), StrokeKind::Inside);
+        painter.galley(rect.min + pad, galley, text_color);
+    }
+    if response.hovered() {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+    }
+    response
+}
+
+fn format_checked_at(state: &crate::update::UpdateState) -> String {
+    use crate::update::UpdateState;
+    match state {
+        UpdateState::Idle => "never".to_string(),
+        UpdateState::Checking => "checking now\u{2026}".to_string(),
+        UpdateState::NoUpdate { checked_at }
+        | UpdateState::Available { checked_at, .. } => format_systemtime(*checked_at),
+        UpdateState::Failed { checked_at, reason } => {
+            format!("{} (failed: {reason})", format_systemtime(*checked_at))
+        }
+    }
+}
+
+fn format_systemtime(t: std::time::SystemTime) -> String {
+    use std::time::UNIX_EPOCH;
+    let secs = t.duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+    let (year, month, day, hour, minute) = ymdhm_local(secs);
+    format!("{year:04}-{month:02}-{day:02} {hour:02}:{minute:02}")
+}
+
+/// Convert a Unix timestamp to a local Y/M/D H/M tuple via the Win32
+/// `FileTimeToSystemTime` chain. Kept self-contained to avoid a date
+/// library dependency for one timestamp.
+fn ymdhm_local(unix_secs: u64) -> (i32, u32, u32, u32, u32) {
+    use std::ptr::null_mut;
+
+    type DWORD = u32;
+    type WORD = u16;
+    #[repr(C)]
+    struct SYSTEMTIME {
+        w_year: WORD,
+        w_month: WORD,
+        w_day_of_week: WORD,
+        w_day: WORD,
+        w_hour: WORD,
+        w_minute: WORD,
+        w_second: WORD,
+        w_milliseconds: WORD,
+    }
+    #[repr(C)]
+    struct FILETIME {
+        dw_low: DWORD,
+        dw_high: DWORD,
+    }
+
+    extern "system" {
+        fn FileTimeToSystemTime(p_ft: *const FILETIME, p_st: *mut SYSTEMTIME) -> i32;
+        fn SystemTimeToTzSpecificLocalTime(
+            tz: *const u8,
+            p_utc: *const SYSTEMTIME,
+            p_local: *mut SYSTEMTIME,
+        ) -> i32;
+    }
+
+    let ft_100ns: u64 = (unix_secs + 11_644_473_600) * 10_000_000;
+    let ft = FILETIME {
+        dw_low: (ft_100ns & 0xFFFF_FFFF) as u32,
+        dw_high: (ft_100ns >> 32) as u32,
+    };
+    let mut utc = SYSTEMTIME {
+        w_year: 0,
+        w_month: 0,
+        w_day_of_week: 0,
+        w_day: 0,
+        w_hour: 0,
+        w_minute: 0,
+        w_second: 0,
+        w_milliseconds: 0,
+    };
+    let mut local = SYSTEMTIME {
+        w_year: 0,
+        w_month: 0,
+        w_day_of_week: 0,
+        w_day: 0,
+        w_hour: 0,
+        w_minute: 0,
+        w_second: 0,
+        w_milliseconds: 0,
+    };
+    unsafe {
+        if FileTimeToSystemTime(&ft as *const _, &mut utc as *mut _) == 0 {
+            return (1970, 1, 1, 0, 0);
+        }
+        if SystemTimeToTzSpecificLocalTime(null_mut(), &utc as *const _, &mut local as *mut _) == 0
+        {
+            local = utc;
+        }
+    }
+    (
+        local.w_year as i32,
+        local.w_month as u32,
+        local.w_day as u32,
+        local.w_hour as u32,
+        local.w_minute as u32,
+    )
 }

@@ -23,6 +23,8 @@ pub struct CpuInfo {
     pub temp: Option<f64>,
     pub clock_mhz: Option<f64>,
     pub power_w: Option<f64>,
+    #[serde(default)]
+    pub core_temps: Option<Vec<Option<f64>>>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -36,6 +38,8 @@ pub struct GpuInfo {
     pub clock_mhz: Option<f64>,
     pub fan_rpm: Option<f64>,
     pub power_w: Option<f64>,
+    #[serde(default)]
+    pub memory_load: Option<f64>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -102,8 +106,8 @@ mod tests {
     use super::*;
 
     const FULL: &str = r#"{"v":1,"ts":1747645200,
-      "cpu":{"name":"Test CPU","load":34.2,"cores":[38.1,55.0],"temp":58.0,"clock_mhz":4400,"power_w":52.0},
-      "gpu":[{"name":"RTX 4070","kind":"discrete","load":51.0,"temp":71.0,"vram_used_mb":6348,"vram_total_mb":12288,"clock_mhz":2610,"fan_rpm":1480,"power_w":140.0}],
+      "cpu":{"name":"Test CPU","load":34.2,"cores":[38.1,55.0],"temp":58.0,"clock_mhz":4400,"power_w":52.0,"core_temps":[60.0,null,62.0,null]},
+      "gpu":[{"name":"RTX 4070","kind":"discrete","load":51.0,"temp":71.0,"vram_used_mb":6348,"vram_total_mb":12288,"clock_mhz":2610,"fan_rpm":1480,"power_w":140.0,"memory_load":42.5}],
       "ram":{"used_mb":15462,"total_mb":32768,"available_mb":17306,"load":47.2,"cached_mb":4403,"pagefile_used_mb":2150,"pagefile_total_mb":8192},
       "storage":[{"name":"Samsung 980 Pro","kind":"nvme","temp":48.0,"activity":22.0,"used_gb":412.0,"total_gb":931.5}],
       "board":{"temp":38.0,"vrm_temp":61.0},
@@ -134,5 +138,34 @@ mod tests {
     fn rejects_malformed_input() {
         assert!(parse_snapshot("not json").is_none());
         assert!(parse_snapshot("").is_none());
+    }
+
+    #[test]
+    fn parses_gpu_memory_load() {
+        let s = parse_snapshot(FULL).expect("should parse");
+        let gpu = &s.gpu.as_ref().unwrap()[0];
+        assert_eq!(gpu.memory_load, Some(42.5));
+    }
+
+    #[test]
+    fn parses_per_core_temperatures_with_gaps() {
+        let s = parse_snapshot(FULL).expect("should parse");
+        let temps = s.cpu.as_ref().unwrap().core_temps.as_ref().unwrap();
+        assert_eq!(temps.len(), 4);
+        assert_eq!(temps[0], Some(60.0));
+        assert_eq!(temps[1], None);
+        assert_eq!(temps[2], Some(62.0));
+        assert_eq!(temps[3], None);
+    }
+
+    #[test]
+    fn parses_a_snapshot_without_new_fields() {
+        let s = parse_snapshot(
+            r#"{"v":1,"ts":1,"cpu":{"name":"X","load":1.0},
+                "gpu":[{"name":"G","kind":"discrete","load":2.0}]}"#,
+        )
+        .expect("should parse");
+        assert!(s.cpu.as_ref().unwrap().core_temps.is_none());
+        assert!(s.gpu.as_ref().unwrap()[0].memory_load.is_none());
     }
 }

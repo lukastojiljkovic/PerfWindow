@@ -13,6 +13,8 @@
 
 pub mod effects;
 pub mod settings;
+pub mod update_banner;
+pub mod update_modal;
 
 use crate::app::{PerfApp, Status};
 use crate::config::ThemeId;
@@ -117,6 +119,14 @@ fn chip_row(ui: &mut egui::Ui, theme: &Theme, app: &mut PerfApp) {
     if chip(ui, theme, "\u{25d0} THEME", false).clicked() {
         let ctx = ui.ctx().clone();
         app.config.theme = next_theme(app.config.theme);
+        app.apply_config_change(&ctx);
+        app.config.save();
+    }
+
+    // CPU heat-map toggle: `▦` (U+25A6 squared crosshatch).
+    if chip(ui, theme, "\u{25A6}", app.config.cpu_heat_map).clicked() {
+        let ctx = ui.ctx().clone();
+        app.config.cpu_heat_map = !app.config.cpu_heat_map;
         app.apply_config_change(&ctx);
         app.config.save();
     }
@@ -264,16 +274,21 @@ pub fn card_grid(ui: &mut egui::Ui, app: &mut PerfApp) {
         return;
     }
 
-    // The grid is read-only; reborrow `app` immutably so the snapshot can be
-    // borrowed (rather than cloned) for the lifetime of the layout.
-    let app: &PerfApp = app;
-    let frame = egui::Frame::NONE.inner_margin(Margin::same(GRID_BODY_PADDING));
-    frame.show(ui, |ui| {
-        let Some(snap) = &app.latest else {
+    // Clone the snapshot so the layout can hold a `&mut PerfApp` mutably to
+    // write into `row_heights` without conflicting borrows. Snapshot is small
+    // (a handful of Vecs of primitives); a clone per ~17 ms of UI frame is
+    // negligible compared to the Vec allocations done by serde_json's parser
+    // upstream.
+    let snap = match &app.latest {
+        Some(s) => s.clone(),
+        None => {
             waiting_note(ui, &app.theme);
             return;
-        };
+        }
+    };
 
+    let frame = egui::Frame::NONE.inner_margin(Margin::same(GRID_BODY_PADDING));
+    frame.show(ui, |ui| {
         // Build the ordered list of cards to draw. Each variant carries only an
         // index; the panel data is read back out of `snap` / `app` at paint time.
         let mut cards: Vec<Card> = Vec::new();
@@ -288,18 +303,53 @@ pub fn card_grid(ui: &mut egui::Ui, app: &mut PerfApp) {
         if snap.ram.is_some() {
             cards.push(Card::Ram);
         }
+        cards.push(Card::Network);
         if snap.storage.is_some() {
             cards.push(Card::Storage);
         }
-        cards.push(Card::Sensors);
-        cards.push(Card::Network);
+        if panels::sensors::has_content(
+            snap.board.as_ref(),
+            snap.fans.as_deref().unwrap_or(&[]),
+            snap.voltages.as_deref().unwrap_or(&[]),
+        ) {
+            cards.push(Card::Sensors);
+        }
 
-        let avail = ui.available_width();
-        let cols = column_count(avail);
-        let col_width = ((avail - GRID_GAP * (cols as f32 - 1.0)) / cols as f32).max(1.0);
+        let avail_w = ui.available_width();
+        let cols = column_count(avail_w);
+        let col_width = ((avail_w - GRID_GAP * (cols as f32 - 1.0)) / cols as f32).max(1.0);
 
-        layout_cards(ui, app, snap, &cards, cols, col_width);
+        let spans = layout_spans(&cards, cols);
+        layout_cards(ui, app, &snap, &cards, &spans, cols, col_width);
     });
+}
+
+/// Fixed outer height of the "summary" cards in the top row (CPU, GPU, RAM,
+/// Network). Tuned so GPU's five stat rows + legend + sparkline fill the
+/// card with no chin, and every other card in the row pads up to match.
+const ROW_1_CARD_HEIGHT: f32 = 275.0;
+/// Baseline for the Storage card (title row + column header + padding).
+const STORAGE_BASE_HEIGHT: f32 = 72.0;
+/// Per-disk row height inside the Storage card.
+const STORAGE_DISK_ROW_HEIGHT: f32 = 28.0;
+/// Fixed outer height of the Sensors card when populated. Wide enough for
+/// up to ~6 readouts in two columns.
+const SENSORS_CARD_HEIGHT: f32 = 210.0;
+
+impl Card {
+    /// Predicted outer card height for this card given the snapshot data.
+    /// Used by `layout_cards` to align every card in the same row to a
+    /// single max height, deterministically (one pass, no memoisation).
+    fn intrinsic_height(self, snap: &crate::ipc::Snapshot) -> f32 {
+        match self {
+            Card::Cpu | Card::Gpu(_) | Card::Ram | Card::Network => ROW_1_CARD_HEIGHT,
+            Card::Storage => {
+                let n = snap.storage.as_ref().map(|s| s.len()).unwrap_or(0) as f32;
+                STORAGE_BASE_HEIGHT + STORAGE_DISK_ROW_HEIGHT * n
+            }
+            Card::Sensors => SENSORS_CARD_HEIGHT,
+        }
+    }
 }
 
 /// One slot in the ordered card list. Indices refer into the snapshot's `gpu`
@@ -315,13 +365,30 @@ enum Card {
 }
 
 impl Card {
-    /// How many grid columns this card spans. Only Storage is double-width.
-    fn span(self) -> usize {
+    /// Base span for this card before context-sensitive adjustments
+    /// (see `layout_spans`).
+    fn base_span(self) -> usize {
         match self {
             Card::Storage => 2,
             _ => 1,
         }
     }
+}
+
+/// Compute the column span for each card given the column budget. Storage
+/// expands to fill the row when nothing else follows it — typically when
+/// Sensors is filtered out on a laptop.
+fn layout_spans(cards: &[Card], cols: usize) -> Vec<usize> {
+    let mut spans: Vec<usize> = cards.iter().map(|c| c.base_span().min(cols)).collect();
+    for i in 0..spans.len() {
+        if matches!(cards[i], Card::Storage) {
+            let following_spans: usize = spans[i + 1..].iter().sum();
+            if following_spans == 0 {
+                spans[i] = cols;
+            }
+        }
+    }
+    spans
 }
 
 /// Choose a column count from the available grid width.
@@ -345,6 +412,7 @@ fn layout_cards(
     app: &PerfApp,
     snap: &crate::ipc::Snapshot,
     cards: &[Card],
+    spans: &[usize],
     cols: usize,
     col_width: f32,
 ) {
@@ -353,29 +421,41 @@ fn layout_cards(
     let mut idx = 0;
     while idx < cards.len() {
         // Greedily fill one row, respecting card spans and the column budget.
-        let mut row: Vec<Card> = Vec::new();
+        let mut row_indices: Vec<usize> = Vec::new();
         let mut used = 0;
         while idx < cards.len() {
-            let span = cards[idx].span().min(cols);
+            let span = spans[idx];
             if used + span > cols {
                 break;
             }
             used += span;
-            row.push(cards[idx]);
+            row_indices.push(idx);
             idx += 1;
         }
 
+        // Row height = the tallest intrinsic among the cards in this row.
+        // One-pass computation from the static heights — deterministic, no
+        // feedback loop, no frame-to-frame drift.
+        let row_h = row_indices
+            .iter()
+            .map(|&i| cards[i].intrinsic_height(snap))
+            .fold(0.0_f32, f32::max);
+
         ui.horizontal_top(|ui| {
             ui.spacing_mut().item_spacing.x = GRID_GAP;
-            for card in &row {
-                let span = card.span().min(cols);
+            for &i in &row_indices {
+                let span = spans[i];
                 let width = col_width * span as f32 + GRID_GAP * (span as f32 - 1.0);
+                // Allocate sub-UI at the full row height so widgets inside
+                // (sparkline) see the true available_height and can grow to
+                // fill the card without leaving a chin at the bottom.
                 ui.allocate_ui_with_layout(
-                    Vec2::new(width, 0.0),
+                    Vec2::new(width, row_h),
                     Layout::top_down(Align::Min),
                     |ui| {
                         ui.set_width(width);
-                        paint_card(ui, app, snap, *card);
+                        ui.set_height(row_h);
+                        paint_card(ui, app, snap, cards[i], row_h);
                     },
                 );
             }
@@ -387,28 +467,42 @@ fn layout_cards(
 ///
 /// The panel functions wrap themselves in `panels::card`, so this calls them
 /// directly — wrapping again would double the frame.
-fn paint_card(ui: &mut egui::Ui, app: &PerfApp, snap: &crate::ipc::Snapshot, card: Card) {
+fn paint_card(
+    ui: &mut egui::Ui,
+    app: &PerfApp,
+    snap: &crate::ipc::Snapshot,
+    card: Card,
+    min_h: f32,
+) {
     let theme = &app.theme;
     let unit = app.config.unit;
     match card {
         Card::Cpu => {
             if let Some(cpu) = &snap.cpu {
-                panels::cpu::cpu_panel(ui, theme, cpu, app.history.cpu.as_ref(), unit);
+                panels::cpu::cpu_panel(
+                    ui,
+                    theme,
+                    cpu,
+                    app.history.cpu.as_ref(),
+                    unit,
+                    app.config.cpu_heat_map,
+                    min_h,
+                );
             }
         }
         Card::Gpu(i) => {
             if let Some(gpu) = snap.gpu.as_ref().and_then(|g| g.get(i)) {
-                panels::gpu::gpu_panel(ui, theme, gpu, app.history.gpus.get(i), unit);
+                panels::gpu::gpu_panel(ui, theme, gpu, app.history.gpus.get(i), unit, min_h);
             }
         }
         Card::Ram => {
             if let Some(ram) = &snap.ram {
-                panels::ram::ram_panel(ui, theme, ram, app.history.ram.as_ref());
+                panels::ram::ram_panel(ui, theme, ram, app.history.ram.as_ref(), min_h);
             }
         }
         Card::Storage => {
             if let Some(disks) = &snap.storage {
-                panels::storage::storage_panel(ui, theme, disks, unit);
+                panels::storage::storage_panel(ui, theme, disks, unit, min_h);
             }
         }
         Card::Sensors => {
@@ -419,10 +513,17 @@ fn paint_card(ui: &mut egui::Ui, app: &PerfApp, snap: &crate::ipc::Snapshot, car
                 snap.fans.as_deref().unwrap_or(&[]),
                 snap.voltages.as_deref().unwrap_or(&[]),
                 unit,
+                min_h,
             );
         }
         Card::Network => {
-            panels::network::network_panel(ui, theme, snap.net.as_ref());
+            panels::network::network_panel(
+                ui,
+                theme,
+                snap.net.as_ref(),
+                app.history.network.as_ref(),
+                min_h,
+            );
         }
     }
 }
@@ -469,7 +570,7 @@ pub fn error_overlay(ui: &mut egui::Ui, app: &mut PerfApp, ctx: &egui::Context) 
             Layout::top_down(Align::Center),
             |ui| {
                 ui.set_width(ERROR_CARD_WIDTH);
-                panels::card(ui, &theme, |ui| {
+                panels::card(ui, &theme, 0.0, |ui| {
                     // `hot` heading — the alarm line, in the display font.
                     ui.label(
                         RichText::new(letter_spaced("SENSOR FEED STOPPED"))

@@ -31,7 +31,16 @@ const EMPTY_NOTE_H: f32 = 22.0;
 /// inner padding and ~10 px of vertical spacing between stacked items. A 2 px
 /// `theme.accent` line is painted over the card's top edge, matching the
 /// mockup's `border-top: 2px solid var(--accent)`.
-pub fn card(ui: &mut egui::Ui, theme: &Theme, contents: impl FnOnce(&mut egui::Ui)) {
+///
+/// `min_h` is the desired outer card height; when intrinsic content is
+/// shorter the body is padded so all cards in a row come out the same height.
+/// Pass `0.0` for "no minimum".
+pub fn card(
+    ui: &mut egui::Ui,
+    theme: &Theme,
+    min_h: f32,
+    contents: impl FnOnce(&mut egui::Ui),
+) {
     let frame = Frame::NONE
         .fill(theme.panel)
         .stroke(Stroke::new(1.0, theme.border))
@@ -40,6 +49,16 @@ pub fn card(ui: &mut egui::Ui, theme: &Theme, contents: impl FnOnce(&mut egui::U
     let inner = frame.show(ui, |ui| {
         ui.spacing_mut().item_spacing.y = CARD_ITEM_SPACING;
         contents(ui);
+        // Pad the body so the outer card frame reaches `min_h`. The frame's
+        // inner_margin contributes `CARD_PADDING * 2` to the outer height;
+        // subtract it before comparing.
+        if min_h > 0.0 {
+            let body_target = (min_h - CARD_PADDING as f32 * 2.0).max(0.0);
+            let used = ui.min_rect().height();
+            if body_target > used {
+                ui.add_space(body_target - used);
+            }
+        }
     });
 
     // Paint the accent strip over the card's top edge. Drawn after the frame so
@@ -73,10 +92,11 @@ pub fn panel_title(ui: &mut egui::Ui, theme: &Theme, title: &str, sub: Option<&s
     });
 }
 
-/// Draw a panel's empty-state: one centred, dimmed line of `text`.
+/// Draw a panel's empty-state: one centred, dimmed line of `text`, wrapped
+/// to the card's available width.
 ///
-/// Used by panels that legitimately have nothing to show — a machine with no
-/// readable motherboard sensors, or no active network adapter. It fabricates
+/// Used by panels that legitimately have nothing to show (a machine with no
+/// readable motherboard sensors, or no active network adapter). It fabricates
 /// nothing and cannot panic.
 pub fn empty_note(ui: &mut egui::Ui, theme: &Theme, text: &str) {
     let (rect, _) = ui.allocate_exact_size(
@@ -88,7 +108,17 @@ pub fn empty_note(ui: &mut egui::Ui, theme: &Theme, text: &str) {
     }
     let painter = ui.painter_at(rect);
     let font = FontId::new(11.0, theme.font_data.egui());
-    let galley = painter.layout_no_wrap(text.to_owned(), font, theme.dim);
+    let mut job = egui::text::LayoutJob::single_section(
+        text.to_owned(),
+        egui::TextFormat {
+            font_id: font,
+            color: theme.dim,
+            ..Default::default()
+        },
+    );
+    job.wrap.max_width = rect.width();
+    job.halign = egui::Align::Center;
+    let galley = painter.layout_job(job);
     painter.galley(
         Pos2::new(
             rect.center().x - galley.size().x / 2.0,

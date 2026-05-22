@@ -41,5 +41,5 @@ public class SnapshotBuilderTests
 
     /// <summary>A GpuInfo with only the name and kind these tests care about.</summary>
     private static GpuInfo Gpu(string name, string kind)
-        => new(name, kind, null, null, null, null, null, null, null);
+        => new(name, kind, null, null, null, null, null, null, null, null);
 }

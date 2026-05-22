@@ -5,14 +5,18 @@ use crate::format::{format_temp, TempUnit};
 use crate::history::RingBuffer;
 use crate::ipc::CpuInfo;
 use crate::theme::Theme;
-use crate::widgets::bars::core_strip;
+use crate::widgets::bars::{core_grid, core_strip};
 use crate::widgets::gauge::donut;
 use crate::widgets::sparkline::sparkline;
 use crate::widgets::stat::stat_row;
 use crate::widgets::{temp_color, TempKind};
 
-/// Render the CPU card: title, a load donut beside temp/clock/power stats, a
-/// per-core load strip and a load-history sparkline.
+/// Render the CPU card: title, a load donut beside temp/clock/power stats,
+/// either a per-core load strip or a per-core heat-map (selected by
+/// `show_heat_map`), and a load-history sparkline.
+///
+/// `show_heat_map = false` is the default UI; `true` is opt-in via the
+/// `cpu_heat_map` config flag, toggled from the title-bar chip.
 ///
 /// Every absent (`None`) reading renders as `"—"`; nothing here can panic.
 pub fn cpu_panel(
@@ -21,8 +25,10 @@ pub fn cpu_panel(
     cpu: &CpuInfo,
     history: Option<&RingBuffer>,
     unit: TempUnit,
+    show_heat_map: bool,
+    min_h: f32,
 ) {
-    card(ui, theme, |ui| {
+    card(ui, theme, min_h, |ui| {
         panel_title(ui, theme, "CPU", Some(&cpu.name));
 
         // Load donut on the left, three stat rows on the right.
@@ -38,13 +44,22 @@ pub fn cpu_panel(
             });
         });
 
-        // Per-core load strip.
+        // Per-core display: strip (default) or heat-map (opt-in).
         let cores: Vec<f32> = cpu
             .cores
             .as_ref()
             .map(|c| c.iter().map(|&v| v as f32).collect())
             .unwrap_or_default();
-        core_strip(ui, theme, &cores);
+        if show_heat_map {
+            let temps: Vec<Option<f32>> = cpu
+                .core_temps
+                .as_ref()
+                .map(|ts| ts.iter().map(|t| t.map(|v| v as f32)).collect())
+                .unwrap_or_default();
+            core_grid(ui, theme, &cores, &temps, unit);
+        } else {
+            core_strip(ui, theme, &cores);
+        }
 
         // Load-history sparkline.
         let samples: Vec<f32> = history

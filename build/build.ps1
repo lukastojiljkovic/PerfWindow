@@ -13,6 +13,28 @@
 $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot -Parent
 
+# Parses the `version` field of [package] in dashboard/Cargo.toml. Errors if
+# the file is missing, the [package] section is missing, or the field cannot
+# be parsed — the build must not produce a version-less artifact.
+function Get-CargoVersion {
+    $manifest = Join-Path $root 'dashboard\Cargo.toml'
+    if (-not (Test-Path $manifest)) {
+        throw "Cargo.toml not found at $manifest"
+    }
+    $inPackage = $false
+    foreach ($line in Get-Content -LiteralPath $manifest) {
+        $trimmed = $line.Trim()
+        if ($trimmed -match '^\[(.+)\]$') {
+            $inPackage = ($matches[1] -eq 'package')
+            continue
+        }
+        if ($inPackage -and $trimmed -match '^\s*version\s*=\s*"([^"]+)"') {
+            return $matches[1]
+        }
+    }
+    throw "Could not find 'version' under [package] in $manifest"
+}
+
 # Locate the Inno Setup compiler: the common install folders first, then the
 # install location recorded in the Inno Setup uninstall registry key.
 function Find-Iscc {
@@ -41,8 +63,10 @@ function Find-Iscc {
     return $null
 }
 
-Write-Host '== Publishing sensord =='
-dotnet publish "$root\sensord\src" -c Release -r win-x64 --self-contained
+$appVersion = Get-CargoVersion
+Write-Host "== Publishing sensord (version $appVersion) =="
+dotnet publish "$root\sensord\src" -c Release -r win-x64 --self-contained `
+    -p:Version=$appVersion -p:AssemblyVersion=$appVersion -p:FileVersion=$appVersion
 if ($LASTEXITCODE -ne 0) { throw 'sensord publish failed' }
 
 Write-Host '== Building dashboard =='
@@ -63,7 +87,7 @@ $iscc = Find-Iscc
 if (-not $iscc) {
     throw 'Inno Setup compiler (ISCC.exe) not found. Install it with: winget install -e --id JRSoftware.InnoSetup'
 }
-& $iscc /Q "$root\build\PerfWindow.iss"
+& $iscc /Q "/DAppVersion=$appVersion" "$root\build\PerfWindow.iss"
 if ($LASTEXITCODE -ne 0) { throw 'installer compilation failed' }
 
 $setup = "$root\dist\PerfWindow-Setup.exe"

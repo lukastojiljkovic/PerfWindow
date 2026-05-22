@@ -9,7 +9,7 @@ public class SnapshotSerializationTests
     {
         var snap = new Snapshot(
             Version: 1, Timestamp: 1747645200,
-            Cpu: new CpuInfo("Test CPU", 34.2, new double[] { 38.1, 55.0 }, 58.0, 4400, 52.0),
+            Cpu: new CpuInfo("Test CPU", 34.2, new double[] { 38.1, 55.0 }, 58.0, 4400, 52.0, null),
             Gpu: null, Ram: null, Storage: null, Board: null,
             Fans: null, Voltages: null, Net: null);
 

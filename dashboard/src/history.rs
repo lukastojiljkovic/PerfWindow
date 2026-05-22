@@ -53,13 +53,54 @@ impl RingBuffer {
     }
 }
 
+impl Default for RingBuffer {
+    fn default() -> Self {
+        Self::new(HISTORY_CAPACITY)
+    }
+}
+
+/// Per-GPU sparkline history: one buffer for compute load, one for memory
+/// controller load.
+#[derive(Debug, Default)]
+pub struct GpuHistory {
+    pub load: RingBuffer,
+    pub memory_load: RingBuffer,
+}
+
+impl GpuHistory {
+    pub fn new(capacity: usize) -> Self {
+        Self {
+            load: RingBuffer::new(capacity),
+            memory_load: RingBuffer::new(capacity),
+        }
+    }
+}
+
+/// Network throughput history: one buffer for download, one for upload, both
+/// in bytes per second.
+#[derive(Debug, Default)]
+pub struct NetThroughputHistory {
+    pub down: RingBuffer,
+    pub up: RingBuffer,
+}
+
+impl NetThroughputHistory {
+    pub fn new(capacity: usize) -> Self {
+        Self {
+            down: RingBuffer::new(capacity),
+            up: RingBuffer::new(capacity),
+        }
+    }
+}
+
 /// Per-component sparkline history. GPU buffers are indexed by GPU position in
 /// the snapshot's `gpu` array.
 #[derive(Debug, Default)]
 pub struct History {
     pub cpu: Option<RingBuffer>,
     pub ram: Option<RingBuffer>,
-    pub gpus: Vec<RingBuffer>,
+    pub gpus: Vec<GpuHistory>,
+    pub network: Option<NetThroughputHistory>,
 }
 
 impl History {
@@ -75,12 +116,20 @@ impl History {
         if let Some(gpus) = &snap.gpu {
             if self.gpus.len() != gpus.len() {
                 self.gpus = (0..gpus.len())
-                    .map(|_| RingBuffer::new(HISTORY_CAPACITY))
+                    .map(|_| GpuHistory::new(HISTORY_CAPACITY))
                     .collect();
             }
             for (buf, gpu) in self.gpus.iter_mut().zip(gpus) {
-                buf.push(gpu.load.unwrap_or(0.0) as f32);
+                buf.load.push(gpu.load.unwrap_or(0.0) as f32);
+                buf.memory_load.push(gpu.memory_load.unwrap_or(0.0) as f32);
             }
+        }
+        if let Some(net) = &snap.net {
+            let buf = self
+                .network
+                .get_or_insert_with(|| NetThroughputHistory::new(HISTORY_CAPACITY));
+            buf.down.push(net.down_bps.unwrap_or(0.0) as f32);
+            buf.up.push(net.up_bps.unwrap_or(0.0) as f32);
         }
     }
 }
@@ -119,5 +168,71 @@ mod tests {
         let rb = RingBuffer::new(4);
         assert_eq!(rb.len(), 0);
         assert_eq!(rb.iter_oldest_first().count(), 0);
+    }
+
+    #[test]
+    fn network_buffer_records_both_directions() {
+        let mut h = History::default();
+        let snap = crate::ipc::Snapshot {
+            v: 1,
+            ts: 0,
+            cpu: None,
+            gpu: None,
+            ram: None,
+            storage: None,
+            board: None,
+            fans: None,
+            voltages: None,
+            net: Some(crate::ipc::NetInfo {
+                adapter: "Ethernet".into(),
+                down_bps: Some(1_000_000.0),
+                up_bps: Some(250_000.0),
+                link_bps: Some(1_000_000_000),
+                down_pct: Some(0.1),
+                up_pct: Some(0.025),
+            }),
+        };
+        h.record(&snap);
+        h.record(&snap);
+        let net = h.network.as_ref().expect("network history exists");
+        let down: Vec<f32> = net.down.iter_oldest_first().collect();
+        let up: Vec<f32> = net.up.iter_oldest_first().collect();
+        assert_eq!(down, vec![1_000_000.0, 1_000_000.0]);
+        assert_eq!(up, vec![250_000.0, 250_000.0]);
+    }
+
+    #[test]
+    fn gpu_history_records_both_load_and_memory_load() {
+        let mut h = History::default();
+        let snap = crate::ipc::Snapshot {
+            v: 1,
+            ts: 0,
+            cpu: None,
+            gpu: Some(vec![crate::ipc::GpuInfo {
+                name: "G".into(),
+                kind: "discrete".into(),
+                load: Some(40.0),
+                temp: None,
+                vram_used_mb: None,
+                vram_total_mb: None,
+                clock_mhz: None,
+                fan_rpm: None,
+                power_w: None,
+                memory_load: Some(15.0),
+            }]),
+            ram: None,
+            storage: None,
+            board: None,
+            fans: None,
+            voltages: None,
+            net: None,
+        };
+        h.record(&snap);
+        h.record(&snap);
+        let gpu = &h.gpus[0];
+        let loads: Vec<f32> = gpu.load.iter_oldest_first().collect();
+        let mem: Vec<f32> = gpu.memory_load.iter_oldest_first().collect();
+        assert_eq!(loads, vec![40.0, 40.0]);
+        assert_eq!(mem, vec![15.0, 15.0]);
     }
 }

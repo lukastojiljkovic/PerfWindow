@@ -13,6 +13,12 @@ public static class SnapshotBuilder
             .Select(s => (double)(s.Value ?? 0f))
             .ToList();
 
+        var coreTemps = cpu.Sensors
+            .Where(s => s.SensorType == SensorType.Temperature && s.Name.StartsWith("CPU Core #"))
+            .OrderBy(s => s.Index)
+            .Select(s => (double?)s.Value)
+            .ToList();
+
         double? temp = cpu.Val(SensorType.Temperature, "Package")
                     ?? cpu.Val(SensorType.Temperature, "Core (Tctl")
                     ?? cpu.FirstVal(SensorType.Temperature);
@@ -29,7 +35,8 @@ public static class SnapshotBuilder
             Cores: cores.Count > 0 ? cores : null,
             Temp: temp,
             ClockMhz: clock,
-            PowerW: cpu.Val(SensorType.Power, "Package"));
+            PowerW: cpu.Val(SensorType.Power, "Package"),
+            CoreTemps: coreTemps.Count > 0 ? coreTemps : null);
     }
 
     public static List<GpuInfo> BuildGpus(IEnumerable<IHardware> hardware)
@@ -53,7 +60,8 @@ public static class SnapshotBuilder
                 VramTotalMb: hw.Val(SensorType.SmallData, "GPU Memory Total"),
                 ClockMhz: hw.Val(SensorType.Clock, "GPU Core"),
                 FanRpm: hw.Val(SensorType.Fan, "GPU"),
-                PowerW: hw.Val(SensorType.Power, "GPU")));
+                PowerW: hw.Val(SensorType.Power, "GPU"),
+                MemoryLoad: hw.Val(SensorType.Load, "GPU Memory Controller")));
         }
         return PreferDiscreteGpus(gpus);
     }

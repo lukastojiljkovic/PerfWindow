@@ -2,6 +2,11 @@ use crate::config::Config;
 use crate::history::History;
 use crate::ipc::{Sensord, Snapshot};
 use crate::theme::{self, system, Theme};
+use crate::update::{
+    check::{spawn_check, STARTUP_DELAY_MS},
+    new_shared, GitHubReleaseSource, SharedUpdateState, OWNER, REPO,
+};
+use std::sync::Arc;
 
 /// Whether the sensor feed is healthy.
 #[derive(PartialEq)]
@@ -9,6 +14,17 @@ pub enum Status {
     Running,
     SensordDown,
 }
+
+/// What a finished download produced.
+pub enum DownloadOutcome {
+    /// The installer was downloaded successfully and is at `path`. The UI
+    /// thread launches it and sets `want_quit`.
+    Ready(std::path::PathBuf),
+    /// The download failed; the modal transitions to its Failed state.
+    Failed(String),
+}
+
+pub type SharedDownloadOutcome = std::sync::Arc<std::sync::Mutex<Option<DownloadOutcome>>>;
 
 /// The PerfWindow application.
 pub struct PerfApp {
@@ -19,6 +35,15 @@ pub struct PerfApp {
     pub latest: Option<Snapshot>,
     pub status: Status,
     pub settings_open: bool,
+    pub update_state: SharedUpdateState,
+    pub update_banner_dismissed: bool,
+    pub update_modal_open: bool,
+    pub update_modal_phase: crate::ui::update_modal::ModalPhase,
+    pub update_download_cancel: Arc<std::sync::atomic::AtomicBool>,
+    pub update_download_progress: crate::update::download::SharedProgress,
+    pub update_download_outcome: SharedDownloadOutcome,
+    pub want_quit: bool,
+    update_source: Arc<GitHubReleaseSource>,
     os_is_light: bool,
 }
 
@@ -41,6 +66,19 @@ impl PerfApp {
             Status::SensordDown
         };
 
+        let update_state = new_shared();
+        let update_source = Arc::new(GitHubReleaseSource::new(OWNER, REPO));
+
+        if config.check_updates_on_startup {
+            let ctx = cc.egui_ctx.clone();
+            let source = Arc::clone(&update_source);
+            let state = Arc::clone(&update_state);
+            std::thread::spawn(move || {
+                std::thread::sleep(std::time::Duration::from_millis(STARTUP_DELAY_MS));
+                spawn_check(source, state, false, move || ctx.request_repaint());
+            });
+        }
+
         let mut app = Self {
             config,
             theme,
@@ -49,6 +87,17 @@ impl PerfApp {
             latest: None,
             status,
             settings_open: false,
+            update_state,
+            update_banner_dismissed: false,
+            update_modal_open: false,
+            update_modal_phase: crate::ui::update_modal::ModalPhase::default(),
+            update_download_cancel: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            update_download_progress: Arc::new(std::sync::Mutex::new(
+                crate::update::download::DownloadProgress::default(),
+            )),
+            update_download_outcome: Arc::new(std::sync::Mutex::new(None)),
+            want_quit: false,
+            update_source,
             os_is_light,
         };
         if let Some(s) = &mut app.sensord {
@@ -57,14 +106,48 @@ impl PerfApp {
         app
     }
 
+    /// Fire a manual update check, ignoring the cache TTL. Called by the
+    /// Settings → Updates section's "Check for updates now" button.
+    pub fn manual_update_check(&self, ctx: &egui::Context) {
+        let source = Arc::clone(&self.update_source);
+        let state = Arc::clone(&self.update_state);
+        let ctx = ctx.clone();
+        spawn_check(source, state, true, move || ctx.request_repaint());
+    }
+
+    /// Apply any download outcome the background thread has left for us.
+    fn poll_download_outcome(&mut self) {
+        let outcome = self
+            .update_download_outcome
+            .lock()
+            .ok()
+            .and_then(|mut g| g.take());
+        let Some(outcome) = outcome else { return };
+        match outcome {
+            DownloadOutcome::Ready(path) => match crate::update::install::launch(&path) {
+                Ok(()) => self.want_quit = true,
+                Err(e) => {
+                    self.update_modal_phase = crate::ui::update_modal::ModalPhase::Failed {
+                        message: format!("could not launch installer: {e}"),
+                    };
+                }
+            },
+            DownloadOutcome::Failed(message) => {
+                self.update_modal_phase =
+                    crate::ui::update_modal::ModalPhase::Failed { message };
+            }
+        }
+    }
+
     /// Restart `sensord` after it has died, re-arming the live feed.
     ///
     /// The old [`Sensord`] is dropped *first* (`self.sensord = None`): its
-    /// [`Drop`] kills the child, joins the reader and removes the temp exe.
-    /// This ordering is mandatory — [`Sensord::spawn`] re-extracts the embedded
-    /// executable to `%TEMP%\PerfWindow-sensord-{pid}.exe`, the *same* path the
-    /// old child still occupies, and Windows refuses to overwrite a running
-    /// `.exe`. Only once the old process is gone do we spawn the replacement.
+    /// [`Drop`] closes stdin so the child exits cleanly, then joins the reader
+    /// thread. Only once the old child has exited is the replacement spawned —
+    /// the new [`Sensord::spawn`] simply launches the sibling `sensord.exe`
+    /// next to `PerfWindow.exe` (located by `ipc::process::sensord_path`), so
+    /// no file is rewritten and the strict ordering is for resource cleanup
+    /// rather than file contention.
     ///
     /// `history` is deliberately kept, so the sparklines carry on uninterrupted
     /// across the gap. `latest` is cleared (its readings are now stale) and the
@@ -72,8 +155,9 @@ impl PerfApp {
     /// as [`Status::Running`] only if the respawn succeeded; a failed spawn is
     /// logged and leaves it [`Status::SensordDown`].
     pub fn respawn_sensord(&mut self, ctx: &egui::Context) {
-        // Drop the old child *before* spawning: its `Drop` removes the temp
-        // exe that `Sensord::spawn` is about to rewrite (see doc comment).
+        // Drop the old child *before* spawning: its `Drop` waits for the
+        // existing reader thread to finish before we hand a fresh stdout
+        // pipe to the replacement.
         self.sensord = None;
 
         let repaint_ctx = ctx.clone();
@@ -129,6 +213,7 @@ impl eframe::App for PerfApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
         self.ingest();
+        self.poll_download_outcome();
 
         // Title bar on top, footer on the bottom, the card grid filling the
         // scrollable centre. Panels are nested with `show_inside` (we render
@@ -141,6 +226,13 @@ impl eframe::App for PerfApp {
             .show_inside(ui, |ui| {
                 crate::ui::title_bar(ui, self);
             });
+        if crate::ui::update_banner::is_visible(self) {
+            egui::Panel::top("pw_update_banner")
+                .frame(egui::Frame::NONE)
+                .show_inside(ui, |ui| {
+                    crate::ui::update_banner::update_banner(ui, self);
+                });
+        }
         egui::Panel::bottom("pw_footer")
             .frame(egui::Frame::NONE)
             .show_inside(ui, |ui| {
@@ -151,8 +243,11 @@ impl eframe::App for PerfApp {
             .show_inside(ui, |ui| {
                 // The faint grid sits on the body background, behind the cards.
                 crate::ui::effects::paint_grid(ui, &self.theme);
+                // `auto_shrink = [false, true]`: keep the full available
+                // width, but shrink vertically to whatever the cards take —
+                // no blank scrollable area below the grid.
                 egui::ScrollArea::vertical()
-                    .auto_shrink([false, false])
+                    .auto_shrink([false, true])
                     .show(ui, |ui| {
                         crate::ui::card_grid(ui, self);
                     });
@@ -161,6 +256,7 @@ impl eframe::App for PerfApp {
         // The settings modal floats above the panels; it is a free-floating
         // `egui::Window` and so takes the `Context`, not a nested `Ui`.
         crate::ui::settings::settings_modal(&ctx, self);
+        crate::ui::update_modal::update_modal(&ctx, self);
 
         // The scanline + vignette overlay paints last so it sits on top of
         // every panel and the modal. (The grid is drawn earlier, inside the
@@ -173,5 +269,9 @@ impl eframe::App for PerfApp {
         ctx.request_repaint_after(std::time::Duration::from_millis(
             self.config.refresh.as_millis() as u64 + 500,
         ));
+
+        if self.want_quit {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+        }
     }
 }

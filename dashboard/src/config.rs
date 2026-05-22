@@ -54,6 +54,18 @@ pub struct Config {
     pub follow_windows: bool,
     pub unit: TempUnit,
     pub refresh: RefreshRate,
+    #[serde(default = "default_check_updates")]
+    pub check_updates_on_startup: bool,
+    #[serde(default = "default_cpu_heat_map")]
+    pub cpu_heat_map: bool,
+}
+
+fn default_check_updates() -> bool {
+    true
+}
+
+fn default_cpu_heat_map() -> bool {
+    false
 }
 
 impl Default for Config {
@@ -63,6 +75,8 @@ impl Default for Config {
             follow_windows: false,
             unit: TempUnit::Celsius,
             refresh: RefreshRate::S1,
+            check_updates_on_startup: true,
+            cpu_heat_map: false,
         }
     }
 }
@@ -117,6 +131,8 @@ mod tests {
             follow_windows: true,
             unit: TempUnit::Fahrenheit,
             refresh: RefreshRate::S2,
+            check_updates_on_startup: true,
+            cpu_heat_map: false,
         };
         let parsed = Config::from_toml_str(&c.to_toml_string());
         assert_eq!(parsed.theme, ThemeId::Amber);
@@ -137,5 +153,33 @@ mod tests {
         assert_eq!(RefreshRate::Ms500.as_millis(), 500);
         assert_eq!(RefreshRate::S1.as_millis(), 1000);
         assert_eq!(RefreshRate::S5.as_millis(), 5000);
+    }
+
+    #[test]
+    fn check_updates_defaults_to_true_when_missing() {
+        let parsed = Config::from_toml_str("");
+        assert!(parsed.check_updates_on_startup);
+    }
+
+    #[test]
+    fn check_updates_round_trips_when_false() {
+        let mut c = Config::default();
+        c.check_updates_on_startup = false;
+        let parsed = Config::from_toml_str(&c.to_toml_string());
+        assert!(!parsed.check_updates_on_startup);
+    }
+
+    #[test]
+    fn cpu_heat_map_defaults_to_false_when_missing() {
+        let parsed = Config::from_toml_str("");
+        assert!(!parsed.cpu_heat_map);
+    }
+
+    #[test]
+    fn cpu_heat_map_round_trips_when_true() {
+        let mut c = Config::default();
+        c.cpu_heat_map = true;
+        let parsed = Config::from_toml_str(&c.to_toml_string());
+        assert!(parsed.cpu_heat_map);
     }
 }
