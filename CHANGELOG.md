@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ## [Unreleased]
 
+## [0.2.1] — 2026-05-22
+
+### Removed
+- The `FAN` stat row in the GPU panel. The underlying sensor field
+  (`GpuInfo.fan_rpm`) is unchanged — it stays in the snapshot schema —
+  but LibreHardwareMonitor does not expose a GPU fan reading on the
+  hardware the project targets, so the row was permanently empty.
+
+### Changed
+- Top-row card height tightened by one stat-row worth now that the GPU
+  card has four rows instead of five.
+
 ## [0.2.0] — 2026-05-22
 
 ### Added
@@ -56,6 +68,7 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   matching uninstaller that removes the exclusions, the `R0sensord` driver
   service, the install directory and the per-user data directory.
 
-[Unreleased]: https://github.com/lukastojiljkovic/PerfWindow/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/lukastojiljkovic/PerfWindow/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/lukastojiljkovic/PerfWindow/releases/tag/v0.2.1
 [0.2.0]: https://github.com/lukastojiljkovic/PerfWindow/releases/tag/v0.2.0
 [0.1.0]: https://github.com/lukastojiljkovic/PerfWindow/releases/tag/v0.1.0

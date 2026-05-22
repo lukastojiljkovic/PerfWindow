@@ -47,7 +47,6 @@ pub fn gpu_panel(
                 };
                 stat_row(ui, theme, "VRAM", &vram, None);
 
-                stat_row(ui, theme, "FAN", &format_fan(gpu.fan_rpm), None);
                 stat_row(ui, theme, "POWER", &format_power(gpu.power_w), None);
             });
         });
@@ -108,14 +107,6 @@ fn dual_legend(ui: &mut egui::Ui, theme: &Theme) {
                 .color(theme.dim),
         );
     });
-}
-
-/// Fan speed rendered as `"1480 rpm"`, or `"—"` when absent.
-fn format_fan(fan_rpm: Option<f64>) -> String {
-    match fan_rpm {
-        Some(rpm) => format!("{} rpm", rpm.round() as i64),
-        None => "—".to_string(),
-    }
 }
 
 /// Power draw rendered as whole watts, `"16 W"`, or `"—"` when absent.
