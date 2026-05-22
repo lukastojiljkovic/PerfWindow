@@ -54,6 +54,12 @@ pub struct Config {
     pub follow_windows: bool,
     pub unit: TempUnit,
     pub refresh: RefreshRate,
+    #[serde(default = "default_check_updates")]
+    pub check_updates_on_startup: bool,
+}
+
+fn default_check_updates() -> bool {
+    true
 }
 
 impl Default for Config {
@@ -63,6 +69,7 @@ impl Default for Config {
             follow_windows: false,
             unit: TempUnit::Celsius,
             refresh: RefreshRate::S1,
+            check_updates_on_startup: true,
         }
     }
 }
@@ -117,6 +124,7 @@ mod tests {
             follow_windows: true,
             unit: TempUnit::Fahrenheit,
             refresh: RefreshRate::S2,
+            check_updates_on_startup: true,
         };
         let parsed = Config::from_toml_str(&c.to_toml_string());
         assert_eq!(parsed.theme, ThemeId::Amber);
@@ -137,5 +145,19 @@ mod tests {
         assert_eq!(RefreshRate::Ms500.as_millis(), 500);
         assert_eq!(RefreshRate::S1.as_millis(), 1000);
         assert_eq!(RefreshRate::S5.as_millis(), 5000);
+    }
+
+    #[test]
+    fn check_updates_defaults_to_true_when_missing() {
+        let parsed = Config::from_toml_str("");
+        assert!(parsed.check_updates_on_startup);
+    }
+
+    #[test]
+    fn check_updates_round_trips_when_false() {
+        let mut c = Config::default();
+        c.check_updates_on_startup = false;
+        let parsed = Config::from_toml_str(&c.to_toml_string());
+        assert!(!parsed.check_updates_on_startup);
     }
 }
