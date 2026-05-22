@@ -53,13 +53,36 @@ impl RingBuffer {
     }
 }
 
+impl Default for RingBuffer {
+    fn default() -> Self {
+        Self::new(HISTORY_CAPACITY)
+    }
+}
+
+/// Per-GPU sparkline history: one buffer for compute load, one for memory
+/// controller load.
+#[derive(Debug, Default)]
+pub struct GpuHistory {
+    pub load: RingBuffer,
+    pub memory_load: RingBuffer,
+}
+
+impl GpuHistory {
+    pub fn new(capacity: usize) -> Self {
+        Self {
+            load: RingBuffer::new(capacity),
+            memory_load: RingBuffer::new(capacity),
+        }
+    }
+}
+
 /// Per-component sparkline history. GPU buffers are indexed by GPU position in
 /// the snapshot's `gpu` array.
 #[derive(Debug, Default)]
 pub struct History {
     pub cpu: Option<RingBuffer>,
     pub ram: Option<RingBuffer>,
-    pub gpus: Vec<RingBuffer>,
+    pub gpus: Vec<GpuHistory>,
 }
 
 impl History {
@@ -75,11 +98,12 @@ impl History {
         if let Some(gpus) = &snap.gpu {
             if self.gpus.len() != gpus.len() {
                 self.gpus = (0..gpus.len())
-                    .map(|_| RingBuffer::new(HISTORY_CAPACITY))
+                    .map(|_| GpuHistory::new(HISTORY_CAPACITY))
                     .collect();
             }
             for (buf, gpu) in self.gpus.iter_mut().zip(gpus) {
-                buf.push(gpu.load.unwrap_or(0.0) as f32);
+                buf.load.push(gpu.load.unwrap_or(0.0) as f32);
+                buf.memory_load.push(gpu.memory_load.unwrap_or(0.0) as f32);
             }
         }
     }
@@ -119,5 +143,40 @@ mod tests {
         let rb = RingBuffer::new(4);
         assert_eq!(rb.len(), 0);
         assert_eq!(rb.iter_oldest_first().count(), 0);
+    }
+
+    #[test]
+    fn gpu_history_records_both_load_and_memory_load() {
+        let mut h = History::default();
+        let snap = crate::ipc::Snapshot {
+            v: 1,
+            ts: 0,
+            cpu: None,
+            gpu: Some(vec![crate::ipc::GpuInfo {
+                name: "G".into(),
+                kind: "discrete".into(),
+                load: Some(40.0),
+                temp: None,
+                vram_used_mb: None,
+                vram_total_mb: None,
+                clock_mhz: None,
+                fan_rpm: None,
+                power_w: None,
+                memory_load: Some(15.0),
+            }]),
+            ram: None,
+            storage: None,
+            board: None,
+            fans: None,
+            voltages: None,
+            net: None,
+        };
+        h.record(&snap);
+        h.record(&snap);
+        let gpu = &h.gpus[0];
+        let loads: Vec<f32> = gpu.load.iter_oldest_first().collect();
+        let mem: Vec<f32> = gpu.memory_load.iter_oldest_first().collect();
+        assert_eq!(loads, vec![40.0, 40.0]);
+        assert_eq!(mem, vec![15.0, 15.0]);
     }
 }

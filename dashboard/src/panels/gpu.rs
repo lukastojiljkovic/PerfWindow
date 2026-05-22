@@ -2,7 +2,7 @@
 
 use super::{card, panel_title};
 use crate::format::{format_gb_pair, format_temp, TempUnit};
-use crate::history::RingBuffer;
+use crate::history::GpuHistory;
 use crate::ipc::GpuInfo;
 use crate::theme::Theme;
 use crate::widgets::gauge::donut;
@@ -22,7 +22,7 @@ pub fn gpu_panel(
     ui: &mut egui::Ui,
     theme: &Theme,
     gpu: &GpuInfo,
-    history: Option<&RingBuffer>,
+    history: Option<&GpuHistory>,
     unit: TempUnit,
 ) {
     let integrated = gpu.kind == "integrated";
@@ -53,7 +53,7 @@ pub fn gpu_panel(
 
         // Load-history sparkline (no per-core strip for GPUs).
         let samples: Vec<f32> = history
-            .map(|h| h.iter_oldest_first().collect())
+            .map(|h| h.load.iter_oldest_first().collect())
             .unwrap_or_default();
         sparkline(ui, theme, &samples, 100.0);
     });
