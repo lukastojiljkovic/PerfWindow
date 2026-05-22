@@ -316,62 +316,12 @@ pub fn card_grid(ui: &mut egui::Ui, app: &mut PerfApp) {
         }
 
         let avail_w = ui.available_width();
-        // Use the viewport-bound height captured before the ScrollArea (egui
-        // returns unbounded height inside a ScrollArea). Subtract the grid's
-        // own body padding which the inner Frame applied above this closure.
-        let avail_h = (app.grid_viewport_height - GRID_BODY_PADDING as f32 * 2.0).max(0.0);
         let cols = column_count(avail_w);
         let col_width = ((avail_w - GRID_GAP * (cols as f32 - 1.0)) / cols as f32).max(1.0);
 
         let spans = layout_spans(&cards, cols);
-
-        // Distribute any extra viewport height evenly across the rows so the
-        // grid fills the window instead of leaving an empty band at the
-        // bottom. Sparklines inside each card absorb the per-row stretch.
-        let num_rows = count_rows(&spans, cols);
-        let used_padding = num_rows.saturating_sub(1) as f32 * GRID_GAP;
-        let prev_total: f32 = app.row_heights.iter().take(num_rows).sum();
-        let extra = (avail_h - prev_total - used_padding).max(0.0);
-        let extra_per_row = if num_rows > 0 {
-            extra / num_rows as f32
-        } else {
-            0.0
-        };
-
-        layout_cards(
-            ui,
-            app,
-            &snap,
-            &cards,
-            &spans,
-            cols,
-            col_width,
-            extra_per_row,
-        );
+        layout_cards(ui, app, &snap, &cards, &spans, cols, col_width);
     });
-}
-
-/// Replay the row-packing logic to count rows ahead of layout. Used by
-/// `card_grid` to distribute the extra viewport height evenly.
-fn count_rows(spans: &[usize], cols: usize) -> usize {
-    let mut rows = 0;
-    let mut used = 0;
-    let mut idx = 0;
-    while idx < spans.len() {
-        let span = spans[idx];
-        if used + span > cols {
-            rows += 1;
-            used = 0;
-            continue;
-        }
-        used += span;
-        idx += 1;
-        if used == cols || idx == spans.len() {
-            rows += 1;
-            used = 0;
-        }
-    }
-    rows
 }
 
 /// One slot in the ordered card list. Indices refer into the snapshot's `gpu`
@@ -431,20 +381,16 @@ fn column_count(avail: f32) -> usize {
 /// that would not fit in the columns left on the current row starts a new row.
 fn layout_cards(
     ui: &mut egui::Ui,
-    app: &mut PerfApp,
+    app: &PerfApp,
     snap: &crate::ipc::Snapshot,
     cards: &[Card],
     spans: &[usize],
     cols: usize,
     col_width: f32,
-    extra_per_row: f32,
 ) {
     ui.spacing_mut().item_spacing = Vec2::splat(GRID_GAP);
 
     let mut idx = 0;
-    let mut row_idx = 0;
-    let mut next_row_heights: Vec<f32> = Vec::new();
-
     while idx < cards.len() {
         let mut row_indices: Vec<usize> = Vec::new();
         let mut used = 0;
@@ -458,36 +404,22 @@ fn layout_cards(
             idx += 1;
         }
 
-        // Stretch this row to the previous frame's max + the viewport's
-        // share of unused vertical space. The next-frame measurement
-        // includes the stretched height, so the stretch self-stabilises.
-        let prev_height = app.row_heights.get(row_idx).copied().unwrap_or(0.0);
-        let row_target_h = prev_height + extra_per_row;
-        let mut row_max_height: f32 = 0.0;
-
         ui.horizontal_top(|ui| {
             ui.spacing_mut().item_spacing.x = GRID_GAP;
             for &i in &row_indices {
                 let span = spans[i];
                 let width = col_width * span as f32 + GRID_GAP * (span as f32 - 1.0);
-                let cell = ui.allocate_ui_with_layout(
+                ui.allocate_ui_with_layout(
                     Vec2::new(width, 0.0),
                     Layout::top_down(Align::Min),
                     |ui| {
                         ui.set_width(width);
-                        ui.set_min_height(row_target_h);
                         paint_card(ui, app, snap, cards[i]);
                     },
                 );
-                row_max_height = row_max_height.max(cell.response.rect.height());
             }
         });
-
-        next_row_heights.push(row_max_height);
-        row_idx += 1;
     }
-
-    app.row_heights = next_row_heights;
 }
 
 /// Paint a single card by dispatching to its `panels::*` function.
