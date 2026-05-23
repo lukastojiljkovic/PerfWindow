@@ -113,6 +113,27 @@ begin
     Result := -1;
 end;
 
+{ Tell the user the runtime install failed, optionally hand them the
+  Microsoft download URL, and abort the installer. PerfWindow.exe will not
+  launch without the runtime, so shipping it to disk now would just reproduce
+  the "double-click does nothing" bug. }
+procedure HandleVcRedistFailure(ExitCode: Integer);
+var
+  ResultCode: Integer;
+  Response: Integer;
+begin
+  Response := MsgBox(
+    'Visual C++ Runtime installation failed (code ' + IntToStr(ExitCode) + ').' + #13#10 +
+    'PerfWindow cannot start without it.' + #13#10 + #13#10 +
+    'Open the Microsoft download page in your browser?',
+    mbError, MB_YESNO);
+  if Response = IDYES then
+    ShellExec('open',
+              'https://aka.ms/vs/17/release/vc_redist.x64.exe',
+              '', '', SW_SHOW, ewNoWait, ResultCode);
+  Abort;
+end;
+
 { Run a PowerShell command hidden and wait for it. Best-effort. }
 procedure RunPowerShell(const Command: String);
 var
