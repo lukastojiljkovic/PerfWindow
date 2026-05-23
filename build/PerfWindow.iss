@@ -48,6 +48,7 @@ Name: "desktopicon"; Description: "Create a &desktop shortcut"; GroupDescription
 Source: "..\dashboard\target\release\PerfWindow.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\dashboard\target\release\sensord.exe";    DestDir: "{app}"; Flags: ignoreversion
 Source: "..\LICENSE";                                 DestDir: "{app}"; Flags: ignoreversion
+Source: "vendor\vc_redist.x64.exe";                                     Flags: dontcopy
 
 [Icons]
 Name: "{group}\{#AppName}";           Filename: "{app}\PerfWindow.exe"
