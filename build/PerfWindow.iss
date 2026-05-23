@@ -48,6 +48,7 @@ Name: "desktopicon"; Description: "Create a &desktop shortcut"; GroupDescription
 Source: "..\dashboard\target\release\PerfWindow.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\dashboard\target\release\sensord.exe";    DestDir: "{app}"; Flags: ignoreversion
 Source: "..\LICENSE";                                 DestDir: "{app}"; Flags: ignoreversion
+Source: "vendor\vc_redist.x64.exe";                                     Flags: dontcopy
 
 [Icons]
 Name: "{group}\{#AppName}";           Filename: "{app}\PerfWindow.exe"
@@ -66,6 +67,9 @@ Type: filesandordirs; Name: "{userappdata}\{#AppName}"
 Type: filesandordirs; Name: "{localappdata}\{#AppName}"
 
 [Code]
+const
+  VC_REDIST_KEY = 'SOFTWARE\Microsoft\VisualStudio\14.0\VC\Runtimes\X64';
+
 var
   DefenderPage: TInputOptionWizardPage;
 
@@ -73,6 +77,80 @@ var
 function PsQuote(const S: String): String;
 begin
   Result := Chr(39) + S + Chr(39);
+end;
+
+{ True iff a 14.x (Visual C++ 2015-2022) x64 runtime is registered on this
+  machine. Reads the standard Microsoft-published location. ABI compatibility
+  is preserved across the entire 14.x line, so any 14.x install is sufficient
+  for binaries linked against vcruntime140.dll / msvcp140.dll. }
+function IsVcRedistInstalled: Boolean;
+var
+  Installed, Major: Cardinal;
+begin
+  Result := RegQueryDWordValue(HKEY_LOCAL_MACHINE, VC_REDIST_KEY, 'Installed', Installed)
+        and (Installed = 1)
+        and RegQueryDWordValue(HKEY_LOCAL_MACHINE, VC_REDIST_KEY, 'Major', Major)
+        and (Major >= 14);
+end;
+
+{ Drop the bundled vc_redist.x64.exe into the temp dir and return its full path. }
+function ExtractVcRedist: String;
+begin
+  ExtractTemporaryFile('vc_redist.x64.exe');
+  Result := ExpandConstant('{tmp}\vc_redist.x64.exe');
+end;
+
+{ Run vc_redist.x64.exe with Microsoft's silent-install switches and return
+  its exit code. Returns -1 if the binary could not be launched at all. }
+function InstallVcRedistSilent(const Path: String): Integer;
+var
+  ResultCode: Integer;
+begin
+  if Exec(Path, '/install /quiet /norestart', '',
+          SW_HIDE, ewWaitUntilTerminated, ResultCode) then
+    Result := ResultCode
+  else
+    Result := -1;
+end;
+
+{ Tell the user the runtime install failed, optionally hand them the
+  Microsoft download URL, and abort the installer. PerfWindow.exe will not
+  launch without the runtime, so shipping it to disk now would just reproduce
+  the "double-click does nothing" bug. }
+procedure HandleVcRedistFailure(ExitCode: Integer);
+var
+  ResultCode: Integer;
+  Response: Integer;
+begin
+  Response := MsgBox(
+    'Visual C++ Runtime installation failed (code ' + IntToStr(ExitCode) + ').' + #13#10 +
+    'PerfWindow cannot start without it.' + #13#10 + #13#10 +
+    'Open the Microsoft download page in your browser?',
+    mbError, MB_YESNO);
+  if Response = IDYES then
+    ShellExec('open',
+              'https://aka.ms/vs/17/release/vc_redist.x64.exe',
+              '', '', SW_SHOW, ewNoWait, ResultCode);
+  Abort;
+end;
+
+{ End-to-end prereq sequence: skip if already installed; otherwise extract
+  the bundled redistributable, surface a status message, run it silently,
+  and route any unexpected exit code through HandleVcRedistFailure (which
+  aborts the installer). Treats vcredist codes 0, 1638 (newer already
+  installed) and 3010 (success, reboot pending) as success. }
+procedure EnsureVcRedist;
+var
+  ExitCode: Integer;
+  RedistPath: String;
+begin
+  if IsVcRedistInstalled then
+    Exit;
+  WizardForm.StatusLabel.Caption := 'Installing Visual C++ Runtime...';
+  RedistPath := ExtractVcRedist;
+  ExitCode := InstallVcRedistSilent(RedistPath);
+  if not ((ExitCode = 0) or (ExitCode = 1638) or (ExitCode = 3010)) then
+    HandleVcRedistFailure(ExitCode);
 end;
 
 { Run a PowerShell command hidden and wait for it. Best-effort. }
@@ -114,6 +192,8 @@ end;
 
 procedure CurStepChanged(CurStep: TSetupStep);
 begin
+  if CurStep = ssInstall then
+    EnsureVcRedist;
   if (CurStep = ssPostInstall) and DefenderPage.Values[0] then
     AddDefenderExclusions;
 end;

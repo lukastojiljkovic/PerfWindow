@@ -63,6 +63,36 @@ function Find-Iscc {
     return $null
 }
 
+# Downloads the official Microsoft Visual C++ 2015-2022 Redistributable into
+# build\vendor\ on demand. The file is bundled by PerfWindow.iss (dontcopy)
+# and installed by the installer on machines that do not have a 14.x runtime.
+# Re-runs are a no-op once the file is present.
+function Ensure-VcRedist {
+    $vendorDir = Join-Path $root 'build\vendor'
+    $vendorBin = Join-Path $vendorDir 'vc_redist.x64.exe'
+    if (Test-Path $vendorBin) { return $vendorBin }
+    if (-not (Test-Path $vendorDir)) {
+        New-Item -ItemType Directory -Path $vendorDir | Out-Null
+    }
+    Write-Host '== Downloading Visual C++ Redistributable =='
+    $previousProgress = $ProgressPreference
+    $ProgressPreference = 'SilentlyContinue'
+    try {
+        Invoke-WebRequest `
+            -Uri 'https://aka.ms/vs/17/release/vc_redist.x64.exe' `
+            -OutFile $vendorBin `
+            -UseBasicParsing
+    } catch {
+        # Don't leave a truncated file behind — Test-Path would treat it as a
+        # valid cache on the next run and Inno would bundle a broken binary.
+        Remove-Item $vendorBin -ErrorAction SilentlyContinue
+        throw
+    } finally {
+        $ProgressPreference = $previousProgress
+    }
+    return $vendorBin
+}
+
 $appVersion = Get-CargoVersion
 Write-Host "== Publishing sensord (version $appVersion) =="
 dotnet publish "$root\sensord\src" -c Release -r win-x64 --self-contained `
@@ -83,6 +113,7 @@ foreach ($f in @($perfExe, $sensordExe)) {
 }
 
 Write-Host '== Building installer =='
+Ensure-VcRedist | Out-Null
 $iscc = Find-Iscc
 if (-not $iscc) {
     throw 'Inno Setup compiler (ISCC.exe) not found. Install it with: winget install -e --id JRSoftware.InnoSetup'
