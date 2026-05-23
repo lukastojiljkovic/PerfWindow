@@ -298,6 +298,8 @@ mod tests {
             ThemeId::Slate,
             ThemeId::Phosphor,
             ThemeId::Light,
+            ThemeId::Synthwave,
+            ThemeId::Crimson,
         ] {
             let t = Theme::for_id(id);
             assert_eq!(t.id, id);
@@ -313,7 +315,13 @@ mod tests {
 
     #[test]
     fn dark_themes_enable_scanlines() {
-        for id in [ThemeId::Amber, ThemeId::Slate, ThemeId::Phosphor] {
+        for id in [
+            ThemeId::Amber,
+            ThemeId::Slate,
+            ThemeId::Phosphor,
+            ThemeId::Synthwave,
+            ThemeId::Crimson,
+        ] {
             assert!(Theme::for_id(id).scanline_opacity > 0.0);
         }
     }
