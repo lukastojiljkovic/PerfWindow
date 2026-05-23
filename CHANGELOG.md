@@ -15,7 +15,9 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   application could fail to launch on a machine without the runtime, with no
   visible error (the Windows PE loader exits the process before any of our
   code runs). The bundled redistributable is the official x64 build hosted by
-  Microsoft.
+  Microsoft. If the silent install ever fails, the installer surfaces an
+  error dialog offering to open the Microsoft download page in the browser
+  and aborts rather than shipping a binary that cannot start.
 
 ## [0.2.1] — 2026-05-22
 
