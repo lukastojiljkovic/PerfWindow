@@ -134,6 +134,25 @@ begin
   Abort;
 end;
 
+{ End-to-end prereq sequence: skip if already installed; otherwise extract
+  the bundled redistributable, surface a status message, run it silently,
+  and route any unexpected exit code through HandleVcRedistFailure (which
+  aborts the installer). Treats vcredist codes 0, 1638 (newer already
+  installed) and 3010 (success, reboot pending) as success. }
+procedure EnsureVcRedist;
+var
+  ExitCode: Integer;
+  RedistPath: String;
+begin
+  if IsVcRedistInstalled then
+    Exit;
+  WizardForm.StatusLabel.Caption := 'Installing Visual C++ Runtime...';
+  RedistPath := ExtractVcRedist;
+  ExitCode := InstallVcRedistSilent(RedistPath);
+  if not ((ExitCode = 0) or (ExitCode = 1638) or (ExitCode = 3010)) then
+    HandleVcRedistFailure(ExitCode);
+end;
+
 { Run a PowerShell command hidden and wait for it. Best-effort. }
 procedure RunPowerShell(const Command: String);
 var
@@ -173,6 +192,8 @@ end;
 
 procedure CurStepChanged(CurStep: TSetupStep);
 begin
+  if CurStep = ssInstall then
+    EnsureVcRedist;
   if (CurStep = ssPostInstall) and DefenderPage.Values[0] then
     AddDefenderExclusions;
 end;
