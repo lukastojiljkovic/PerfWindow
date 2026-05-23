@@ -638,12 +638,14 @@ fn respawn_button(ui: &mut egui::Ui, theme: &Theme) -> egui::Response {
     response
 }
 
-/// Advance a theme through the fixed four-theme cycle.
+/// Advance a theme through the fixed cycle.
 fn next_theme(id: ThemeId) -> ThemeId {
     match id {
         ThemeId::Amber => ThemeId::Slate,
         ThemeId::Slate => ThemeId::Phosphor,
         ThemeId::Phosphor => ThemeId::Light,
-        ThemeId::Light => ThemeId::Amber,
+        ThemeId::Light => ThemeId::Synthwave,
+        ThemeId::Synthwave => ThemeId::Crimson,
+        ThemeId::Crimson => ThemeId::Amber,
     }
 }
