@@ -264,13 +264,15 @@ fn theme_section(ui: &mut egui::Ui, theme: &Theme, app: &PerfApp, change: &mut O
     });
 }
 
-/// The four themes offered, in mockup card order: Light, Amber, Slate,
-/// Phosphor — each with the short tag shown under its name.
-const THEME_CARDS: [(ThemeId, &str); 4] = [
-    (ThemeId::Light, "LIGHT"),
-    (ThemeId::Amber, "DARK"),
-    (ThemeId::Slate, "DARK"),
-    (ThemeId::Phosphor, "DARK"),
+/// The six themes offered, in picker order: Light, Amber, Slate, Phosphor,
+/// Synthwave, Crimson — each with the short tag shown under its name.
+const THEME_CARDS: [(ThemeId, &str); 6] = [
+    (ThemeId::Light,     "LIGHT"),
+    (ThemeId::Amber,     "DARK"),
+    (ThemeId::Slate,     "DARK"),
+    (ThemeId::Phosphor,  "DARK"),
+    (ThemeId::Synthwave, "DARK"),
+    (ThemeId::Crimson,   "DARK"),
 ];
 
 /// Draw the 4-column theme-card grid. `selected` is the currently configured
