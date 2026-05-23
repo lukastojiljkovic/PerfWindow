@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ## [Unreleased]
 
+## [0.2.3] — 2026-05-24
+
+### Added
+- Two new dark themes: **Synthwave Neon** (electric magenta-purple on
+  deep purple-black, ChakraPetch + SpaceMono fonts) and **Crimson Terminal**
+  (deep crimson on warm red-black, PlexMonoBold + PlexMono fonts). Selectable
+  from Settings → Theme alongside the existing four themes.
+
+### Changed
+- The Settings theme picker now lays out cards as 3 columns × 2 rows instead
+  of 4 × 1, to accommodate the additional themes without shrinking each card.
+
 ## [0.2.2] — 2026-05-23
 
 ### Fixed
@@ -80,7 +92,8 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   matching uninstaller that removes the exclusions, the `R0sensord` driver
   service, the install directory and the per-user data directory.
 
-[Unreleased]: https://github.com/lukastojiljkovic/PerfWindow/compare/v0.2.2...HEAD
+[Unreleased]: https://github.com/lukastojiljkovic/PerfWindow/compare/v0.2.3...HEAD
+[0.2.3]: https://github.com/lukastojiljkovic/PerfWindow/releases/tag/v0.2.3
 [0.2.2]: https://github.com/lukastojiljkovic/PerfWindow/releases/tag/v0.2.2
 [0.2.1]: https://github.com/lukastojiljkovic/PerfWindow/releases/tag/v0.2.1
 [0.2.0]: https://github.com/lukastojiljkovic/PerfWindow/releases/tag/v0.2.0
