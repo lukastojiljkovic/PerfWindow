@@ -28,5 +28,5 @@ Thumbs.db
 *.user
 *.swp
 
-# Build-time vendored binaries (downloaded by build.ps1 on demand).
-build/vendor/
+# Build-time vendored binaries (downloaded by build.ps1 on demand)
+/build/vendor/
