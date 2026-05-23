@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ## [Unreleased]
 
+## [0.2.2] — 2026-05-23
+
+### Fixed
+- The installer now detects the Microsoft Visual C++ 2015-2022 Redistributable
+  on the target machine and installs it silently if missing. Previously the
+  application could fail to launch on a machine without the runtime, with no
+  visible error (the Windows PE loader exits the process before any of our
+  code runs). The bundled redistributable is the official x64 build hosted by
+  Microsoft.
+
 ## [0.2.1] — 2026-05-22
 
 ### Removed
@@ -68,7 +78,8 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   matching uninstaller that removes the exclusions, the `R0sensord` driver
   service, the install directory and the per-user data directory.
 
-[Unreleased]: https://github.com/lukastojiljkovic/PerfWindow/compare/v0.2.1...HEAD
+[Unreleased]: https://github.com/lukastojiljkovic/PerfWindow/compare/v0.2.2...HEAD
+[0.2.2]: https://github.com/lukastojiljkovic/PerfWindow/releases/tag/v0.2.2
 [0.2.1]: https://github.com/lukastojiljkovic/PerfWindow/releases/tag/v0.2.1
 [0.2.0]: https://github.com/lukastojiljkovic/PerfWindow/releases/tag/v0.2.0
 [0.1.0]: https://github.com/lukastojiljkovic/PerfWindow/releases/tag/v0.1.0
