@@ -67,6 +67,9 @@ Type: filesandordirs; Name: "{userappdata}\{#AppName}"
 Type: filesandordirs; Name: "{localappdata}\{#AppName}"
 
 [Code]
+const
+  VC_REDIST_KEY = 'SOFTWARE\Microsoft\VisualStudio\14.0\VC\Runtimes\X64';
+
 var
   DefenderPage: TInputOptionWizardPage;
 
@@ -74,6 +77,20 @@ var
 function PsQuote(const S: String): String;
 begin
   Result := Chr(39) + S + Chr(39);
+end;
+
+{ True iff a 14.x (Visual C++ 2015-2022) x64 runtime is registered on this
+  machine. Reads the standard Microsoft-published location. ABI compatibility
+  is preserved across the entire 14.x line, so any 14.x install is sufficient
+  for binaries linked against vcruntime140.dll / msvcp140.dll. }
+function IsVcRedistInstalled(): Boolean;
+var
+  Installed, Major: Cardinal;
+begin
+  Result := RegQueryDWordValue(HKEY_LOCAL_MACHINE, VC_REDIST_KEY, 'Installed', Installed)
+        and (Installed = 1)
+        and RegQueryDWordValue(HKEY_LOCAL_MACHINE, VC_REDIST_KEY, 'Major', Major)
+        and (Major >= 14);
 end;
 
 { Run a PowerShell command hidden and wait for it. Best-effort. }
