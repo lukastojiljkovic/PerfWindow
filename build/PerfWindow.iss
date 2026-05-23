@@ -83,7 +83,7 @@ end;
   machine. Reads the standard Microsoft-published location. ABI compatibility
   is preserved across the entire 14.x line, so any 14.x install is sufficient
   for binaries linked against vcruntime140.dll / msvcp140.dll. }
-function IsVcRedistInstalled(): Boolean;
+function IsVcRedistInstalled: Boolean;
 var
   Installed, Major: Cardinal;
 begin
