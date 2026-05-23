@@ -107,7 +107,7 @@ var
   ResultCode: Integer;
 begin
   if Exec(Path, '/install /quiet /norestart', '',
-          SW_SHOW, ewWaitUntilTerminated, ResultCode) then
+          SW_HIDE, ewWaitUntilTerminated, ResultCode) then
     Result := ResultCode
   else
     Result := -1;
