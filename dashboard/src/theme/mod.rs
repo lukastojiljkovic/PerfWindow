@@ -154,6 +154,52 @@ impl Theme {
                 vignette: 0.04,
                 glow_px: 0.0,
             },
+            ThemeId::Synthwave => Theme {
+                id,
+                name: "Synthwave Neon",
+                dark: true,
+                bg: hex("#0a0612"),
+                panel: hex("#15102a"),
+                border: hex("#3d2a6e"),
+                track: hex("#1f1843"),
+                chrome: hex("#050208"),
+                ink: hex("#e8dcff"),
+                dim: hex("#8b78c4"),
+                faint: hex("#4d4068"),
+                accent: hex("#c44eff"),
+                accent_soft: hex("#d97aff"),
+                ok: hex("#4ade80"),
+                warn: hex("#f5a524"),
+                hot: hex("#ff4d6d"),
+                font_display: FontFamily::ChakraPetch,
+                font_data: FontFamily::SpaceMono,
+                scanline_opacity: 0.16,
+                vignette: 0.5,
+                glow_px: 8.0,
+            },
+            ThemeId::Crimson => Theme {
+                id,
+                name: "Crimson Terminal",
+                dark: true,
+                bg: hex("#0e0606"),
+                panel: hex("#1a0c0c"),
+                border: hex("#4a1818"),
+                track: hex("#261212"),
+                chrome: hex("#050202"),
+                ink: hex("#f4d8d8"),
+                dim: hex("#b07878"),
+                faint: hex("#6e4848"),
+                accent: hex("#dc2626"),
+                accent_soft: hex("#ef4444"),
+                ok: hex("#4ade80"),
+                warn: hex("#fbbf24"),
+                hot: hex("#ff8e3a"),
+                font_display: FontFamily::PlexMonoBold,
+                font_data: FontFamily::PlexMono,
+                scanline_opacity: 0.16,
+                vignette: 0.5,
+                glow_px: 7.0,
+            },
         }
     }
 }
@@ -252,6 +298,8 @@ mod tests {
             ThemeId::Slate,
             ThemeId::Phosphor,
             ThemeId::Light,
+            ThemeId::Synthwave,
+            ThemeId::Crimson,
         ] {
             let t = Theme::for_id(id);
             assert_eq!(t.id, id);
@@ -267,7 +315,13 @@ mod tests {
 
     #[test]
     fn dark_themes_enable_scanlines() {
-        for id in [ThemeId::Amber, ThemeId::Slate, ThemeId::Phosphor] {
+        for id in [
+            ThemeId::Amber,
+            ThemeId::Slate,
+            ThemeId::Phosphor,
+            ThemeId::Synthwave,
+            ThemeId::Crimson,
+        ] {
             assert!(Theme::for_id(id).scanline_opacity > 0.0);
         }
     }

@@ -2,13 +2,15 @@ use crate::format::TempUnit;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
-/// Identifies one of the four themes.
+/// Identifies one of the six themes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ThemeId {
     Amber,
     Slate,
     Phosphor,
     Light,
+    Synthwave,
+    Crimson,
 }
 
 /// The fixed set of poll intervals offered in Settings.

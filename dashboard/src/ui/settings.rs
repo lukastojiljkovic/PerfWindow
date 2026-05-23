@@ -264,33 +264,43 @@ fn theme_section(ui: &mut egui::Ui, theme: &Theme, app: &PerfApp, change: &mut O
     });
 }
 
-/// The four themes offered, in mockup card order: Light, Amber, Slate,
-/// Phosphor — each with the short tag shown under its name.
-const THEME_CARDS: [(ThemeId, &str); 4] = [
-    (ThemeId::Light, "LIGHT"),
-    (ThemeId::Amber, "DARK"),
-    (ThemeId::Slate, "DARK"),
-    (ThemeId::Phosphor, "DARK"),
+/// The six themes offered, in picker order: Light, Amber, Slate, Phosphor,
+/// Synthwave, Crimson — each with the short tag shown under its name.
+const THEME_CARDS: [(ThemeId, &str); 6] = [
+    (ThemeId::Light,     "LIGHT"),
+    (ThemeId::Amber,     "DARK"),
+    (ThemeId::Slate,     "DARK"),
+    (ThemeId::Phosphor,  "DARK"),
+    (ThemeId::Synthwave, "DARK"),
+    (ThemeId::Crimson,   "DARK"),
 ];
 
-/// Draw the 4-column theme-card grid. `selected` is the currently configured
-/// theme; clicking a different card queues a [`Change::Theme`]. Matches
-/// `.theme-grid` in the mockup.
+/// Draw the theme-card grid as 3 columns x 2 rows (6 cards total). `selected`
+/// is the currently configured theme; clicking a different card queues a
+/// [`Change::Theme`]. Matches `.theme-grid` in the mockup.
 fn theme_grid(ui: &mut egui::Ui, theme: &Theme, selected: ThemeId, change: &mut Option<Change>) {
-    let card_w = (ui.available_width() - THEME_CARD_GAP * 3.0) / 4.0;
-    ui.horizontal(|ui| {
-        ui.spacing_mut().item_spacing.x = THEME_CARD_GAP;
-        for (id, tag) in THEME_CARDS {
-            ui.allocate_ui_with_layout(
-                Vec2::new(card_w, 0.0),
-                egui::Layout::top_down(egui::Align::Min),
-                |ui| {
-                    ui.set_width(card_w);
-                    if theme_card(ui, theme, id, tag, id == selected).clicked() && id != selected {
-                        *change = Some(Change::Theme(id));
-                    }
-                },
-            );
+    const COLS: usize = 3;
+    let card_w = (ui.available_width() - THEME_CARD_GAP * (COLS as f32 - 1.0)) / COLS as f32;
+    ui.vertical(|ui| {
+        ui.spacing_mut().item_spacing.y = THEME_CARD_GAP;
+        for row in THEME_CARDS.chunks(COLS) {
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = THEME_CARD_GAP;
+                for &(id, tag) in row {
+                    ui.allocate_ui_with_layout(
+                        Vec2::new(card_w, 0.0),
+                        egui::Layout::top_down(egui::Align::Min),
+                        |ui| {
+                            ui.set_width(card_w);
+                            if theme_card(ui, theme, id, tag, id == selected).clicked()
+                                && id != selected
+                            {
+                                *change = Some(Change::Theme(id));
+                            }
+                        },
+                    );
+                }
+            });
         }
     });
 }
