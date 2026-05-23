@@ -74,11 +74,22 @@ function Ensure-VcRedist {
     if (-not (Test-Path $vendorDir)) {
         New-Item -ItemType Directory -Path $vendorDir | Out-Null
     }
-    Write-Host "== Downloading Visual C++ Redistributable =="
-    Invoke-WebRequest `
-        -Uri 'https://aka.ms/vs/17/release/vc_redist.x64.exe' `
-        -OutFile $vendorBin `
-        -UseBasicParsing
+    Write-Host '== Downloading Visual C++ Redistributable =='
+    $previousProgress = $ProgressPreference
+    $ProgressPreference = 'SilentlyContinue'
+    try {
+        Invoke-WebRequest `
+            -Uri 'https://aka.ms/vs/17/release/vc_redist.x64.exe' `
+            -OutFile $vendorBin `
+            -UseBasicParsing
+    } catch {
+        # Don't leave a truncated file behind — Test-Path would treat it as a
+        # valid cache on the next run and Inno would bundle a broken binary.
+        Remove-Item $vendorBin -ErrorAction SilentlyContinue
+        throw
+    } finally {
+        $ProgressPreference = $previousProgress
+    }
     return $vendorBin
 }
 
