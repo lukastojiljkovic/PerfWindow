@@ -93,6 +93,26 @@ begin
         and (Major >= 14);
 end;
 
+{ Drop the bundled vc_redist.x64.exe into the temp dir and return its full path. }
+function ExtractVcRedist: String;
+begin
+  ExtractTemporaryFile('vc_redist.x64.exe');
+  Result := ExpandConstant('{tmp}\vc_redist.x64.exe');
+end;
+
+{ Run vc_redist.x64.exe with Microsoft's silent-install switches and return
+  its exit code. Returns -1 if the binary could not be launched at all. }
+function InstallVcRedistSilent(const Path: String): Integer;
+var
+  ResultCode: Integer;
+begin
+  if Exec(Path, '/install /quiet /norestart', '',
+          SW_SHOW, ewWaitUntilTerminated, ResultCode) then
+    Result := ResultCode
+  else
+    Result := -1;
+end;
+
 { Run a PowerShell command hidden and wait for it. Best-effort. }
 procedure RunPowerShell(const Command: String);
 var
