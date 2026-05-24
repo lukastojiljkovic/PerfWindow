@@ -1,0 +1,64 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build and publish
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: dashboard
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Verify Cargo.toml version matches tag
+        shell: pwsh
+        run: |
+          $tag = '${{ github.ref_name }}'.TrimStart('v')
+          $manifest = Get-Content dashboard/Cargo.toml -Raw
+          if ($manifest -notmatch "(?m)^version\s*=\s*`"$tag`"") {
+            throw "dashboard/Cargo.toml version does not match tag $tag"
+          }
+      - name: Install Inno Setup
+        run: choco install innosetup -y
+      - name: Build
+        shell: pwsh
+        run: pwsh build/build.ps1
+      - name: Extract release notes from CHANGELOG
+        shell: pwsh
+        run: |
+          $tag = '${{ github.ref_name }}'.TrimStart('v')
+          $changelog = Get-Content CHANGELOG.md -Raw
+          $pattern = "(?ms)^## \[$tag\][^\n]*\n(.+?)(?=^## \[|\Z)"
+          if ($changelog -match $pattern) {
+            $matches[1].Trim() | Out-File -Encoding utf8 release-notes.md
+          } else {
+            throw "No CHANGELOG section for $tag"
+          }
+      - name: Compute SHA256
+        shell: pwsh
+        run: |
+          $h = (Get-FileHash dist/PerfWindow-Setup.exe -Algorithm SHA256).Hash
+          "$h  PerfWindow-Setup.exe" | Out-File -Encoding ascii dist/PerfWindow-Setup.exe.sha256
+      - name: Publish release
+        shell: pwsh
+        run: |
+          gh release create '${{ github.ref_name }}' `
+            dist/PerfWindow-Setup.exe `
+            dist/PerfWindow-Setup.exe.sha256 `
+            --title '${{ github.ref_name }}' `
+            --notes-file release-notes.md
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
