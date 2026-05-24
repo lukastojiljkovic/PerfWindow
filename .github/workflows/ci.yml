@@ -20,6 +20,14 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: dashboard
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Publish sensord
+        # dashboard/build.rs embeds sensord.exe as a sibling, so the
+        # .NET self-contained publish must run before any cargo command
+        # that touches build.rs (build, test, clippy all do).
+        run: dotnet publish sensord/src -c Release -r win-x64 --self-contained
       - name: Build
         working-directory: dashboard
         run: cargo build --release
