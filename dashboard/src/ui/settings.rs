@@ -831,6 +831,7 @@ fn format_systemtime(t: std::time::SystemTime) -> String {
 /// Convert a Unix timestamp to a local Y/M/D H/M tuple via the Win32
 /// `FileTimeToSystemTime` chain. Kept self-contained to avoid a date
 /// library dependency for one timestamp.
+#[allow(clippy::upper_case_acronyms)]
 fn ymdhm_local(unix_secs: u64) -> (i32, u32, u32, u32, u32) {
     use std::ptr::null_mut;
 

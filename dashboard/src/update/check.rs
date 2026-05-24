@@ -168,10 +168,7 @@ fn publish_cached(state: &SharedUpdateState, cache: &Cache, repaint: &(impl Fn()
 /// release is structurally invalid (missing installer or bad tag).
 fn evaluate(release: &Release) -> Option<bool> {
     release.installer_asset()?;
-    match is_newer(env!("CARGO_PKG_VERSION"), &release.tag_name) {
-        Ok(b) => Some(b),
-        Err(_) => None,
-    }
+    is_newer(env!("CARGO_PKG_VERSION"), &release.tag_name).ok()
 }
 
 fn failure_reason(e: &FetchError) -> String {

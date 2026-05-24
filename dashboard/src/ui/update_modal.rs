@@ -25,20 +25,15 @@ const CHROME_RESERVE: f32 = 60.0;
 const MIN_BODY_HEIGHT: f32 = 180.0;
 
 /// Which screen the modal is currently showing.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub enum ModalPhase {
     /// "Confirm" screen: changelog + Cancel/Update buttons.
+    #[default]
     Confirm,
     /// "Downloading" screen: progress bar.
     Downloading { progress: f32, bytes: u64, total: u64 },
     /// "Failed" screen: an error message + browser fallback + retry.
     Failed { message: String },
-}
-
-impl Default for ModalPhase {
-    fn default() -> Self {
-        ModalPhase::Confirm
-    }
 }
 
 /// Render the modal if `app.update_modal_open` is set.
