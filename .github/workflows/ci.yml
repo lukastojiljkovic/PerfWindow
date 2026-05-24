@@ -31,7 +31,11 @@ jobs:
         run: cargo clippy --release -- -D warnings
       - name: Test
         working-directory: dashboard
-        run: cargo test --release
+        # --test-threads=1 because the ui_snapshot integration tests
+        # share a wgpu context and crash with STATUS_ACCESS_VIOLATION
+        # when run concurrently. Unit tests are fast enough that the
+        # serial penalty is negligible.
+        run: cargo test --release -- --test-threads=1
 
   rust-audit:
     name: Rust - security audit
