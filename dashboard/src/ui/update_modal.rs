@@ -18,6 +18,11 @@ const BODY_PADDING_X: i8 = 18;
 const BODY_PADDING_Y: i8 = 20;
 const BTN_PAD: Vec2 = Vec2::new(14.0, 8.0);
 const PROGRESS_BAR_H: f32 = 14.0;
+/// Title bar + outer breathing room reserved when computing the body's
+/// `ScrollArea` max height — see [`update_modal`].
+const CHROME_RESERVE: f32 = 60.0;
+/// Floor for the body's `ScrollArea` max height when the viewport is tiny.
+const MIN_BODY_HEIGHT: f32 = 180.0;
 
 /// Which screen the modal is currently showing.
 #[derive(Debug, Clone)]
@@ -92,18 +97,32 @@ pub fn update_modal(ctx: &egui::Context, app: &mut PerfApp) {
             if modal_title_bar(ui, &theme).clicked() {
                 close = true;
             }
-            egui::Frame::NONE
-                .inner_margin(Margin::symmetric(BODY_PADDING_X, BODY_PADDING_Y))
-                .show(ui, |ui| match &phase_snapshot {
-                    ModalPhase::Confirm => confirm_screen(ui, &theme, app, &release, &mut close),
-                    ModalPhase::Downloading {
-                        progress,
-                        bytes,
-                        total,
-                    } => downloading_screen(ui, &theme, app, &release, *progress, *bytes, *total),
-                    ModalPhase::Failed { message } => {
-                        failed_screen(ui, &theme, app, &release, message, &mut close);
-                    }
+            // Cap the body to whatever vertical room is left after the title
+            // bar so the close ✕ stays reachable on a short app window. When
+            // the body fits, the `ScrollArea` shrinks to its content.
+            let body_max_h =
+                (ctx.content_rect().height() - CHROME_RESERVE).max(MIN_BODY_HEIGHT);
+            egui::ScrollArea::vertical()
+                .max_height(body_max_h)
+                .auto_shrink([false, true])
+                .show(ui, |ui| {
+                    egui::Frame::NONE
+                        .inner_margin(Margin::symmetric(BODY_PADDING_X, BODY_PADDING_Y))
+                        .show(ui, |ui| match &phase_snapshot {
+                            ModalPhase::Confirm => {
+                                confirm_screen(ui, &theme, app, &release, &mut close)
+                            }
+                            ModalPhase::Downloading {
+                                progress,
+                                bytes,
+                                total,
+                            } => downloading_screen(
+                                ui, &theme, app, &release, *progress, *bytes, *total,
+                            ),
+                            ModalPhase::Failed { message } => {
+                                failed_screen(ui, &theme, app, &release, message, &mut close);
+                            }
+                        });
                 });
         });
 
