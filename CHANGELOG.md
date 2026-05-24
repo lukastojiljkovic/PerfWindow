@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ## [Unreleased]
 
+## [0.2.4] — 2026-05-24
+
+### Fixed
+- The installer now registers a Windows Defender Allow rule for the
+  WinRing0 threat signature (`VulnerableDriver:WinNT/Winring0`,
+  ThreatID `2147937641`) in addition to the existing folder and process
+  exclusions, so the recurring "Severe Trojan" alert no longer surfaces
+  after the application starts. The detection fires inside Defender's
+  kernel scanner once LibreHardwareMonitor loads the driver service and
+  is not suppressed by file-path exclusions; a ThreatID-level allow is
+  the only setting that stops it. The installer also reconciles any
+  existing WinRing0 detections found in Defender's history and allows
+  their threat IDs too, so a future Microsoft definition update that
+  renumbers the signature self-heals on the next install without
+  shipping a new installer. The uninstaller reverses every change.
+
 ## [0.2.3] — 2026-05-24
 
 ### Added
@@ -92,7 +108,8 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   matching uninstaller that removes the exclusions, the `R0sensord` driver
   service, the install directory and the per-user data directory.
 
-[Unreleased]: https://github.com/lukastojiljkovic/PerfWindow/compare/v0.2.3...HEAD
+[Unreleased]: https://github.com/lukastojiljkovic/PerfWindow/compare/v0.2.4...HEAD
+[0.2.4]: https://github.com/lukastojiljkovic/PerfWindow/releases/tag/v0.2.4
 [0.2.3]: https://github.com/lukastojiljkovic/PerfWindow/releases/tag/v0.2.3
 [0.2.2]: https://github.com/lukastojiljkovic/PerfWindow/releases/tag/v0.2.2
 [0.2.1]: https://github.com/lukastojiljkovic/PerfWindow/releases/tag/v0.2.1
