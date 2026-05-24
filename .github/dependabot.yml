@@ -1,0 +1,33 @@
+version: 2
+updates:
+  - package-ecosystem: cargo
+    directory: /dashboard
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    ignore:
+      - dependency-name: eframe
+        update-types: ["version-update:semver-major"]
+      - dependency-name: egui
+        update-types: ["version-update:semver-major"]
+      - dependency-name: egui_kittest
+        update-types: ["version-update:semver-major"]
+
+  - package-ecosystem: nuget
+    directory: /sensord/src
+    schedule:
+      interval: weekly
+      day: monday
+
+  - package-ecosystem: nuget
+    directory: /sensord/tests
+    schedule:
+      interval: weekly
+      day: monday
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
