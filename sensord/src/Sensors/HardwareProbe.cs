@@ -15,12 +15,7 @@ public static class HardwareProbe
 {
     public static void Run(TextWriter w)
     {
-        w.WriteLine("=== sensord hardware probe ===");
-        w.WriteLine($"elevated         : {IsElevated()}");
-        w.WriteLine($"Path.GetTempPath : {Path.GetTempPath()}");
-        w.WriteLine($"TMP  env         : {Environment.GetEnvironmentVariable("TMP")}");
-        w.WriteLine($"TEMP env         : {Environment.GetEnvironmentVariable("TEMP")}");
-        w.WriteLine();
+        DumpHeader(w);
 
         try
         {
@@ -60,6 +55,22 @@ public static class HardwareProbe
             w.WriteLine($"PROBE ERROR: {ex.GetType().Name}: {ex.Message}");
             w.WriteLine(ex.StackTrace);
         }
+    }
+
+    /// <summary>
+    /// Writes the diagnostic header lines that precede the LibreHardwareMonitor
+    /// section in <see cref="Run"/>: banner, elevation status, temp paths.
+    /// Extracted so the header shape can be unit-tested without spinning up
+    /// the kernel driver.
+    /// </summary>
+    public static void DumpHeader(TextWriter w)
+    {
+        w.WriteLine("=== sensord hardware probe ===");
+        w.WriteLine($"elevated         : {IsElevated()}");
+        w.WriteLine($"Path.GetTempPath : {Path.GetTempPath()}");
+        w.WriteLine($"TMP  env         : {Environment.GetEnvironmentVariable("TMP")}");
+        w.WriteLine($"TEMP env         : {Environment.GetEnvironmentVariable("TEMP")}");
+        w.WriteLine();
     }
 
     private static void DumpHardware(IHardware hw, TextWriter w, int depth)
