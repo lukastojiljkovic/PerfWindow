@@ -1,5 +1,9 @@
 # PerfWindow
 
+[![CI](https://github.com/lukastojiljkovic/PerfWindow/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/lukastojiljkovic/PerfWindow/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/lukastojiljkovic/PerfWindow)](https://github.com/lukastojiljkovic/PerfWindow/releases/latest)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
 A lightweight, open-source Windows hardware monitor — real-time **usage and
 temperatures** for CPU, GPU, RAM, storage, motherboard, fans, voltages and
 network throughput, in a single retro-utilitarian dashboard.
