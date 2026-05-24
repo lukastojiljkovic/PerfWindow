@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ## [Unreleased]
 
+## [0.2.5] — 2026-05-24
+
+### Changed
+- The footer status dot now shows the running app version (e.g. `● v0.2.5`)
+  instead of the hardcoded `● LIVE` label when sensord is streaming. The
+  version is baked in at compile time from `Cargo.toml`, so the footer
+  cannot drift from the actual binary. The `● NO SIGNAL` state is
+  unchanged.
+
 ## [0.2.4] — 2026-05-24
 
 ### Fixed
@@ -108,7 +117,8 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   matching uninstaller that removes the exclusions, the `R0sensord` driver
   service, the install directory and the per-user data directory.
 
-[Unreleased]: https://github.com/lukastojiljkovic/PerfWindow/compare/v0.2.4...HEAD
+[Unreleased]: https://github.com/lukastojiljkovic/PerfWindow/compare/v0.2.5...HEAD
+[0.2.5]: https://github.com/lukastojiljkovic/PerfWindow/releases/tag/v0.2.5
 [0.2.4]: https://github.com/lukastojiljkovic/PerfWindow/releases/tag/v0.2.4
 [0.2.3]: https://github.com/lukastojiljkovic/PerfWindow/releases/tag/v0.2.3
 [0.2.2]: https://github.com/lukastojiljkovic/PerfWindow/releases/tag/v0.2.2
