@@ -38,7 +38,13 @@ pub fn gpu_panel(
                 let temp_col = gpu.temp.map(|t| temp_color(t, TempKind::Processor, theme));
                 stat_row(ui, theme, "TEMP", &temp_value, temp_col);
 
-                stat_row(ui, theme, "MEM USE", &format_percent_unit(gpu.memory_load), None);
+                stat_row(
+                    ui,
+                    theme,
+                    "MEM USE",
+                    &format_percent_unit(gpu.memory_load),
+                    None,
+                );
 
                 let vram = if integrated {
                     "shared".to_string()

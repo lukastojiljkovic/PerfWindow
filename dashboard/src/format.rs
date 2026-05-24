@@ -129,7 +129,10 @@ mod tests {
     #[test]
     fn formats_temperature_compactly_without_unit_suffix() {
         assert_eq!(format_temp_compact(Some(58.0), TempUnit::Celsius), "58°");
-        assert_eq!(format_temp_compact(Some(58.0), TempUnit::Fahrenheit), "136°");
+        assert_eq!(
+            format_temp_compact(Some(58.0), TempUnit::Fahrenheit),
+            "136°"
+        );
         assert_eq!(format_temp_compact(None, TempUnit::Celsius), "—");
     }
 

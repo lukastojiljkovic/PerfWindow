@@ -95,7 +95,10 @@ mod tests {
             checked_at: t,
         };
         match s {
-            UpdateState::Available { release, checked_at } => {
+            UpdateState::Available {
+                release,
+                checked_at,
+            } => {
                 assert_eq!(release.tag_name, r.tag_name);
                 assert_eq!(checked_at, t);
             }

@@ -51,5 +51,8 @@ fn main() {
 /// `…/<profile>/build/<pkg>-<hash>/out`.
 fn output_bin_dir() -> Option<PathBuf> {
     let out_dir = std::env::var_os("OUT_DIR")?;
-    Path::new(&out_dir).ancestors().nth(3).map(Path::to_path_buf)
+    Path::new(&out_dir)
+        .ancestors()
+        .nth(3)
+        .map(Path::to_path_buf)
 }

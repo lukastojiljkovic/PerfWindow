@@ -134,6 +134,9 @@ pub fn dual_sparkline(
     if secondary.len() >= 2 {
         let secondary_points = map_points(secondary);
         let secondary_color = theme.accent.gamma_multiply(0.45);
-        painter.add(Shape::line(secondary_points, Stroke::new(1.4, secondary_color)));
+        painter.add(Shape::line(
+            secondary_points,
+            Stroke::new(1.4, secondary_color),
+        ));
     }
 }

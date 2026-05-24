@@ -59,19 +59,17 @@ fn snapshot_scenario(
     let theme = Theme::for_id(theme_id);
     let mut frame = 0u32;
     let mut body = body;
-    let mut harness = Harness::builder()
-        .with_size(size)
-        .build_ui(move |ui| {
-            let ctx = ui.ctx().clone();
-            if frame == 0 {
-                theme::install_fonts(&ctx);
-                theme.apply(&ctx);
-            }
-            frame += 1;
-            if frame >= 2 {
-                body(&ctx);
-            }
-        });
+    let mut harness = Harness::builder().with_size(size).build_ui(move |ui| {
+        let ctx = ui.ctx().clone();
+        if frame == 0 {
+            theme::install_fonts(&ctx);
+            theme.apply(&ctx);
+        }
+        frame += 1;
+        if frame >= 2 {
+            body(&ctx);
+        }
+    });
 
     // Two explicit frames so the queued font swap settles before snapshot.
     harness.run();

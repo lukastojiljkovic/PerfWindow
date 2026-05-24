@@ -110,7 +110,12 @@ fn banner_chip(ui: &mut egui::Ui, theme: &Theme, label: &str, primary: bool) -> 
         if primary {
             painter.rect_filled(rect, 0.0, theme.accent);
         }
-        painter.rect_stroke(rect, 0.0, Stroke::new(1.0, stroke_color), StrokeKind::Inside);
+        painter.rect_stroke(
+            rect,
+            0.0,
+            Stroke::new(1.0, stroke_color),
+            StrokeKind::Inside,
+        );
         painter.galley(rect.min + pad, galley, text_color);
     }
     if response.hovered() {

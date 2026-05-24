@@ -133,8 +133,7 @@ impl PerfApp {
                 }
             },
             DownloadOutcome::Failed(message) => {
-                self.update_modal_phase =
-                    crate::ui::update_modal::ModalPhase::Failed { message };
+                self.update_modal_phase = crate::ui::update_modal::ModalPhase::Failed { message };
             }
         }
     }
