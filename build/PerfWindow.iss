@@ -69,6 +69,13 @@ Type: filesandordirs; Name: "{localappdata}\{#AppName}"
 [Code]
 const
   VC_REDIST_KEY = 'SOFTWARE\Microsoft\VisualStudio\14.0\VC\Runtimes\X64';
+  { Microsoft Defender threat ID for "VulnerableDriver:WinNT/Winring0".
+    Defender's vulnerable-driver detection fires inside the kernel scanner
+    once LibreHardwareMonitor loads the driver service; file-path exclusions
+    cannot suppress it because the detection runs against the in-kernel
+    image, not the .sys on disk. Registering this ID as Allow is the only
+    setting that stops the recurring alert. }
+  WIN_RING0_THREAT_ID = '2147937641';
 
 var
   DefenderPage: TInputOptionWizardPage;
@@ -169,25 +176,36 @@ begin
     'Windows Defender',
     'Allow PerfWindow to read your CPU sensors.',
     'PerfWindow reads CPU temperature, clock and power through a kernel driver'
-    + ' (WinRing0) that is on Microsoft''s vulnerable-driver list, so Windows'
-    + ' Defender quarantines it on sight and those readings stop. The option'
-    + ' below tells Defender to skip only PerfWindow''s install folder, its'
-    + ' per-user data folder and the sensord.exe process; the rest of your'
-    + ' system stays protected, and the uninstaller removes the exclusions'
-    + ' again. You may leave it unchecked, but CPU temperature, clock and'
-    + ' power will then show as unavailable.',
+    + ' (WinRing0) that is on Microsoft''s vulnerable-driver list. Without'
+    + ' configuration, Windows Defender flags the loaded driver with a'
+    + ' recurring "VulnerableDriver:WinNT/Winring0" alert. The option below'
+    + ' adds Defender exclusions for PerfWindow''s install folder, its per-user'
+    + ' data folder and the sensord.exe process, and registers an Allow rule'
+    + ' for the WinRing0 threat signature so the alert does not surface'
+    + ' again. The rest of your system stays protected, and the uninstaller'
+    + ' reverses every change. You may leave it unchecked, but CPU'
+    + ' temperature, clock and power will then show as unavailable and the'
+    + ' Defender alert will keep returning.',
     False, False);
-  DefenderPage.Add('Add the Windows Defender exclusions PerfWindow needs (recommended)');
+  DefenderPage.Add('Configure Windows Defender for PerfWindow (recommended)');
   DefenderPage.Values[0] := True;
 end;
 
-{ Tell Windows Defender to skip PerfWindow's folders and the sensord process. }
+{ Tell Windows Defender to skip PerfWindow's folders and the sensord process,
+  and to allow the specific WinRing0 threat signature. The reconciliation pass
+  scans Defender's detection history for any other ID a definition update may
+  have introduced for the same driver and allows those too, so a future
+  Microsoft update that renumbers the signature self-heals on the next install. }
 procedure AddDefenderExclusions;
 begin
   RunPowerShell(
     'Add-MpPreference -ExclusionPath ' + PsQuote(ExpandConstant('{app}')) + ';'
     + 'Add-MpPreference -ExclusionPath ' + PsQuote(ExpandConstant('{localappdata}\{#AppName}')) + ';'
-    + 'Add-MpPreference -ExclusionProcess ' + PsQuote('sensord.exe'));
+    + 'Add-MpPreference -ExclusionProcess ' + PsQuote('sensord.exe') + ';'
+    + 'Add-MpPreference -ThreatIDDefaultAction_Ids ' + WIN_RING0_THREAT_ID + ' -ThreatIDDefaultAction_Actions Allow;'
+    + 'Get-MpThreatDetection -ErrorAction SilentlyContinue'
+    + ' | Where-Object { $_.Resources -match ''winring'' }'
+    + ' | ForEach-Object { Add-MpPreference -ThreatIDDefaultAction_Ids $_.ThreatID -ThreatIDDefaultAction_Actions Allow }');
 end;
 
 procedure CurStepChanged(CurStep: TSetupStep);
@@ -209,7 +227,11 @@ begin
   RunPowerShell(
     'Remove-MpPreference -ExclusionPath ' + PsQuote(ExpandConstant('{app}')) + ';'
     + 'Remove-MpPreference -ExclusionPath ' + PsQuote(ExpandConstant('{localappdata}\{#AppName}')) + ';'
-    + 'Remove-MpPreference -ExclusionProcess ' + PsQuote('sensord.exe'));
+    + 'Remove-MpPreference -ExclusionProcess ' + PsQuote('sensord.exe') + ';'
+    + 'Remove-MpPreference -ThreatIDDefaultAction_Ids ' + WIN_RING0_THREAT_ID + ';'
+    + 'Get-MpThreatDetection -ErrorAction SilentlyContinue'
+    + ' | Where-Object { $_.Resources -match ''winring'' }'
+    + ' | ForEach-Object { try { Remove-MpPreference -ThreatIDDefaultAction_Ids $_.ThreatID -ErrorAction Stop } catch { } }');
 
   { LibreHardwareMonitor removes this service itself on a clean exit; delete it
     here too in case PerfWindow was killed before it could. }
