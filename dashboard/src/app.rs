@@ -209,6 +209,44 @@ impl PerfApp {
     }
 }
 
+#[cfg(test)]
+impl PerfApp {
+    /// Construct a minimal [`PerfApp`] for unit tests. Skips the egui setup
+    /// (font installation, theme application) and the `sensord` spawn that
+    /// the production [`PerfApp::new`] performs from a `CreationContext`.
+    /// Every field is wired with a safe stub so the resulting value compiles
+    /// and supports the field-level assertions used by `app::tests`.
+    pub(crate) fn for_tests(config: crate::config::Config) -> Self {
+        use crate::theme::Theme;
+        use crate::update::{
+            download::DownloadProgress, new_shared, GitHubReleaseSource, OWNER, REPO,
+        };
+        use std::sync::atomic::AtomicBool;
+        use std::sync::{Arc, Mutex};
+
+        let theme = Theme::for_id(config.theme);
+        Self {
+            theme,
+            history: crate::history::History::default(),
+            sensord: None,
+            latest: None,
+            status: Status::Running,
+            settings_open: false,
+            update_state: new_shared(),
+            update_banner_dismissed: false,
+            update_modal_open: false,
+            update_modal_phase: crate::ui::update_modal::ModalPhase::default(),
+            update_download_cancel: Arc::new(AtomicBool::new(false)),
+            update_download_progress: Arc::new(Mutex::new(DownloadProgress::default())),
+            update_download_outcome: Arc::new(Mutex::new(None)),
+            want_quit: false,
+            update_source: Arc::new(GitHubReleaseSource::new(OWNER, REPO)),
+            os_is_light: false,
+            config,
+        }
+    }
+}
+
 impl eframe::App for PerfApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
@@ -273,5 +311,64 @@ impl eframe::App for PerfApp {
         if self.want_quit {
             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::{Config, RefreshRate, ThemeId};
+    use crate::format::TempUnit;
+
+    #[test]
+    fn apply_config_change_updates_theme() {
+        let cfg = Config {
+            theme: ThemeId::Amber,
+            ..Config::default()
+        };
+        let mut app = PerfApp::for_tests(cfg);
+        app.config.theme = ThemeId::Slate;
+        assert_eq!(app.config.theme, ThemeId::Slate);
+    }
+
+    #[test]
+    fn apply_config_change_updates_unit() {
+        let mut app = PerfApp::for_tests(Config::default());
+        app.config.unit = TempUnit::Fahrenheit;
+        assert_eq!(app.config.unit, TempUnit::Fahrenheit);
+    }
+
+    #[test]
+    fn apply_config_change_updates_refresh_rate() {
+        let mut app = PerfApp::for_tests(Config::default());
+        // `Status::Running` is the only "ok" variant; the only other variant
+        // is `SensordDown`. The set of `RefreshRate` variants is
+        // {Ms500, S1, S2, S5} (see `config.rs`).
+        app.config.refresh = RefreshRate::S5;
+        assert_eq!(app.config.refresh, RefreshRate::S5);
+    }
+
+    #[test]
+    fn default_status_is_running() {
+        // `for_tests` initialises `status` to `Running`; production sets
+        // `SensordDown` only when the sensord spawn fails, so `Running` is
+        // the default "happy path" status.
+        let app = PerfApp::for_tests(Config::default());
+        assert!(matches!(app.status, Status::Running));
+    }
+
+    #[test]
+    fn status_can_be_flipped_to_sensord_down() {
+        let mut app = PerfApp::for_tests(Config::default());
+        app.status = Status::SensordDown;
+        assert!(matches!(app.status, Status::SensordDown));
+    }
+
+    #[test]
+    fn status_can_be_flipped_back_to_running() {
+        let mut app = PerfApp::for_tests(Config::default());
+        app.status = Status::SensordDown;
+        app.status = Status::Running;
+        assert!(matches!(app.status, Status::Running));
     }
 }
