@@ -141,7 +141,11 @@ pub fn core_grid(
         };
         // Foreground colour: bg fill is in the accent family — read against
         // the theme's ink/bg pair to keep contrast as the cell heats.
-        let fg = if load_frac >= 0.5 { theme.bg } else { theme.ink };
+        let fg = if load_frac >= 0.5 {
+            theme.bg
+        } else {
+            theme.ink
+        };
         let galley = painter.layout_no_wrap(label, label_font.clone(), fg);
         let text_pos = egui::Pos2::new(
             cell_rect.center().x - galley.size().x / 2.0,

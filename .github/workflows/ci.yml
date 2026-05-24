@@ -1,0 +1,109 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  rust-test:
+    name: Rust - build, test, lint
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: dashboard
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Publish sensord
+        # dashboard/build.rs embeds sensord.exe as a sibling, so the
+        # .NET self-contained publish must run before any cargo command
+        # that touches build.rs (build, test, clippy all do).
+        run: dotnet publish sensord/src -c Release -r win-x64 --self-contained
+      - name: Build
+        working-directory: dashboard
+        run: cargo build --release
+      - name: Format
+        working-directory: dashboard
+        run: cargo fmt --check
+      - name: Clippy
+        working-directory: dashboard
+        run: cargo clippy --release -- -D warnings
+      - name: Test
+        working-directory: dashboard
+        # --test-threads=1 because the ui_snapshot integration tests
+        # share a wgpu context and crash with STATUS_ACCESS_VIOLATION
+        # when run concurrently. Unit tests are fast enough that the
+        # serial penalty is negligible.
+        run: cargo test --release -- --test-threads=1
+
+  rust-audit:
+    name: Rust - security audit
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install cargo-audit
+        run: cargo install cargo-audit --locked
+      - name: Audit
+        working-directory: dashboard
+        run: cargo audit
+
+  dotnet-test:
+    name: .NET - test
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Restore
+        run: dotnet restore sensord/tests/Sensord.Tests.csproj
+      - name: Test
+        run: dotnet test sensord/tests/Sensord.Tests.csproj --no-restore
+
+  dotnet-format:
+    name: .NET - format check
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Format
+        shell: pwsh
+        run: |
+          dotnet format sensord/src/sensord.csproj --verify-no-changes
+          dotnet format sensord/tests/Sensord.Tests.csproj --verify-no-changes
+
+  installer-build:
+    name: Installer - smoke build
+    needs: [rust-test, dotnet-test]
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: dashboard
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Install Inno Setup
+        run: choco install innosetup -y
+      - name: Build
+        shell: pwsh
+        run: pwsh build/build.ps1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: PerfWindow-Setup-pr-${{ github.sha }}
+          path: dist/PerfWindow-Setup.exe
+          retention-days: 7

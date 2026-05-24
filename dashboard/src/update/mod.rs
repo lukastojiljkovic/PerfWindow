@@ -22,6 +22,6 @@ pub mod state;
 pub const OWNER: &str = "lukastojiljkovic";
 pub const REPO: &str = "PerfWindow";
 
-pub use release::{Release, INSTALLER_ASSET_NAME};
-pub use source::{FetchError, GitHubReleaseSource, ReleaseSource};
+pub use release::Release;
+pub use source::GitHubReleaseSource;
 pub use state::{new_shared, SharedUpdateState, UpdateState};

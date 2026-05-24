@@ -135,8 +135,7 @@ pub fn settings_modal(ctx: &egui::Context, app: &mut PerfApp) {
             // scrollbar appears so the title bar's ✕ and the footer remain
             // reachable on a short window. Without this the modal grew to its
             // content's natural height and clipped past the viewport.
-            let body_max_h =
-                (ctx.content_rect().height() - CHROME_RESERVE).max(MIN_BODY_HEIGHT);
+            let body_max_h = (ctx.content_rect().height() - CHROME_RESERVE).max(MIN_BODY_HEIGHT);
             egui::ScrollArea::vertical()
                 .max_height(body_max_h)
                 .auto_shrink([false, true])
@@ -287,12 +286,12 @@ fn theme_section(ui: &mut egui::Ui, theme: &Theme, app: &PerfApp, change: &mut O
 /// The six themes offered, in picker order: Light, Amber, Slate, Phosphor,
 /// Synthwave, Crimson — each with the short tag shown under its name.
 const THEME_CARDS: [(ThemeId, &str); 6] = [
-    (ThemeId::Light,     "LIGHT"),
-    (ThemeId::Amber,     "DARK"),
-    (ThemeId::Slate,     "DARK"),
-    (ThemeId::Phosphor,  "DARK"),
+    (ThemeId::Light, "LIGHT"),
+    (ThemeId::Amber, "DARK"),
+    (ThemeId::Slate, "DARK"),
+    (ThemeId::Phosphor, "DARK"),
     (ThemeId::Synthwave, "DARK"),
-    (ThemeId::Crimson,   "DARK"),
+    (ThemeId::Crimson, "DARK"),
 ];
 
 /// Draw the theme-card grid as 3 columns x 2 rows (6 cards total). `selected`
@@ -700,12 +699,7 @@ fn footer(ui: &mut egui::Ui, theme: &Theme) {
 
 /// The UPDATES section: current version, opt-out toggle, manual check,
 /// last-checked stamp.
-fn updates_section(
-    ui: &mut egui::Ui,
-    theme: &Theme,
-    app: &PerfApp,
-    change: &mut Option<Change>,
-) {
+fn updates_section(ui: &mut egui::Ui, theme: &Theme, app: &PerfApp, change: &mut Option<Change>) {
     ui.vertical(|ui| {
         ui.spacing_mut().item_spacing.y = SECTION_INNER_GAP;
         section_label(ui, theme, "UPDATES");
@@ -782,9 +776,11 @@ fn updates_section(
 
 fn check_now_button(ui: &mut egui::Ui, theme: &Theme) -> egui::Response {
     let font = FontId::new(10.0, theme.font_data.egui());
-    let galley = ui
-        .painter()
-        .layout_no_wrap("Check for updates now".to_owned(), font, Color32::PLACEHOLDER);
+    let galley = ui.painter().layout_no_wrap(
+        "Check for updates now".to_owned(),
+        font,
+        Color32::PLACEHOLDER,
+    );
     let pad = Vec2::new(10.0, 5.0);
     let size = galley.size() + pad * 2.0;
     let (rect, response) = ui.allocate_exact_size(size, Sense::click());
@@ -799,7 +795,12 @@ fn check_now_button(ui: &mut egui::Ui, theme: &Theme) -> egui::Response {
         if fill != Color32::TRANSPARENT {
             painter.rect_filled(rect, 0.0, fill);
         }
-        painter.rect_stroke(rect, 0.0, Stroke::new(1.0, stroke_color), StrokeKind::Inside);
+        painter.rect_stroke(
+            rect,
+            0.0,
+            Stroke::new(1.0, stroke_color),
+            StrokeKind::Inside,
+        );
         painter.galley(rect.min + pad, galley, text_color);
     }
     if response.hovered() {
@@ -813,8 +814,9 @@ fn format_checked_at(state: &crate::update::UpdateState) -> String {
     match state {
         UpdateState::Idle => "never".to_string(),
         UpdateState::Checking => "checking now\u{2026}".to_string(),
-        UpdateState::NoUpdate { checked_at }
-        | UpdateState::Available { checked_at, .. } => format_systemtime(*checked_at),
+        UpdateState::NoUpdate { checked_at } | UpdateState::Available { checked_at, .. } => {
+            format_systemtime(*checked_at)
+        }
         UpdateState::Failed { checked_at, reason } => {
             format!("{} (failed: {reason})", format_systemtime(*checked_at))
         }
@@ -823,7 +825,10 @@ fn format_checked_at(state: &crate::update::UpdateState) -> String {
 
 fn format_systemtime(t: std::time::SystemTime) -> String {
     use std::time::UNIX_EPOCH;
-    let secs = t.duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+    let secs = t
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
     let (year, month, day, hour, minute) = ymdhm_local(secs);
     format!("{year:04}-{month:02}-{day:02} {hour:02}:{minute:02}")
 }
@@ -831,6 +836,7 @@ fn format_systemtime(t: std::time::SystemTime) -> String {
 /// Convert a Unix timestamp to a local Y/M/D H/M tuple via the Win32
 /// `FileTimeToSystemTime` chain. Kept self-contained to avoid a date
 /// library dependency for one timestamp.
+#[allow(clippy::upper_case_acronyms)]
 fn ymdhm_local(unix_secs: u64) -> (i32, u32, u32, u32, u32) {
     use std::ptr::null_mut;
 

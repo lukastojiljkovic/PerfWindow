@@ -33,12 +33,12 @@ public static class DiskInfoReader
                         || !int.TryParse(deviceIdStr, out int diskIndex))
                         continue;
 
-                    var busType   = obj["BusType"]   is ushort bt ? bt : (ushort)0;
-                    var mediaType = obj["MediaType"]  is ushort mt ? mt : (ushort)0;
-                    var sizeBytes = obj["Size"]       is ulong  sz ? sz : 0UL;
+                    var busType = obj["BusType"] is ushort bt ? bt : (ushort)0;
+                    var mediaType = obj["MediaType"] is ushort mt ? mt : (ushort)0;
+                    var sizeBytes = obj["Size"] is ulong sz ? sz : 0UL;
 
-                    string kind      = ClassifyDisk(busType, mediaType);
-                    double? totalGb  = sizeBytes > 0 ? sizeBytes / 1024.0 / 1024.0 / 1024.0 : null;
+                    string kind = ClassifyDisk(busType, mediaType);
+                    double? totalGb = sizeBytes > 0 ? sizeBytes / 1024.0 / 1024.0 / 1024.0 : null;
 
                     result[diskIndex] = new PhysicalDiskInfo(kind, totalGb);
                 }
@@ -62,8 +62,8 @@ public static class DiskInfoReader
     /// <param name="mediaType">MSFT_PhysicalDisk.MediaType (3 = HDD, 4 = SSD, 0 = Unspecified)</param>
     internal static string ClassifyDisk(ushort busType, ushort mediaType)
     {
-        if (busType == 17)   return "nvme";
-        if (mediaType == 4)  return "ssd";
+        if (busType == 17) return "nvme";
+        if (mediaType == 4) return "ssd";
         return "hdd";
     }
 }

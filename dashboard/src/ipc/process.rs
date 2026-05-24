@@ -134,3 +134,60 @@ impl Drop for Sensord {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::{Arc, Mutex};
+
+    #[test]
+    fn fresh_state_is_not_alive_by_default() {
+        // `SensorState::default()` is what `Sensord::spawn` overwrites with a
+        // freshly-built `SensorState { latest: None, alive: true }`. The
+        // derived default carries `bool::default() == false` and is used only
+        // for sites that construct a placeholder before plumbing in a real
+        // sensord child.
+        let s = SensorState::default();
+        assert!(!s.alive);
+        assert!(s.latest.is_none());
+    }
+
+    #[test]
+    fn mark_dead_flips_alive_to_false() {
+        let mut s = SensorState {
+            latest: None,
+            alive: true,
+        };
+        s.alive = false;
+        assert!(!s.alive);
+    }
+
+    #[test]
+    fn is_alive_reads_through_the_mutex() {
+        let state = Arc::new(Mutex::new(SensorState {
+            latest: None,
+            alive: true,
+        }));
+        let alive_first = state.lock().map(|s| s.alive).unwrap_or(false);
+        assert!(alive_first);
+        state.lock().unwrap().alive = false;
+        let alive_after = state.lock().map(|s| s.alive).unwrap_or(false);
+        assert!(!alive_after);
+    }
+
+    #[test]
+    fn is_alive_returns_false_on_poisoned_mutex() {
+        let state: Arc<Mutex<SensorState>> = Arc::new(Mutex::new(SensorState {
+            latest: None,
+            alive: true,
+        }));
+        let state_for_panic = Arc::clone(&state);
+        let _ = std::thread::spawn(move || {
+            let _guard = state_for_panic.lock().unwrap();
+            panic!("poisoning the mutex on purpose");
+        })
+        .join();
+        let alive = state.lock().map(|s| s.alive).unwrap_or(false);
+        assert!(!alive, "poisoned mutex should be treated as dead");
+    }
+}

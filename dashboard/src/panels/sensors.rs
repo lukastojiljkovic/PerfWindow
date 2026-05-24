@@ -54,11 +54,7 @@ pub fn sensors_panel(
 /// Returns `true` iff at least one displayable readout would be produced by
 /// [`collect_readouts`]. Used by the card grid to decide whether to include
 /// the Sensors card at all on machines whose Super-I/O chip is unreadable.
-pub fn has_content(
-    board: Option<&BoardInfo>,
-    fans: &[FanInfo],
-    voltages: &[VoltageInfo],
-) -> bool {
+pub fn has_content(board: Option<&BoardInfo>, fans: &[FanInfo], voltages: &[VoltageInfo]) -> bool {
     if let Some(board) = board {
         if finite(board.temp).is_some() || finite(board.vrm_temp).is_some() {
             return true;
@@ -199,33 +195,51 @@ mod tests {
     #[test]
     fn has_content_returns_false_when_everything_is_absent_or_none() {
         assert!(!has_content(None, &[], &[]));
-        let board = BoardInfo { temp: None, vrm_temp: None };
+        let board = BoardInfo {
+            temp: None,
+            vrm_temp: None,
+        };
         assert!(!has_content(Some(&board), &[], &[]));
     }
 
     #[test]
     fn has_content_returns_true_for_a_board_temperature() {
-        let board = BoardInfo { temp: Some(38.0), vrm_temp: None };
+        let board = BoardInfo {
+            temp: Some(38.0),
+            vrm_temp: None,
+        };
         assert!(has_content(Some(&board), &[], &[]));
     }
 
     #[test]
     fn has_content_returns_true_for_a_single_fan() {
-        let fan = FanInfo { name: "CPU".into(), rpm: Some(920.0) };
+        let fan = FanInfo {
+            name: "CPU".into(),
+            rpm: Some(920.0),
+        };
         assert!(has_content(None, &[fan], &[]));
     }
 
     #[test]
     fn has_content_returns_true_for_a_single_voltage() {
-        let v = VoltageInfo { name: "+12V".into(), volts: Some(12.0) };
+        let v = VoltageInfo {
+            name: "+12V".into(),
+            volts: Some(12.0),
+        };
         assert!(has_content(None, &[], &[v]));
     }
 
     #[test]
     fn has_content_ignores_non_finite_values() {
-        let board = BoardInfo { temp: Some(f64::NAN), vrm_temp: None };
+        let board = BoardInfo {
+            temp: Some(f64::NAN),
+            vrm_temp: None,
+        };
         assert!(!has_content(Some(&board), &[], &[]));
-        let fan = FanInfo { name: "CPU".into(), rpm: Some(f64::NAN) };
+        let fan = FanInfo {
+            name: "CPU".into(),
+            rpm: Some(f64::NAN),
+        };
         assert!(!has_content(None, &[fan], &[]));
     }
 }

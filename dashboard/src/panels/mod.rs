@@ -35,12 +35,7 @@ const EMPTY_NOTE_H: f32 = 22.0;
 /// `min_h` is the desired outer card height; when intrinsic content is
 /// shorter the body is padded so all cards in a row come out the same height.
 /// Pass `0.0` for "no minimum".
-pub fn card(
-    ui: &mut egui::Ui,
-    theme: &Theme,
-    min_h: f32,
-    contents: impl FnOnce(&mut egui::Ui),
-) {
+pub fn card(ui: &mut egui::Ui, theme: &Theme, min_h: f32, contents: impl FnOnce(&mut egui::Ui)) {
     let frame = Frame::NONE
         .fill(theme.panel)
         .stroke(Stroke::new(1.0, theme.border))

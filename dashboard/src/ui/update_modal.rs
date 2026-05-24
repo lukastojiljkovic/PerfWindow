@@ -25,20 +25,19 @@ const CHROME_RESERVE: f32 = 60.0;
 const MIN_BODY_HEIGHT: f32 = 180.0;
 
 /// Which screen the modal is currently showing.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub enum ModalPhase {
     /// "Confirm" screen: changelog + Cancel/Update buttons.
+    #[default]
     Confirm,
     /// "Downloading" screen: progress bar.
-    Downloading { progress: f32, bytes: u64, total: u64 },
+    Downloading {
+        progress: f32,
+        bytes: u64,
+        total: u64,
+    },
     /// "Failed" screen: an error message + browser fallback + retry.
     Failed { message: String },
-}
-
-impl Default for ModalPhase {
-    fn default() -> Self {
-        ModalPhase::Confirm
-    }
 }
 
 /// Render the modal if `app.update_modal_open` is set.
@@ -100,8 +99,7 @@ pub fn update_modal(ctx: &egui::Context, app: &mut PerfApp) {
             // Cap the body to whatever vertical room is left after the title
             // bar so the close ✕ stays reachable on a short app window. When
             // the body fits, the `ScrollArea` shrinks to its content.
-            let body_max_h =
-                (ctx.content_rect().height() - CHROME_RESERVE).max(MIN_BODY_HEIGHT);
+            let body_max_h = (ctx.content_rect().height() - CHROME_RESERVE).max(MIN_BODY_HEIGHT);
             egui::ScrollArea::vertical()
                 .max_height(body_max_h)
                 .auto_shrink([false, true])
@@ -281,7 +279,12 @@ fn progress_bar(ui: &mut egui::Ui, theme: &Theme, fraction: f32) {
     let mut fill_rect = rect;
     fill_rect.max.x = rect.min.x + rect.width() * fraction.clamp(0.0, 1.0);
     painter.rect_filled(fill_rect, 0.0, theme.accent);
-    painter.rect_stroke(rect, 0.0, Stroke::new(1.0, theme.border), StrokeKind::Inside);
+    painter.rect_stroke(
+        rect,
+        0.0,
+        Stroke::new(1.0, theme.border),
+        StrokeKind::Inside,
+    );
 }
 
 fn failed_screen(
@@ -310,10 +313,12 @@ fn failed_screen(
         );
 
         ui.label(
-            egui::RichText::new("You can try again, or download it manually from the releases page.")
-                .family(theme.font_data.egui())
-                .size(11.0)
-                .color(theme.dim),
+            egui::RichText::new(
+                "You can try again, or download it manually from the releases page.",
+            )
+            .family(theme.font_data.egui())
+            .size(11.0)
+            .color(theme.dim),
         );
 
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -333,11 +338,7 @@ fn failed_screen(
 /// Downloading screen. Outcome is written to `app.update_download_outcome`
 /// by the worker thread and applied to the UI by
 /// [`PerfApp::poll_download_outcome`] on the next frame.
-fn start_update_download(
-    ctx: &egui::Context,
-    app: &mut PerfApp,
-    release: &crate::update::Release,
-) {
+fn start_update_download(ctx: &egui::Context, app: &mut PerfApp, release: &crate::update::Release) {
     let Some(asset) = release.installer_asset().cloned() else {
         app.update_modal_phase = ModalPhase::Failed {
             message: "release is missing the installer asset".into(),
@@ -400,7 +401,12 @@ fn action_button(ui: &mut egui::Ui, theme: &Theme, label: &str, primary: bool) -
         if primary {
             painter.rect_filled(rect, 0.0, theme.accent);
         }
-        painter.rect_stroke(rect, 0.0, Stroke::new(1.0, stroke_color), StrokeKind::Inside);
+        painter.rect_stroke(
+            rect,
+            0.0,
+            Stroke::new(1.0, stroke_color),
+            StrokeKind::Inside,
+        );
         painter.galley(rect.min + BTN_PAD, galley, text_color);
     }
     if response.hovered() {
@@ -429,7 +435,12 @@ fn close_button(ui: &mut egui::Ui, theme: &Theme) -> Response {
         if fill != Color32::TRANSPARENT {
             painter.rect_filled(rect, 0.0, fill);
         }
-        painter.rect_stroke(rect, 0.0, Stroke::new(1.0, stroke_color), StrokeKind::Inside);
+        painter.rect_stroke(
+            rect,
+            0.0,
+            Stroke::new(1.0, stroke_color),
+            StrokeKind::Inside,
+        );
         painter.galley(rect.min + pad, galley, text_color);
     }
     if response.hovered() {

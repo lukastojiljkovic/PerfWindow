@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ## [Unreleased]
 
+## [0.3.0] — 2026-05-24
+
+### Added
+- GitHub Actions CI: every push and pull request now runs the full
+  Rust + .NET build, test, lint, and security audit, with a smoke
+  build of the Windows installer.
+- GitHub Actions release pipeline: pushing a `v*` tag now builds the
+  installer, computes its SHA256, extracts the matching CHANGELOG
+  section as release notes, and publishes the release. The
+  maintainer's release flow is now `git tag -a vX.X.X && git push`.
+- Snapshot-based UI regression coverage via `egui_kittest`: the
+  settings and update modals are captured per theme so a future
+  theme or layout regression fails CI with a pixel-diff PNG.
+- Dependabot weekly updates for cargo, NuGet, and GitHub Actions
+  dependencies.
+- README badges for CI status, latest release, and license.
+
+### Changed
+- The dashboard's `cargo clippy` warnings are now build errors in CI
+  (`-D warnings`). The `update::mod` module no longer re-exports
+  three names that were never used outside the module; `ModalPhase`
+  now derives `Default`; `ymdhm_local` carries a local
+  `allow(upper_case_acronyms)` for its Win32 type names.
+- Dashboard test count grew from 61 to 83; sensord test count grew
+  from 24 to 43. Approximate coverage: dashboard ≥ 85 % on non-UI
+  code, sensord ≥ 90 % (measured locally with `cargo llvm-cov`; not
+  published to a coverage service).
+
+User-facing application behaviour is unchanged.
+
 ## [0.2.6] — 2026-05-24
 
 ### Fixed
@@ -129,7 +159,8 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   matching uninstaller that removes the exclusions, the `R0sensord` driver
   service, the install directory and the per-user data directory.
 
-[Unreleased]: https://github.com/lukastojiljkovic/PerfWindow/compare/v0.2.6...HEAD
+[Unreleased]: https://github.com/lukastojiljkovic/PerfWindow/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/lukastojiljkovic/PerfWindow/releases/tag/v0.3.0
 [0.2.6]: https://github.com/lukastojiljkovic/PerfWindow/releases/tag/v0.2.6
 [0.2.5]: https://github.com/lukastojiljkovic/PerfWindow/releases/tag/v0.2.5
 [0.2.4]: https://github.com/lukastojiljkovic/PerfWindow/releases/tag/v0.2.4

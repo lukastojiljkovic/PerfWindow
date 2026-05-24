@@ -115,17 +115,17 @@ public static class SnapshotBuilder
 
             if (hasDiskIndex && diskInfo.TryGetValue(diskIndex, out PhysicalDiskInfo info))
             {
-                kind    = info.Kind;
+                kind = info.Kind;
                 totalGb = info.TotalGb;
-                usedGb  = (info.TotalGb.HasValue && usedPct.HasValue) ? info.TotalGb.Value * usedPct.Value / 100.0 : null;
+                usedGb = (info.TotalGb.HasValue && usedPct.HasValue) ? info.TotalGb.Value * usedPct.Value / 100.0 : null;
             }
             else
             {
                 // WMI data unavailable — fall back to the identifier prefix for kind,
                 // leave capacity null.
-                kind    = ClassifyDiskByIdentifier(idStr);
+                kind = ClassifyDiskByIdentifier(idStr);
                 totalGb = null;
-                usedGb  = null;
+                usedGb = null;
             }
 
             list.Add(new StorageInfo(
@@ -146,7 +146,7 @@ public static class SnapshotBuilder
     internal static string ClassifyDiskByIdentifier(string identifier)
     {
         if (identifier.Contains("/nvme/", StringComparison.OrdinalIgnoreCase)) return "nvme";
-        if (identifier.Contains("/ssd/",  StringComparison.OrdinalIgnoreCase)) return "ssd";
+        if (identifier.Contains("/ssd/", StringComparison.OrdinalIgnoreCase)) return "ssd";
         return "hdd";
     }
 
@@ -200,7 +200,7 @@ public static class SnapshotBuilder
             UpBps: upBps,
             LinkBps: linkBps > 0 ? linkBps : null,
             DownPct: linkBps > 0 ? NetUtil.Utilisation(downBps, linkBps) : null,
-            UpPct:   linkBps > 0 ? NetUtil.Utilisation(upBps, linkBps)   : null);
+            UpPct: linkBps > 0 ? NetUtil.Utilisation(upBps, linkBps) : null);
     }
 
     public static Snapshot Build(IReadOnlyList<IHardware> hardware, PagefileInfo pf,
