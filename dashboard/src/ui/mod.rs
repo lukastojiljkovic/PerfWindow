@@ -189,9 +189,10 @@ fn chip(ui: &mut egui::Ui, theme: &Theme, label: &str, on: bool) -> egui::Respon
 
 /// Draw the footer: a `chrome`-filled strip opened by a 1 px `border` top rule.
 ///
-/// Left to right: a live/no-signal indicator, the configured refresh rate and
-/// the latest snapshot's headline CPU / GPU / network figures. Matches
-/// `.pw-foot` in the mockup.
+/// Left to right: a status dot — the running app version when sensord is
+/// streaming, NO SIGNAL when it isn't — the configured refresh rate and the
+/// latest snapshot's headline CPU / GPU / network figures. Matches `.pw-foot`
+/// in the mockup.
 pub fn footer(ui: &mut egui::Ui, app: &PerfApp) {
     let theme = &app.theme;
     let frame = egui::Frame::NONE
@@ -202,10 +203,12 @@ pub fn footer(ui: &mut egui::Ui, app: &PerfApp) {
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 15.0;
 
-            // Live / no-signal status dot.
+            // Status dot: shows the running app version when sensord is alive,
+            // NO SIGNAL when it isn't. The version is baked in at compile time
+            // from Cargo.toml so the footer cannot drift from the actual binary.
             let running = app.status == Status::Running;
             let (dot_text, dot_color) = if running {
-                ("\u{25cf} LIVE", theme.ok)
+                (concat!("\u{25cf} v", env!("CARGO_PKG_VERSION")), theme.ok)
             } else {
                 ("\u{25cf} NO SIGNAL", theme.hot)
             };
