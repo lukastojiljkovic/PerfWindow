@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ## [Unreleased]
 
+## [0.2.6] — 2026-05-24
+
+### Fixed
+- The Settings and Update modals can no longer extend past the bottom of
+  the app window. Previously, on a non-maximised or short window, the
+  modals grew to their natural content height, clipping the title bar's
+  close button and the modals' bottom controls off-screen. The body of
+  each modal is now wrapped in a `ScrollArea` whose maximum height is
+  capped at the viewport height minus the chrome; if the body fits, the
+  modal shrinks to it, otherwise a scrollbar appears so the title bar's
+  ✕ and the action buttons stay reachable.
+
 ## [0.2.5] — 2026-05-24
 
 ### Changed
@@ -117,7 +129,8 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   matching uninstaller that removes the exclusions, the `R0sensord` driver
   service, the install directory and the per-user data directory.
 
-[Unreleased]: https://github.com/lukastojiljkovic/PerfWindow/compare/v0.2.5...HEAD
+[Unreleased]: https://github.com/lukastojiljkovic/PerfWindow/compare/v0.2.6...HEAD
+[0.2.6]: https://github.com/lukastojiljkovic/PerfWindow/releases/tag/v0.2.6
 [0.2.5]: https://github.com/lukastojiljkovic/PerfWindow/releases/tag/v0.2.5
 [0.2.4]: https://github.com/lukastojiljkovic/PerfWindow/releases/tag/v0.2.4
 [0.2.3]: https://github.com/lukastojiljkovic/PerfWindow/releases/tag/v0.2.3

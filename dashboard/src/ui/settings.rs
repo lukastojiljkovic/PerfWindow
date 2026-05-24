@@ -21,6 +21,13 @@ use egui::{
 
 /// Fixed outer width of the settings window (mockup `.cfg { width: 600px }`).
 const WINDOW_WIDTH: f32 = 600.0;
+/// Combined height of the title bar + footer + outer breathing room. The body's
+/// `ScrollArea` is capped at `viewport_height - CHROME_RESERVE` so the chrome
+/// stays on-screen even on a short app window.
+const CHROME_RESERVE: f32 = 90.0;
+/// Floor for the body's `ScrollArea` max height. Below this the modal becomes
+/// useless even with scroll — pick something that still shows one section.
+const MIN_BODY_HEIGHT: f32 = 180.0;
 /// Title-bar / footer strip padding (mockup `.cfg-tb { padding: 12px 15px }`).
 const TB_PADDING_X: i8 = 15;
 const TB_PADDING_Y: i8 = 12;
@@ -122,15 +129,28 @@ pub fn settings_modal(ctx: &egui::Context, app: &mut PerfApp) {
                 close = true;
             }
 
-            egui::Frame::NONE
-                .inner_margin(Margin::symmetric(BODY_PADDING_X, BODY_PADDING_Y))
+            // Cap the body to whatever vertical room is left in the app window
+            // after reserving the title bar + footer. When the body fits, the
+            // `ScrollArea` shrinks to its content; when it does not, the
+            // scrollbar appears so the title bar's ✕ and the footer remain
+            // reachable on a short window. Without this the modal grew to its
+            // content's natural height and clipped past the viewport.
+            let body_max_h =
+                (ctx.content_rect().height() - CHROME_RESERVE).max(MIN_BODY_HEIGHT);
+            egui::ScrollArea::vertical()
+                .max_height(body_max_h)
+                .auto_shrink([false, true])
                 .show(ui, |ui| {
-                    ui.spacing_mut().item_spacing.y = SECTION_GAP;
+                    egui::Frame::NONE
+                        .inner_margin(Margin::symmetric(BODY_PADDING_X, BODY_PADDING_Y))
+                        .show(ui, |ui| {
+                            ui.spacing_mut().item_spacing.y = SECTION_GAP;
 
-                    theme_section(ui, &theme, app, &mut change);
-                    unit_section(ui, &theme, app.config.unit, &mut change);
-                    refresh_section(ui, &theme, app.config.refresh, &mut change);
-                    updates_section(ui, &theme, app, &mut change);
+                            theme_section(ui, &theme, app, &mut change);
+                            unit_section(ui, &theme, app.config.unit, &mut change);
+                            refresh_section(ui, &theme, app.config.refresh, &mut change);
+                            updates_section(ui, &theme, app, &mut change);
+                        });
                 });
 
             footer(ui, &theme);
