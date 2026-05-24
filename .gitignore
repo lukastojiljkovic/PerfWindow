@@ -30,3 +30,8 @@ Thumbs.db
 
 # Build-time vendored binaries (downloaded by build.ps1 on demand)
 /build/vendor/
+
+# egui_kittest snapshot scratch files (only the canonical `.png` is checked in)
+**/tests/snapshots/**/*.new.png
+**/tests/snapshots/**/*.old.png
+**/tests/snapshots/**/*.diff.png

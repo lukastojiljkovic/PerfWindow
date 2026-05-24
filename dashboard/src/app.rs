@@ -209,14 +209,19 @@ impl PerfApp {
     }
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 impl PerfApp {
-    /// Construct a minimal [`PerfApp`] for unit tests. Skips the egui setup
-    /// (font installation, theme application) and the `sensord` spawn that
-    /// the production [`PerfApp::new`] performs from a `CreationContext`.
-    /// Every field is wired with a safe stub so the resulting value compiles
-    /// and supports the field-level assertions used by `app::tests`.
-    pub(crate) fn for_tests(config: crate::config::Config) -> Self {
+    /// Construct a minimal [`PerfApp`] for unit and integration tests. Skips
+    /// the egui setup (font installation, theme application) and the `sensord`
+    /// spawn that the production [`PerfApp::new`] performs from a
+    /// `CreationContext`. Every field is wired with a safe stub so the
+    /// resulting value compiles and supports the field-level assertions used
+    /// by `app::tests` plus the snapshot harness in `tests/ui_snapshot.rs`.
+    ///
+    /// Exposed to integration tests via the `test-support` feature, which the
+    /// crate's own `[dev-dependencies]` self-enables — so production builds
+    /// (`cargo build`) never include this constructor.
+    pub fn for_tests(config: crate::config::Config) -> Self {
         use crate::theme::Theme;
         use crate::update::{
             download::DownloadProgress, new_shared, GitHubReleaseSource, OWNER, REPO,

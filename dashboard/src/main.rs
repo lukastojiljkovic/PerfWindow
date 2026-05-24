@@ -1,18 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 #![allow(dead_code)]
 
-mod app;
-mod config;
-mod format;
-mod history;
-mod ipc;
-mod panels;
-mod theme;
-mod ui;
-mod update;
-mod widgets;
-
-use app::PerfApp;
+use perfwindow::app::PerfApp;
 
 fn main() -> eframe::Result {
     let options = eframe::NativeOptions {
