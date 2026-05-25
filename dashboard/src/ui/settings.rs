@@ -76,6 +76,7 @@ enum Change {
     Unit(TempUnit),
     Refresh(RefreshRate),
     CheckUpdates(bool),
+    AlwaysOnTop(bool),
     ManualCheck,
 }
 
@@ -148,6 +149,7 @@ pub fn settings_modal(ctx: &egui::Context, app: &mut PerfApp) {
                             theme_section(ui, &theme, app, &mut change);
                             unit_section(ui, &theme, app.config.unit, &mut change);
                             refresh_section(ui, &theme, app.config.refresh, &mut change);
+                            display_section(ui, &theme, app.config.always_on_top, &mut change);
                             updates_section(ui, &theme, app, &mut change);
                         });
                 });
@@ -165,6 +167,7 @@ pub fn settings_modal(ctx: &egui::Context, app: &mut PerfApp) {
             Change::Unit(unit) => app.config.unit = unit,
             Change::Refresh(rate) => app.config.refresh = rate,
             Change::CheckUpdates(on) => app.config.check_updates_on_startup = on,
+            Change::AlwaysOnTop(on) => app.config.always_on_top = on,
             Change::ManualCheck => app.manual_update_check(ctx),
         }
         if needs_save {
@@ -695,6 +698,78 @@ fn footer(ui: &mut egui::Ui, theme: &Theme) {
                 .color(theme.dim),
             );
         });
+}
+
+/// The DISPLAY section: window-behaviour toggles. Currently holds only the
+/// "Keep window always on top" switch; further window-state controls (e.g.
+/// click-through, transparency) will live here.
+fn display_section(ui: &mut egui::Ui, theme: &Theme, on: bool, change: &mut Option<Change>) {
+    ui.vertical(|ui| {
+        ui.spacing_mut().item_spacing.y = SECTION_INNER_GAP;
+        section_label(ui, theme, "DISPLAY");
+
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 11.0;
+
+            let (track_rect, response) =
+                ui.allocate_exact_size(Vec2::new(TOGGLE_W, TOGGLE_H), Sense::click());
+            if ui.is_rect_visible(track_rect) {
+                let painter = ui.painter_at(track_rect);
+                let (track_fill, track_stroke) = if on {
+                    (theme.accent, theme.accent)
+                } else {
+                    (theme.track, theme.border)
+                };
+                painter.rect_filled(track_rect, 0.0, track_fill);
+                painter.rect_stroke(
+                    track_rect,
+                    0.0,
+                    Stroke::new(1.0, track_stroke),
+                    StrokeKind::Inside,
+                );
+                let knob_x = if on {
+                    track_rect.max.x - 2.0 - TOGGLE_DOT
+                } else {
+                    track_rect.min.x + 2.0
+                };
+                let knob = Rect::from_min_size(
+                    Pos2::new(knob_x, track_rect.min.y + 2.0),
+                    Vec2::splat(TOGGLE_DOT),
+                );
+                let knob_color = if on { theme.bg } else { theme.dim };
+                painter.rect_filled(knob, 0.0, knob_color);
+            }
+            if response.hovered() {
+                ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+            }
+            if response.clicked() {
+                *change = Some(Change::AlwaysOnTop(!on));
+            }
+
+            let mut job = egui::text::LayoutJob::default();
+            let data_font = FontId::new(11.0, theme.font_data.egui());
+            job.wrap.max_width = ui.available_width();
+            job.append(
+                "Keep window always on top",
+                0.0,
+                egui::TextFormat {
+                    font_id: data_font.clone(),
+                    color: theme.ink,
+                    ..Default::default()
+                },
+            );
+            job.append(
+                "  \u{2014} stays above other windows even when not focused",
+                0.0,
+                egui::TextFormat {
+                    font_id: data_font,
+                    color: theme.dim,
+                    ..Default::default()
+                },
+            );
+            ui.label(job);
+        });
+    });
 }
 
 /// The UPDATES section: current version, opt-out toggle, manual check,

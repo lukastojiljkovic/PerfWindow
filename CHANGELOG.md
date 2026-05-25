@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ## [Unreleased]
 
+## [0.4.1] — 2026-05-25
+
+### Added
+- **Keep window always on top** toggle. Available two ways:
+  a pushpin (`📌`) chip in the title bar next to the heat-map and
+  unit chips for a quick flip, and a matching **DISPLAY** section
+  toggle inside Settings for discoverability. The preference is
+  persisted to `config.toml` (`always_on_top`, default `false`)
+  and applied to the window via `egui::ViewportCommand::WindowLevel`.
+  Launching with the preference on opens the window at the correct
+  Z-level immediately — no startup flash.
+
 ## [0.4.0] — 2026-05-25
 
 ### Added
@@ -200,7 +212,8 @@ User-facing application behaviour is unchanged.
   matching uninstaller that removes the exclusions, the `R0sensord` driver
   service, the install directory and the per-user data directory.
 
-[Unreleased]: https://github.com/lukastojiljkovic/PerfWindow/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/lukastojiljkovic/PerfWindow/compare/v0.4.1...HEAD
+[0.4.1]: https://github.com/lukastojiljkovic/PerfWindow/releases/tag/v0.4.1
 [0.4.0]: https://github.com/lukastojiljkovic/PerfWindow/releases/tag/v0.4.0
 [0.3.0]: https://github.com/lukastojiljkovic/PerfWindow/releases/tag/v0.3.0
 [0.2.6]: https://github.com/lukastojiljkovic/PerfWindow/releases/tag/v0.2.6

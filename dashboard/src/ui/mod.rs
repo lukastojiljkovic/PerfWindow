@@ -134,6 +134,14 @@ fn chip_row(ui: &mut egui::Ui, theme: &Theme, app: &mut PerfApp) {
         app.config.save();
     }
 
+    // Always-on-top toggle: `📌` (U+1F4CC pushpin). The viewport switch
+    // happens in `PerfApp::sync_window_level` on the next frame, driven by
+    // the new `config.always_on_top`.
+    if chip(ui, theme, "\u{1F4CC}", app.config.always_on_top).clicked() {
+        app.config.always_on_top = !app.config.always_on_top;
+        app.config.save();
+    }
+
     // Fahrenheit / Celsius — the active unit is filled.
     let unit = app.config.unit;
     if chip(ui, theme, "\u{00b0}F", unit == TempUnit::Fahrenheit).clicked()
