@@ -9,6 +9,7 @@ use crate::format::{finite, format_bytes_per_sec, format_link};
 use crate::history::NetThroughputHistory;
 use crate::ipc::NetInfo;
 use crate::theme::Theme;
+use crate::ui::tooltips::tip;
 use crate::widgets::gauge::donut;
 use crate::widgets::sparkline::dual_sparkline;
 use crate::widgets::stat::stat_row;
@@ -42,23 +43,35 @@ pub fn network_panel(
             .unwrap_or(0.0);
 
         ui.horizontal(|ui| {
-            donut(ui, theme, donut_pct as f32, "%", "USE");
+            donut(ui, theme, donut_pct as f32, "%", "USE").on_hover_text(
+                "Network link utilisation — the larger of download and upload as a \
+                 fraction of the adapter's negotiated link speed.",
+            );
             ui.vertical(|ui| {
-                stat_row(
-                    ui,
-                    theme,
+                tip(
+                    stat_row(
+                        ui,
+                        theme,
+                        "DOWN",
+                        &format_bytes_per_sec(finite(net.down_bps).unwrap_or(0.0)),
+                        None,
+                    ),
                     "DOWN",
-                    &format_bytes_per_sec(finite(net.down_bps).unwrap_or(0.0)),
-                    None,
                 );
-                stat_row(
-                    ui,
-                    theme,
+                tip(
+                    stat_row(
+                        ui,
+                        theme,
+                        "UP",
+                        &format_bytes_per_sec(finite(net.up_bps).unwrap_or(0.0)),
+                        None,
+                    ),
                     "UP",
-                    &format_bytes_per_sec(finite(net.up_bps).unwrap_or(0.0)),
-                    None,
                 );
-                stat_row(ui, theme, "LINK", &format_link(net.link_bps), None);
+                tip(
+                    stat_row(ui, theme, "LINK", &format_link(net.link_bps), None),
+                    "LINK",
+                );
             });
         });
 

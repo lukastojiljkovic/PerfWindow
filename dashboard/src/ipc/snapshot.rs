@@ -1,12 +1,19 @@
 use serde::Deserialize;
 
-/// One NDJSON snapshot from `sensord`. Sections are absent when the hardware is.
+/// One NDJSON snapshot from `sensord`. Sections are absent when the hardware
+/// is. Every field added after the initial 0.1.0 schema uses
+/// `#[serde(default)]` so older `sensord` builds parse cleanly.
 #[derive(Debug, Clone, Deserialize)]
 pub struct Snapshot {
     pub v: i32,
     pub ts: i64,
     pub cpu: Option<CpuInfo>,
     pub gpu: Option<Vec<GpuInfo>>,
+    /// The integrated GPU when an iGPU is enumerated alongside a discrete
+    /// one. Absent on desktops with no iGPU and on machines whose only GPU
+    /// is integrated (it already appears in `gpu` as the sole entry).
+    #[serde(default)]
+    pub igpu: Option<GpuInfo>,
     pub ram: Option<RamInfo>,
     pub storage: Option<Vec<StorageInfo>>,
     pub board: Option<BoardInfo>,
@@ -31,6 +38,26 @@ pub struct CpuInfo {
     pub core_temps: Option<Vec<Option<f64>>>,
     #[serde(default)]
     pub voltage_v: Option<f64>,
+    /// °C of headroom the hottest core has before throttling kicks in.
+    /// Smaller = closer to TjMax. Populated when LHM exposes per-core
+    /// "Distance to TjMax" sensors (Intel; some AMD).
+    #[serde(default)]
+    pub distance_to_tjmax_c: Option<f64>,
+    /// RAPL sub-domain power draw, watts. Whole-package draw lives in
+    /// `power_w`; the three breakdown fields are only present when the
+    /// silicon exposes them.
+    #[serde(default)]
+    pub power_cores_w: Option<f64>,
+    #[serde(default)]
+    pub power_memory_w: Option<f64>,
+    #[serde(default)]
+    pub power_platform_w: Option<f64>,
+    /// On Intel hybrid CPUs, the count of P-Cores and E-Cores so the
+    /// dashboard can section the heat-map. Both `None` on non-hybrid CPUs.
+    #[serde(default)]
+    pub p_core_count: Option<u32>,
+    #[serde(default)]
+    pub e_core_count: Option<u32>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -48,6 +75,26 @@ pub struct GpuInfo {
     pub memory_load: Option<f64>,
     #[serde(default)]
     pub hot_spot_temp: Option<f64>,
+    /// GDDR/VRAM die hot spot (°C). A separate physical sensor from `temp`
+    /// (GPU core) and `hot_spot_temp` (GPU die hot spot).
+    #[serde(default)]
+    pub memory_junction_temp_c: Option<f64>,
+    /// PCIe link-direction throughput in bytes per second. Useful for
+    /// streaming / model-loading bus-saturation diagnosis.
+    #[serde(default)]
+    pub pcie_rx_bps: Option<f64>,
+    #[serde(default)]
+    pub pcie_tx_bps: Option<f64>,
+    /// VRAM split: dedicated-on-card vs DXGI-shared system RAM, MB. The
+    /// shared figure is mostly meaningful on iGPUs and laptops whose dGPU
+    /// spills into RAM.
+    #[serde(default)]
+    pub dedicated_vram_used_mb: Option<f64>,
+    #[serde(default)]
+    pub shared_vram_used_mb: Option<f64>,
+    /// GPU core voltage rail, volts.
+    #[serde(default)]
+    pub voltage_v: Option<f64>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -75,6 +122,16 @@ pub struct StorageInfo {
     pub read_bps: Option<f64>,
     #[serde(default)]
     pub write_bps: Option<f64>,
+    /// Lifetime metrics — exposed on most NVMe drives and many SATA SSDs.
+    /// `power_on_hours` and `power_on_count` come from S.M.A.R.T. attributes;
+    /// `available_spare_pct` is the NVMe-spec reserved-blocks reading (0–100;
+    /// distinct from the merged `health` figure above).
+    #[serde(default)]
+    pub power_on_hours: Option<i64>,
+    #[serde(default)]
+    pub power_on_count: Option<i64>,
+    #[serde(default)]
+    pub available_spare_pct: Option<f64>,
 }
 
 #[derive(Debug, Clone, Deserialize)]

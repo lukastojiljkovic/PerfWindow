@@ -100,13 +100,20 @@ fn header_row(ui: &mut egui::Ui, theme: &Theme) {
     }
 }
 
-/// Draw one disk row: a 1 px top rule then the four data cells.
+/// Draw one disk row: a 1 px top rule then the four data cells. The full row
+/// is a single hover target — hovering reveals SMART lifetime details
+/// (power-on hours, cycle count, NVMe Available Spare) that do not fit on
+/// the row itself.
 fn disk_row(ui: &mut egui::Ui, theme: &Theme, disk: &StorageInfo, unit: TempUnit) {
     let total_w = ui.available_width();
     let widths = column_widths(total_w);
-    let (rect, _) = ui.allocate_exact_size(Vec2::new(total_w, DISK_ROW_H), Sense::hover());
+    let (rect, response) = ui.allocate_exact_size(Vec2::new(total_w, DISK_ROW_H), Sense::hover());
     if !ui.is_rect_visible(rect) {
         return;
+    }
+
+    if let Some(tip_text) = lifetime_tooltip(disk) {
+        response.on_hover_text(tip_text);
     }
 
     let painter = ui.painter_at(rect);
@@ -209,6 +216,52 @@ fn disk_row(ui: &mut egui::Ui, theme: &Theme, disk: &StorageInfo, unit: TempUnit
         cap_galley,
         theme.dim,
     );
+}
+
+/// Compose a multi-line hover tooltip for a disk row. Returns `None` when no
+/// lifetime metric is present (older `sensord` builds, drives without SMART).
+fn lifetime_tooltip(disk: &StorageInfo) -> Option<String> {
+    if disk.power_on_hours.is_none()
+        && disk.power_on_count.is_none()
+        && disk.available_spare_pct.is_none()
+        && disk.read_bps.is_none()
+        && disk.write_bps.is_none()
+    {
+        return None;
+    }
+    let mut out = format!("{} · {}\n", kind_label(&disk.kind), disk.name);
+    if let (Some(r), Some(w)) = (finite(disk.read_bps), finite(disk.write_bps)) {
+        out.push_str(&format!(
+            "  Read   {}\n  Write  {}\n",
+            format_bytes_per_sec(r),
+            format_bytes_per_sec(w),
+        ));
+    }
+    if let Some(h) = disk.power_on_hours {
+        out.push_str(&format!(
+            "  Power-on hours    {}\n",
+            format_power_on_hours(h)
+        ));
+    }
+    if let Some(c) = disk.power_on_count {
+        out.push_str(&format!("  Power-on cycles   {}\n", c));
+    }
+    if let Some(s) = finite(disk.available_spare_pct) {
+        out.push_str(&format!("  NVMe spare        {:.0} %\n", s));
+    }
+    Some(out.trim_end().to_string())
+}
+
+/// Format cumulative power-on hours with a parenthetical year/day breakdown
+/// once the figure exceeds a year. `5057 h (≈ 0 y 211 d)`.
+fn format_power_on_hours(hours: i64) -> String {
+    if hours <= 0 {
+        return format!("{} h", hours);
+    }
+    let days_total = hours / 24;
+    let years = days_total / 365;
+    let days = days_total % 365;
+    format!("{} h  (\u{2248} {} y {} d)", hours, years, days)
 }
 
 /// Format a `used_gb` / `total_gb` pair (both already in gigabytes).

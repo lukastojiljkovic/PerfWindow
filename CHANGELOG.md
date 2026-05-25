@@ -7,6 +7,93 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ## [Unreleased]
 
+## [0.5.0] — 2026-05-25
+
+A "sensor expansion" release. PerfWindow now bundles the **PawnIO**
+kernel driver (which `LibreHardwareMonitor` 0.9.5+ requires for MSR
+access — see the *Fixed* section), then leverages everything the new
+driver and library expose: hot-spot temps, lifetime metrics, PCIe
+throughput, an Intel-iGPU panel, P-Core / E-Core distinction in the
+heat-map, and **hover tooltips** with plain-language explanations on
+every metric so a non-expert reader can tell `TjMax` apart from
+`Junction` apart from `Vcore` without opening Wikipedia.
+
+### Added
+- **Intel integrated-GPU panel** mirroring the discrete-GPU card.
+  Renders only when an iGPU is enumerated (most laptops, hybrid
+  desktops), with Load, Clock, Power and Voltage where the IGCL
+  telemetry path exposes them.
+- **GPU Memory Junction temperature** stat row, paralleling Hot Spot.
+  VRAM thermal headroom matters during VRAM-heavy work (large texture
+  budgets, on-GPU inference, video encode).
+- **CPU Distance-to-TjMax** stat row showing how many degrees the
+  hottest core has before throttling kicks in. More intuitive than the
+  absolute temperature: `ΔTjMax 12 °C` reads as "12 °C of headroom
+  left".
+- **CPU power breakdown** — Package power stays primary; secondary dim
+  line shows Cores / DRAM / Platform separately when the MSRs expose
+  them. Useful for battery-life analysis on laptops.
+- **GPU PCIe throughput** (Rx / Tx, bytes per second) sparkline in the
+  GPU panel. Surfaces bus saturation during game streaming, model
+  loading or any sustained host↔GPU transfer.
+- **GPU VRAM split** between dedicated and DXGI-shared memory in the
+  VRAM bar. Quick read on how much an app is overflowing into system
+  RAM (a common cause of stutter on laptops with small VRAM).
+- **Per-storage Power-On Hours, cycle count and Available Spare** on a
+  secondary line under each drive: `5057 h · 1103 cycles · spare 100 %`.
+  Together with the existing Health %, they form a complete NVMe
+  lifetime picture.
+- **P-Core / E-Core distinction** in the CPU heat-map for Intel hybrid
+  CPUs. P-Cores and E-Cores are visually separated and color-toned
+  differently so a glance tells whether load is on the performance
+  cluster or the efficiency cluster.
+- **Hover tooltips** on every stat row, chip and bar across all
+  panels. Hovering for half a second produces a one-sentence
+  explanation in plain language — what the metric measures, what a
+  typical range looks like, and what a high value implies. Sourced
+  from a single central description table so terminology stays
+  consistent.
+- The installer bundles the official **PawnIO 2.2.0 setup** (signed by
+  the upstream author, SHA-256 pinned in `build.ps1` for build
+  reproducibility) and chain-installs it silently with the
+  `-install -silent` switches taken from the official winget manifest.
+  Re-running the installer is a no-op for users who already have
+  PawnIO 2.2.0; older PawnIO installs are upgraded in-place by the
+  PawnIO setup itself.
+
+### Fixed
+- **CPU temperature, clock and power readings are back.** Bumping
+  `LibreHardwareMonitorLib` to 0.9.6 in 0.4.0 silently swapped the
+  kernel driver from WinRing0 to [PawnIO](https://pawnio.eu), which
+  PerfWindow's installer did not ship. The sensor backend kept
+  reporting CPU load (a Windows API path) but everything that needs an
+  MSR — temperature, per-core clocks, package power — came back as
+  `null`. The 0.5.0 installer bundles `PawnIO_setup.exe` 2.2.0 and
+  runs it silently as part of the install sequence.
+- The dashboard's changelog viewer renders inline markdown spans
+  (`**bold**`, `*italic*`, `` `code` ``, `[text](url)`) with proper
+  weight, italics, monospace tint, and a clickable hyperlink. Earlier
+  builds stripped these to plain text and the modal looked like
+  unformatted output.
+
+### Changed
+- The `sensord` NDJSON schema gains new optional fields under
+  `cpu`, `gpu[]`, `storage[]` and a new top-level `igpu` field for the
+  Intel integrated GPU. Every addition is annotated
+  `#[serde(default)]` so older `sensord` builds keep parsing without
+  losing existing readings.
+- The Windows Defender exclusions PerfWindow 0.4.1 and earlier
+  registered for WinRing0 are obsolete (PawnIO is signed and Defender
+  does not flag it) and are now removed on install and uninstall.
+  Upgrades from 0.4.1 finish with no PerfWindow-owned Defender state.
+- The installer no longer presents the "Configure Windows Defender for
+  PerfWindow" wizard page — nothing needs to be configured any more.
+
+### Removed
+- The legacy `R0sensord` driver service is stopped and deleted on
+  install and uninstall if a pre-0.5.0 build left it behind. PawnIO
+  manages its own driver service under a different name.
+
 ## [0.4.1] — 2026-05-25
 
 ### Added
@@ -212,7 +299,8 @@ User-facing application behaviour is unchanged.
   matching uninstaller that removes the exclusions, the `R0sensord` driver
   service, the install directory and the per-user data directory.
 
-[Unreleased]: https://github.com/lukastojiljkovic/PerfWindow/compare/v0.4.1...HEAD
+[Unreleased]: https://github.com/lukastojiljkovic/PerfWindow/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/lukastojiljkovic/PerfWindow/releases/tag/v0.5.0
 [0.4.1]: https://github.com/lukastojiljkovic/PerfWindow/releases/tag/v0.4.1
 [0.4.0]: https://github.com/lukastojiljkovic/PerfWindow/releases/tag/v0.4.0
 [0.3.0]: https://github.com/lukastojiljkovic/PerfWindow/releases/tag/v0.3.0

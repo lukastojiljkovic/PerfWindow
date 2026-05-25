@@ -14,6 +14,7 @@
 pub mod changelog_modal;
 pub mod effects;
 pub mod settings;
+pub mod tooltips;
 pub mod update_banner;
 pub mod update_modal;
 
@@ -331,6 +332,9 @@ pub fn card_grid(ui: &mut egui::Ui, app: &mut PerfApp) {
                 cards.push(Card::Gpu(i));
             }
         }
+        if snap.igpu.is_some() {
+            cards.push(Card::Igpu);
+        }
         if snap.ram.is_some() {
             cards.push(Card::Ram);
         }
@@ -378,7 +382,7 @@ impl Card {
     /// single max height, deterministically (one pass, no memoisation).
     fn intrinsic_height(self, snap: &crate::ipc::Snapshot) -> f32 {
         match self {
-            Card::Cpu | Card::Gpu(_) | Card::Ram | Card::Network => ROW_1_CARD_HEIGHT,
+            Card::Cpu | Card::Gpu(_) | Card::Igpu | Card::Ram | Card::Network => ROW_1_CARD_HEIGHT,
             Card::Storage => {
                 let n = snap.storage.as_ref().map(|s| s.len()).unwrap_or(0) as f32;
                 STORAGE_BASE_HEIGHT + STORAGE_DISK_ROW_HEIGHT * n
@@ -395,6 +399,10 @@ impl Card {
 enum Card {
     Cpu,
     Gpu(usize),
+    /// Intel / integrated GPU. Rendered with `gpu_panel` (which already
+    /// special-cases `kind == "integrated"`) but sourced from
+    /// `snap.igpu` rather than `snap.gpu`.
+    Igpu,
     Ram,
     Storage,
     Sensors,
@@ -542,6 +550,13 @@ fn paint_card(
         Card::Gpu(i) => {
             if let Some(gpu) = snap.gpu.as_ref().and_then(|g| g.get(i)) {
                 panels::gpu::gpu_panel(ui, theme, gpu, app.history.gpus.get(i), unit, min_h);
+            }
+        }
+        Card::Igpu => {
+            if let Some(igpu) = &snap.igpu {
+                // No history tracked for the iGPU yet — the panel renders
+                // without the trailing sparkline when `None`.
+                panels::gpu::gpu_panel(ui, theme, igpu, None, unit, min_h);
             }
         }
         Card::Ram => {

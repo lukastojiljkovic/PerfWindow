@@ -93,6 +93,47 @@ function Ensure-VcRedist {
     return $vendorBin
 }
 
+# Downloads PawnIO_setup.exe (the kernel driver LibreHardwareMonitor 0.9.5+
+# uses for MSR access — it replaced WinRing0) into build\vendor\ on demand.
+# Pinned to an exact version with a SHA-256 check so the bundled artifact is
+# reproducible and a tampered redirect cannot slip an unexpected driver into
+# the installer. Re-runs are a no-op once a matching file is present.
+function Ensure-PawnIo {
+    $vendorDir = Join-Path $root 'build\vendor'
+    $vendorBin = Join-Path $vendorDir 'PawnIO_setup.exe'
+    $version = '2.2.0'
+    $expectedSha256 = '1F519A22E47187F70A1379A48CA604981C4FCF694F4E65B734AAA74A9FBA3032'
+    $url = "https://github.com/namazso/PawnIO.Setup/releases/download/$version/PawnIO_setup.exe"
+
+    if (Test-Path $vendorBin) {
+        $existing = (Get-FileHash $vendorBin -Algorithm SHA256).Hash
+        if ($existing -eq $expectedSha256) { return $vendorBin }
+        # Cached file is wrong (older pinned version, partial download); fall
+        # through and re-download.
+        Remove-Item $vendorBin
+    }
+    if (-not (Test-Path $vendorDir)) {
+        New-Item -ItemType Directory -Path $vendorDir | Out-Null
+    }
+    Write-Host "== Downloading PawnIO $version =="
+    $previousProgress = $ProgressPreference
+    $ProgressPreference = 'SilentlyContinue'
+    try {
+        Invoke-WebRequest -Uri $url -OutFile $vendorBin -UseBasicParsing
+    } catch {
+        Remove-Item $vendorBin -ErrorAction SilentlyContinue
+        throw
+    } finally {
+        $ProgressPreference = $previousProgress
+    }
+    $actual = (Get-FileHash $vendorBin -Algorithm SHA256).Hash
+    if ($actual -ne $expectedSha256) {
+        Remove-Item $vendorBin -ErrorAction SilentlyContinue
+        throw "PawnIO SHA-256 mismatch: expected $expectedSha256, got $actual"
+    }
+    return $vendorBin
+}
+
 $appVersion = Get-CargoVersion
 Write-Host "== Publishing sensord (version $appVersion) =="
 dotnet publish "$root\sensord\src" -c Release -r win-x64 --self-contained `
@@ -114,6 +155,7 @@ foreach ($f in @($perfExe, $sensordExe)) {
 
 Write-Host '== Building installer =='
 Ensure-VcRedist | Out-Null
+Ensure-PawnIo | Out-Null
 $iscc = Find-Iscc
 if (-not $iscc) {
     throw 'Inno Setup compiler (ISCC.exe) not found. Install it with: winget install -e --id JRSoftware.InnoSetup'

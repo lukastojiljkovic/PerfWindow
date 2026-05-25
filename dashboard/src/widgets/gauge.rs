@@ -1,5 +1,5 @@
 use crate::theme::Theme;
-use egui::{FontId, Painter, Pos2, Rect, Sense, Shape, Stroke, Vec2};
+use egui::{FontId, Painter, Pos2, Rect, Response, Sense, Shape, Stroke, Vec2};
 use std::f32::consts::TAU;
 
 /// Size of the gauge widget in pixels.
@@ -19,11 +19,14 @@ const SEGMENTS: usize = 120;
 /// clockwise, filled with `theme.accent`. The track is `theme.track`.
 /// Inner disc is `theme.panel` so only the ~8 px ring is visible.
 /// Centre text shows the integer value and `unit`; `label` appears below.
-pub fn donut(ui: &mut egui::Ui, theme: &Theme, value: f32, unit: &str, label: &str) {
-    let (rect, _response) = ui.allocate_exact_size(Vec2::splat(SIZE), Sense::hover());
+///
+/// Returns the gauge's egui [`Response`] so callers can attach a hover
+/// tooltip (e.g. `donut(...).on_hover_text("CPU load.")`).
+pub fn donut(ui: &mut egui::Ui, theme: &Theme, value: f32, unit: &str, label: &str) -> Response {
+    let (rect, response) = ui.allocate_exact_size(Vec2::splat(SIZE), Sense::hover());
 
     if !ui.is_rect_visible(rect) {
-        return;
+        return response;
     }
 
     let painter = ui.painter_at(rect);
@@ -52,6 +55,8 @@ pub fn donut(ui: &mut egui::Ui, theme: &Theme, value: f32, unit: &str, label: &s
 
     // --- centre text ---
     draw_center_text(&painter, rect, theme, value, unit, label);
+
+    response
 }
 
 /// Draw an arc as a polyline of short segments with the given stroke width.
