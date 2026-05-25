@@ -18,12 +18,21 @@ cleanly through Add/Remove Programs.
 - **CPU** — load (overall and per-core or per-thread), package and per-core
   temperatures, current clock, Vcore, RAPL power (Package, plus a Cores / DRAM
   / Platform breakdown on hover) and distance-to-TjMax for throttling headroom.
-  On Intel hybrid CPUs the heat-map distinguishes P-Cores from E-Cores.
+  On Intel hybrid CPUs P-Cores and E-Cores are visually separated in both the
+  default strip view (P at full accent opacity, E dimmer, with a gap between
+  the clusters) and the opt-in per-core heat-map (P / E border colours and
+  corner tags).
 - **GPU** — discrete (NVIDIA / AMD) and integrated (Intel) on their own cards,
   with load, core temperature, GPU hot spot, GDDR memory junction temperature,
-  current clock, fan RPM, power draw, VRAM split (dedicated vs DXGI-shared),
-  PCIe Rx/Tx throughput and core voltage.
-- **RAM** — used / free / cached and pagefile usage.
+  current clock, fan RPM, power draw, VRAM split (dedicated vs DXGI-shared
+  on discretes; megabytes-of-system-memory-mapped on iGPUs), PCIe Rx/Tx
+  throughput and core voltage. The integrated-GPU card hides rows the
+  hardware does not populate, so it stays compact instead of showing a wall
+  of em-dashes on machines whose iGPU exposes only a subset of sensors.
+- **RAM** — used / free / cached, pagefile usage, and per-module DIMM
+  temperature when the SPD hub exposes a thermal sensor (every DDR5 SO-DIMM,
+  most DDR4 desktop kits). The hottest module shows on the card; hover for
+  per-module breakdown.
 - **Storage** — per-drive temperature, activity, capacity, remaining health.
   Hover any drive row for SMART lifetime: power-on hours (with year/day
   breakdown), cold-start cycles and NVMe Available Spare.
