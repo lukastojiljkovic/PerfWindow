@@ -1,11 +1,16 @@
 version: 2
+# One grouped PR per ecosystem per month. Keeps security updates flowing
+# without flooding the branch list — each scan opens at most three PRs
+# (cargo, nuget, github-actions) instead of one per dependency.
 updates:
   - package-ecosystem: cargo
     directory: /dashboard
     schedule:
-      interval: weekly
-      day: monday
-    open-pull-requests-limit: 5
+      interval: monthly
+    open-pull-requests-limit: 3
+    groups:
+      cargo-deps:
+        patterns: ["*"]
     ignore:
       - dependency-name: eframe
         update-types: ["version-update:semver-major"]
@@ -17,17 +22,26 @@ updates:
   - package-ecosystem: nuget
     directory: /sensord/src
     schedule:
-      interval: weekly
-      day: monday
+      interval: monthly
+    open-pull-requests-limit: 3
+    groups:
+      sensord-src-deps:
+        patterns: ["*"]
 
   - package-ecosystem: nuget
     directory: /sensord/tests
     schedule:
-      interval: weekly
-      day: monday
+      interval: monthly
+    open-pull-requests-limit: 3
+    groups:
+      sensord-tests-deps:
+        patterns: ["*"]
 
   - package-ecosystem: github-actions
     directory: /
     schedule:
-      interval: weekly
-      day: monday
+      interval: monthly
+    open-pull-requests-limit: 3
+    groups:
+      actions-deps:
+        patterns: ["*"]

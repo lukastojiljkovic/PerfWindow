@@ -15,6 +15,11 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   while discharging, and battery health (Full Charged Capacity ÷ Design
   Capacity, colour-banded like disk health). The card is conditional on
   a battery being present; desktops are unaffected.
+- **Per-drive HEALTH column** in the Storage panel, showing remaining
+  life (0–100 %, 100 = new). Sourced from LHM's "Remaining Life" sensor
+  with a fallback to the NVMe-spec "Available Spare". Colour-coded: ok
+  at ≥ 80 %, warn at 50–80 %, hot below 50 %. Drives that expose
+  neither sensor render an em-dash and stay neutral.
 - **Per-disk Read / Write throughput** under each storage row, formatted
   with the same human-friendly bytes-per-second formatter as the
   Network panel. Disk row height grew from 25 to 38 px to fit the
@@ -34,27 +39,14 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ### Changed
 - The `sensord` NDJSON schema gains optional fields: `uptime_sec`,
-  `battery`, `storage[].read_bps`, `storage[].write_bps`,
-  `cpu.voltage_v`, and `gpu[].hot_spot_temp`. All are absent when the
-  underlying hardware doesn't expose the reading; the dashboard
-  tolerates older `sensord` builds via `#[serde(default)]`.
+  `battery`, `storage[].health`, `storage[].read_bps`,
+  `storage[].write_bps`, `cpu.voltage_v`, and `gpu[].hot_spot_temp`.
+  All are absent when the underlying hardware doesn't expose the
+  reading; the dashboard tolerates older `sensord` builds via
+  `#[serde(default)]`.
 - Battery-aware layout: when a battery is present, the second grid row
   shows Battery + Storage (+ Sensors if populated). Storage's column
   span shrinks to keep the row to exactly the available column count.
-
-## [0.3.1] — 2026-05-25
-
-### Added
-- Per-drive **HEALTH** column in the Storage panel, showing the drive's
-  remaining-life percentage (0–100 %, where 100 % is a new drive). The
-  reading is sourced from the drive's SMART data via LibreHardwareMonitor's
-  "Remaining Life" sensor, with a fallback to the NVMe-spec
-  "Available Spare" sensor for drives that expose only the latter. The
-  value is colour-coded: ok at ≥ 80 %, warn at 50–80 %, hot below 50 %.
-  Drives that expose neither sensor render an em-dash and stay neutral.
-- New `health` field in the `storage[]` entries of the `sensord` NDJSON
-  schema. Older `sensord` builds without this field continue to parse
-  cleanly thanks to a `#[serde(default)]` on the dashboard side.
 
 ## [0.3.0] — 2026-05-24
 
@@ -210,7 +202,6 @@ User-facing application behaviour is unchanged.
 
 [Unreleased]: https://github.com/lukastojiljkovic/PerfWindow/compare/v0.4.0...HEAD
 [0.4.0]: https://github.com/lukastojiljkovic/PerfWindow/releases/tag/v0.4.0
-[0.3.1]: https://github.com/lukastojiljkovic/PerfWindow/releases/tag/v0.3.1
 [0.3.0]: https://github.com/lukastojiljkovic/PerfWindow/releases/tag/v0.3.0
 [0.2.6]: https://github.com/lukastojiljkovic/PerfWindow/releases/tag/v0.2.6
 [0.2.5]: https://github.com/lukastojiljkovic/PerfWindow/releases/tag/v0.2.5
