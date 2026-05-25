@@ -6,6 +6,7 @@ use crate::history::RingBuffer;
 use crate::ipc::RamInfo;
 use crate::theme::Theme;
 use crate::ui::tooltips::tip;
+use crate::ui::LayoutDensity;
 use crate::widgets::bars::bar_meter;
 use crate::widgets::gauge::donut;
 use crate::widgets::sparkline::sparkline;
@@ -28,6 +29,7 @@ pub fn ram_panel(
     ram: &RamInfo,
     history: Option<&RingBuffer>,
     unit: TempUnit,
+    density: LayoutDensity,
     min_h: f32,
 ) {
     card(ui, theme, min_h, |ui| {
@@ -45,26 +47,32 @@ pub fn ram_panel(
                     stat_row(ui, theme, "FREE", &gb(ram.available_mb), None),
                     "FREE",
                 );
-                tip(
-                    stat_row(ui, theme, "CACHED", &gb(ram.cached_mb), None),
-                    "CACHED",
-                );
+                // CACHED is informative but redundant with USED+FREE.
+                // Skipped in Compact mode.
+                if density == LayoutDensity::Full {
+                    tip(
+                        stat_row(ui, theme, "CACHED", &gb(ram.cached_mb), None),
+                        "CACHED",
+                    );
+                }
 
                 // DIMM temperature — surface the hottest module on the row,
                 // full per-module breakdown on hover. Only present when the
                 // SPD hub exposes a thermal sensor (DDR5; most DDR4 desktop
                 // kits). Older sensord builds and older hardware skip it.
-                if let Some(dimms) = ram.dimm_temps.as_ref().filter(|d| !d.is_empty()) {
-                    let hottest = dimms.iter().map(|d| d.temp_c).fold(f64::MIN, f64::max);
-                    let value = format_temp(Some(hottest), unit);
-                    let col = Some(temp_color(hottest, TempKind::Processor, theme));
-                    let label = if dimms.len() > 1 { "DIMM MAX" } else { "DIMM" };
-                    let resp = stat_row(ui, theme, label, &value, col);
-                    let mut hover = String::from("Per-module DIMM temperatures (°C):\n");
-                    for d in dimms {
-                        hover.push_str(&format!("  {:<10} {:.1}\n", d.label, d.temp_c));
+                if density == LayoutDensity::Full {
+                    if let Some(dimms) = ram.dimm_temps.as_ref().filter(|d| !d.is_empty()) {
+                        let hottest = dimms.iter().map(|d| d.temp_c).fold(f64::MIN, f64::max);
+                        let value = format_temp(Some(hottest), unit);
+                        let col = Some(temp_color(hottest, TempKind::Processor, theme));
+                        let label = if dimms.len() > 1 { "DIMM MAX" } else { "DIMM" };
+                        let resp = stat_row(ui, theme, label, &value, col);
+                        let mut hover = String::from("Per-module DIMM temperatures (°C):\n");
+                        for d in dimms {
+                            hover.push_str(&format!("  {:<10} {:.1}\n", d.label, d.temp_c));
+                        }
+                        resp.on_hover_text(hover.trim_end().to_string());
                     }
-                    resp.on_hover_text(hover.trim_end().to_string());
                 }
             });
         });

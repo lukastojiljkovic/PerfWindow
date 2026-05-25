@@ -24,6 +24,24 @@ pub struct Snapshot {
     pub battery: Option<BatteryInfo>,
     #[serde(default)]
     pub uptime_sec: Option<i64>,
+    /// Fan readings from the ASUS ATK WMI bridge — only present on ASUS
+    /// laptops/desktops with the ATK Package driver installed. Distinct
+    /// from `fans` (which carries LHM Super-I/O fan readings) so the
+    /// dashboard can surface them independently in the footer.
+    #[serde(default)]
+    pub atk_fans: Option<Vec<FanInfo>>,
+    /// Current resolution + refresh rate of the primary monitor, read via
+    /// Win32 `EnumDisplaySettings`. Absent only on headless systems.
+    #[serde(default)]
+    pub display: Option<DisplayInfo>,
+}
+
+/// Active display info — primary monitor resolution and refresh rate.
+#[derive(Debug, Clone, Deserialize)]
+pub struct DisplayInfo {
+    pub width: i32,
+    pub height: i32,
+    pub refresh_hz: i32,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -95,6 +113,18 @@ pub struct GpuInfo {
     /// GPU core voltage rail, volts.
     #[serde(default)]
     pub voltage_v: Option<f64>,
+    /// Per-engine GPU utilisation breakdown (DXGI engines: 3D, Copy,
+    /// Video Decode, Video Encode, Optical Flow, etc.). Sorted by load
+    /// descending — first entry is the busiest engine right now.
+    #[serde(default)]
+    pub d3d_engines: Option<Vec<D3DEngineLoad>>,
+}
+
+/// One DXGI engine's utilisation reading, as emitted by sensord.
+#[derive(Debug, Clone, Deserialize)]
+pub struct D3DEngineLoad {
+    pub name: String,
+    pub load: f64,
 }
 
 #[derive(Debug, Clone, Deserialize)]

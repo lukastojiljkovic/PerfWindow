@@ -48,6 +48,9 @@ pub struct PerfApp {
     /// `config.always_on_top` toggles so we send `ViewportCommand::WindowLevel`
     /// only on transitions, not every frame.
     pub applied_on_top: bool,
+    /// True while the window is in F11 fullscreen mode. Transient — not
+    /// persisted to config. Toggled by the F11 keypress handler.
+    pub fullscreen: bool,
     update_source: Arc<GitHubReleaseSource>,
     os_is_light: bool,
 }
@@ -104,6 +107,7 @@ impl PerfApp {
             want_quit: false,
             show_changelog: false,
             applied_on_top: false,
+            fullscreen: false,
             update_source,
             os_is_light,
         };
@@ -127,6 +131,20 @@ impl PerfApp {
         };
         ctx.send_viewport_cmd(egui::ViewportCommand::WindowLevel(level));
         self.applied_on_top = self.config.always_on_top;
+    }
+
+    /// Toggle the F11 fullscreen state. Hides the OS window chrome
+    /// (decorations) while fullscreen so the dashboard fills the screen
+    /// edge-to-edge, and restores it on exit. The state is transient and not
+    /// persisted to config — F11 always opens a fresh windowed session.
+    fn handle_fullscreen_keypress(&mut self, ctx: &egui::Context) {
+        let toggled = ctx.input(|i| i.key_pressed(egui::Key::F11));
+        if !toggled {
+            return;
+        }
+        self.fullscreen = !self.fullscreen;
+        ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(self.fullscreen));
+        ctx.send_viewport_cmd(egui::ViewportCommand::Decorations(!self.fullscreen));
     }
 
     /// Fire a manual update check, ignoring the cache TTL. Called by the
@@ -269,6 +287,7 @@ impl PerfApp {
             want_quit: false,
             show_changelog: false,
             applied_on_top: false,
+            fullscreen: false,
             update_source: Arc::new(GitHubReleaseSource::new(OWNER, REPO)),
             os_is_light: false,
             config,
@@ -282,6 +301,7 @@ impl eframe::App for PerfApp {
         self.ingest();
         self.poll_download_outcome();
         self.sync_window_level(&ctx);
+        self.handle_fullscreen_keypress(&ctx);
 
         // Title bar on top, footer on the bottom, the card grid filling the
         // scrollable centre. Panels are nested with `show_inside` (we render

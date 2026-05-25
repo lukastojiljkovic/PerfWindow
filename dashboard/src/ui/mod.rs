@@ -270,6 +270,30 @@ pub fn footer(ui: &mut egui::Ui, app: &mut PerfApp) {
                     let up = format_bytes_per_sec(finite(net.up_bps).unwrap_or(0.0));
                     foot_item(ui, &theme, &format!("NET \u{2193}{down} \u{2191}{up}"));
                 }
+                // ATK fans (ASUS-only). Each fan reads as one footer chip
+                // labelled with its short name and current value. Skipped
+                // silently on non-ASUS hardware.
+                if let Some(fans) = &snap.atk_fans {
+                    for fan in fans {
+                        if let Some(rpm) = fan.rpm {
+                            let short = fan
+                                .name
+                                .strip_suffix(" Fan")
+                                .unwrap_or(&fan.name)
+                                .to_uppercase();
+                            foot_item(ui, &theme, &format!("{short} FAN {}", rpm.round() as i64));
+                        }
+                    }
+                }
+                // Active display: resolution + refresh rate. Read once per
+                // snapshot via Win32 EnumDisplaySettings on the sensord side.
+                if let Some(d) = &snap.display {
+                    foot_item(
+                        ui,
+                        &theme,
+                        &format!("{}x{} @ {}Hz", d.width, d.height, d.refresh_hz),
+                    );
+                }
             }
         });
     });
@@ -356,10 +380,39 @@ pub fn card_grid(ui: &mut egui::Ui, app: &mut PerfApp) {
         let avail_w = ui.available_width();
         let cols = column_count(avail_w);
         let col_width = ((avail_w - GRID_GAP * (cols as f32 - 1.0)) / cols as f32).max(1.0);
+        // Compact mode: hide non-essential rows when the window is at or
+        // near its minimum size, so the panels fit without scrolling.
+        // Threshold sits just below the 4-col breakpoint, so the default
+        // launch size (1180 px wide → 4 cols) shows everything and only a
+        // user who deliberately shrinks the window gets the trim-down.
+        let density = if avail_w >= COMPACT_THRESHOLD {
+            LayoutDensity::Full
+        } else {
+            LayoutDensity::Compact
+        };
 
         let spans = layout_spans(&cards, cols);
-        layout_cards(ui, app, &snap, &cards, &spans, cols, col_width);
+        layout_cards(ui, app, &snap, &cards, &spans, cols, col_width, density);
     });
+}
+
+/// Width threshold below which panels switch to compact (essentials-only)
+/// rendering. Tuned to sit just below the 4-col breakpoint so the default
+/// 1180×600 launch size stays in `Full` mode and only a deliberate shrink
+/// drops to `Compact`.
+const COMPACT_THRESHOLD: f32 = 1100.0;
+
+/// Per-frame density signal handed to every panel function so it can drop
+/// non-essential stat rows when the window is narrow.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum LayoutDensity {
+    /// Window has room for everything — render every stat row, breakdown,
+    /// and tooltip-source row.
+    Full,
+    /// Window is at or near its minimum size — drop secondary readings
+    /// (HOTSPOT, JUNCTION, PCIE, V, VCORE, TJMAX, CACHED, DIMM, LINK,
+    /// HEALTH on Battery) so the panel fits without scrolling.
+    Compact,
 }
 
 /// Fixed outer height of the "summary" cards in the top row (CPU, GPU, RAM,
@@ -468,6 +521,7 @@ fn column_count(avail: f32) -> usize {
 /// Each row is one `ui.horizontal`; a single-width card is allocated
 /// `col_width`, the double-width Storage card `2*col_width + GRID_GAP`. A card
 /// that would not fit in the columns left on the current row starts a new row.
+#[allow(clippy::too_many_arguments)]
 fn layout_cards(
     ui: &mut egui::Ui,
     app: &PerfApp,
@@ -476,6 +530,7 @@ fn layout_cards(
     spans: &[usize],
     cols: usize,
     col_width: f32,
+    density: LayoutDensity,
 ) {
     ui.spacing_mut().item_spacing = Vec2::splat(GRID_GAP);
 
@@ -516,7 +571,7 @@ fn layout_cards(
                     |ui| {
                         ui.set_width(width);
                         ui.set_height(row_h);
-                        paint_card(ui, app, snap, cards[i], row_h);
+                        paint_card(ui, app, snap, cards[i], row_h, density);
                     },
                 );
             }
@@ -534,6 +589,7 @@ fn paint_card(
     snap: &crate::ipc::Snapshot,
     card: Card,
     min_h: f32,
+    density: LayoutDensity,
 ) {
     let theme = &app.theme;
     let unit = app.config.unit;
@@ -547,25 +603,42 @@ fn paint_card(
                     app.history.cpu.as_ref(),
                     unit,
                     app.config.cpu_heat_map,
+                    density,
                     min_h,
                 );
             }
         }
         Card::Gpu(i) => {
             if let Some(gpu) = snap.gpu.as_ref().and_then(|g| g.get(i)) {
-                panels::gpu::gpu_panel(ui, theme, gpu, app.history.gpus.get(i), unit, min_h);
+                panels::gpu::gpu_panel(
+                    ui,
+                    theme,
+                    gpu,
+                    app.history.gpus.get(i),
+                    unit,
+                    density,
+                    min_h,
+                );
             }
         }
         Card::Igpu => {
             if let Some(igpu) = &snap.igpu {
                 // No history tracked for the iGPU yet — the panel renders
                 // without the trailing sparkline when `None`.
-                panels::gpu::gpu_panel(ui, theme, igpu, None, unit, min_h);
+                panels::gpu::gpu_panel(ui, theme, igpu, None, unit, density, min_h);
             }
         }
         Card::Ram => {
             if let Some(ram) = &snap.ram {
-                panels::ram::ram_panel(ui, theme, ram, app.history.ram.as_ref(), unit, min_h);
+                panels::ram::ram_panel(
+                    ui,
+                    theme,
+                    ram,
+                    app.history.ram.as_ref(),
+                    unit,
+                    density,
+                    min_h,
+                );
             }
         }
         Card::Storage => {

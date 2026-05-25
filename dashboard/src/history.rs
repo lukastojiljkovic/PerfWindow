@@ -194,6 +194,8 @@ mod tests {
             }),
             battery: None,
             uptime_sec: None,
+            atk_fans: None,
+            display: None,
         };
         h.record(&snap);
         h.record(&snap);
@@ -229,6 +231,7 @@ mod tests {
                 dedicated_vram_used_mb: None,
                 shared_vram_used_mb: None,
                 voltage_v: None,
+                d3d_engines: None,
             }]),
             igpu: None,
             ram: None,
@@ -239,6 +242,8 @@ mod tests {
             net: None,
             battery: None,
             uptime_sec: None,
+            atk_fans: None,
+            display: None,
         };
         h.record(&snap);
         h.record(&snap);

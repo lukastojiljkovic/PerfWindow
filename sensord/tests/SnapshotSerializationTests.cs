@@ -26,7 +26,7 @@ public class SnapshotSerializationTests
                 ECoreCount: null),
             Gpu: null, Igpu: null, Ram: null, Storage: null, Board: null,
             Fans: null, Voltages: null, Net: null,
-            Battery: null, UptimeSec: null);
+            Battery: null, UptimeSec: null, AtkFans: null, Display: null);
 
         string json = JsonSerializer.Serialize(snap, SensordJsonContext.Default.Snapshot);
 
@@ -42,7 +42,7 @@ public class SnapshotSerializationTests
         var snap = new Snapshot(
             Version: 1, Timestamp: 1, Cpu: null, Gpu: null, Igpu: null, Ram: null,
             Storage: null, Board: null, Fans: null, Voltages: null,
-            Net: null, Battery: null, UptimeSec: null);
+            Net: null, Battery: null, UptimeSec: null, AtkFans: null, Display: null);
         string json = JsonSerializer.Serialize(snap, SensordJsonContext.Default.Snapshot);
         Assert.DoesNotContain("\"gpu\"", json);
         Assert.DoesNotContain("\"cpu\"", json);

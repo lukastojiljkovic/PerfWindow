@@ -6,6 +6,7 @@ use crate::history::GpuHistory;
 use crate::ipc::GpuInfo;
 use crate::theme::Theme;
 use crate::ui::tooltips::tip;
+use crate::ui::LayoutDensity;
 use crate::widgets::gauge::donut;
 use crate::widgets::stat::stat_row;
 use crate::widgets::{temp_color, TempKind};
@@ -26,6 +27,7 @@ pub fn gpu_panel(
     gpu: &GpuInfo,
     history: Option<&GpuHistory>,
     unit: TempUnit,
+    density: LayoutDensity,
     min_h: f32,
 ) {
     let integrated = gpu.kind == "integrated";
@@ -36,25 +38,36 @@ pub fn gpu_panel(
 
         // Load donut on the left, two columns of stat rows on the right.
         ui.horizontal(|ui| {
-            donut(ui, theme, gpu.load.unwrap_or(0.0) as f32, "%", "LOAD").on_hover_text(
-                "GPU compute utilisation, 0–100 %. Reflects the 3D / compute \
-                 engine; idle desktops sit close to 0 even with the GPU clocked up.",
-            );
+            let load_resp = donut(ui, theme, gpu.load.unwrap_or(0.0) as f32, "%", "LOAD");
+            // Default tooltip — overridden below when D3D engine breakdown is
+            // available (which gives a much more actionable explanation than
+            // a generic blurb about utilisation).
+            if let Some(text) = d3d_breakdown_tooltip(gpu) {
+                load_resp.on_hover_text(text);
+            } else {
+                load_resp.on_hover_text(
+                    "GPU compute utilisation, 0–100 %. Reflects the 3D / compute \
+                     engine; idle desktops sit close to 0 even with the GPU clocked up.",
+                );
+            }
 
             // Decide once which rows have data — kept stable across the two
             // columns so the visual layout is predictable. Discrete GPUs
             // always show TEMP/CLOCK/POWER (the headline trio) even when the
             // current snapshot is missing one; iGPUs hide them when the
             // hardware does not expose the reading.
+            let full = density == LayoutDensity::Full;
             let show_temp = !integrated || gpu.temp.is_some();
             let show_clock = finite(gpu.clock_mhz).is_some();
-            let show_hot_spot = finite(gpu.hot_spot_temp).is_some();
-            let show_junction = finite(gpu.memory_junction_temp_c).is_some();
+            // HOTSPOT, JUNCTION, PCIE, V are detail readings — kept in Full
+            // mode, dropped in Compact so the card fits a narrow window.
+            let show_hot_spot = full && finite(gpu.hot_spot_temp).is_some();
+            let show_junction = full && finite(gpu.memory_junction_temp_c).is_some();
             let show_mem_use = !integrated || finite(gpu.memory_load).is_some();
             let show_vram = true; // dedicated for discrete, shared for iGPU
-            let show_pcie = sum_optional(gpu.pcie_rx_bps, gpu.pcie_tx_bps).is_some();
+            let show_pcie = full && sum_optional(gpu.pcie_rx_bps, gpu.pcie_tx_bps).is_some();
             let show_power = !integrated || finite(gpu.power_w).map(|p| p > 0.05).unwrap_or(false);
-            let show_voltage = finite(gpu.voltage_v).is_some();
+            let show_voltage = full && finite(gpu.voltage_v).is_some();
 
             ui.columns(2, |cols| {
                 // -------- Left column: TEMP, HOTSPOT, JUNCTION, CLOCK, V --------
@@ -157,6 +170,35 @@ fn sum_optional(a: Option<f64>, b: Option<f64>) -> Option<f64> {
         (Some(x), None) | (None, Some(x)) => Some(x),
         (None, None) => None,
     }
+}
+
+/// Hover text for the LOAD donut summarising which DXGI engines are busy.
+/// Reads `gpu.d3d_engines` (sensord's pre-sorted descending breakdown of
+/// "D3D 3D", "D3D Copy", "D3D Video Encode" etc.) and formats every entry
+/// with a meaningful (>0.5 %) load. Returns `None` when sensord did not
+/// publish a breakdown — older builds, hardware without D3D counters.
+fn d3d_breakdown_tooltip(gpu: &GpuInfo) -> Option<String> {
+    let engines = gpu.d3d_engines.as_ref()?;
+    if engines.is_empty() {
+        return None;
+    }
+    let mut out = String::from("GPU compute utilisation, 0–100 %.\n");
+    if let Some(total) = finite(gpu.load) {
+        out.push_str(&format!("Overall: {:.0} %\n", total));
+    }
+    out.push_str("\nPer DXGI engine (idle engines hidden):\n");
+    let mut shown = 0;
+    for e in engines {
+        if e.load < 0.5 {
+            continue;
+        }
+        out.push_str(&format!("  {:<18} {:>5.1} %\n", e.name, e.load));
+        shown += 1;
+    }
+    if shown == 0 {
+        out.push_str("  (all engines idle)\n");
+    }
+    Some(out.trim_end().to_string())
 }
 
 /// Hover text for the PCIe row when at least one direction has data.
