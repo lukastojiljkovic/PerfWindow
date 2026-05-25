@@ -13,6 +13,10 @@ pub struct Snapshot {
     pub fans: Option<Vec<FanInfo>>,
     pub voltages: Option<Vec<VoltageInfo>>,
     pub net: Option<NetInfo>,
+    #[serde(default)]
+    pub battery: Option<BatteryInfo>,
+    #[serde(default)]
+    pub uptime_sec: Option<i64>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -25,6 +29,8 @@ pub struct CpuInfo {
     pub power_w: Option<f64>,
     #[serde(default)]
     pub core_temps: Option<Vec<Option<f64>>>,
+    #[serde(default)]
+    pub voltage_v: Option<f64>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -40,6 +46,8 @@ pub struct GpuInfo {
     pub power_w: Option<f64>,
     #[serde(default)]
     pub memory_load: Option<f64>,
+    #[serde(default)]
+    pub hot_spot_temp: Option<f64>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -61,6 +69,23 @@ pub struct StorageInfo {
     pub activity: Option<f64>,
     pub used_gb: Option<f64>,
     pub total_gb: Option<f64>,
+    #[serde(default)]
+    pub health: Option<f64>,
+    #[serde(default)]
+    pub read_bps: Option<f64>,
+    #[serde(default)]
+    pub write_bps: Option<f64>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct BatteryInfo {
+    pub charge_pct: Option<f64>,
+    /// Signed rate: positive when charging, negative when discharging, in watts.
+    pub rate_w: Option<f64>,
+    pub voltage_v: Option<f64>,
+    pub design_capacity_mwh: Option<f64>,
+    pub full_capacity_mwh: Option<f64>,
+    pub time_remaining_sec: Option<i64>,
 }
 
 #[derive(Debug, Clone, Deserialize)]

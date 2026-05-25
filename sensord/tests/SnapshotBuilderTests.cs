@@ -44,7 +44,7 @@ public class SnapshotBuilderTests
 
     /// <summary>A GpuInfo with only the name and kind these tests care about.</summary>
     private static GpuInfo Gpu(string name, string kind)
-        => new(name, kind, null, null, null, null, null, null, null, null);
+        => new(name, kind, null, null, null, null, null, null, null, null, null);
 
     // ---- Edge-case Build() tests ---------------------------------------
 
@@ -109,6 +109,171 @@ public class SnapshotBuilderTests
         Assert.Equal("nvme", snap.Storage![0].Kind);
         Assert.Null(snap.Storage![0].TotalGb);
         Assert.Null(snap.Storage![0].UsedGb);
+    }
+
+    [Fact]
+    public void Build_reads_storage_health_from_remaining_life_level_sensor()
+    {
+        var disk = new FakeStorage
+        {
+            Name = "Samsung 980 Pro",
+            IdentifierValue = "/nvme/0",
+            SensorsArray = new ISensor[]
+            {
+                new FakeSensor { Name = "Remaining Life", SensorType = SensorType.Level, Value = 96f },
+            },
+        };
+        var snap = SnapshotBuilder.Build(
+            new IHardware[] { disk },
+            default,
+            new Dictionary<string, long>(),
+            new Dictionary<int, PhysicalDiskInfo>());
+
+        Assert.Equal(96.0, snap.Storage![0].Health);
+    }
+
+    [Fact]
+    public void Build_falls_back_to_available_spare_when_remaining_life_missing()
+    {
+        var disk = new FakeStorage
+        {
+            Name = "Generic NVMe",
+            IdentifierValue = "/nvme/0",
+            SensorsArray = new ISensor[]
+            {
+                new FakeSensor { Name = "Available Spare", SensorType = SensorType.Level, Value = 88f },
+            },
+        };
+        var snap = SnapshotBuilder.Build(
+            new IHardware[] { disk },
+            default,
+            new Dictionary<string, long>(),
+            new Dictionary<int, PhysicalDiskInfo>());
+
+        Assert.Equal(88.0, snap.Storage![0].Health);
+    }
+
+    [Fact]
+    public void Build_leaves_storage_health_null_when_no_matching_level_sensor()
+    {
+        var disk = new FakeStorage
+        {
+            Name = "Old HDD",
+            IdentifierValue = "/hdd/0",
+            SensorsArray = new ISensor[]
+            {
+                // A Level sensor that is not health-related, plus an unrelated
+                // Temperature sensor — neither should be picked up as health.
+                new FakeSensor { Name = "Write Amplification", SensorType = SensorType.Level, Value = 1.4f },
+                new FakeSensor { Name = "Temperature 1",       SensorType = SensorType.Temperature, Value = 38f },
+            },
+        };
+        var snap = SnapshotBuilder.Build(
+            new IHardware[] { disk },
+            default,
+            new Dictionary<string, long>(),
+            new Dictionary<int, PhysicalDiskInfo>());
+
+        Assert.Null(snap.Storage![0].Health);
+    }
+
+    [Fact]
+    public void Build_reads_storage_read_and_write_throughput()
+    {
+        var disk = new FakeStorage
+        {
+            Name = "WD Black",
+            IdentifierValue = "/nvme/0",
+            SensorsArray = new ISensor[]
+            {
+                new FakeSensor { Name = "Read Rate",  SensorType = SensorType.Throughput, Value = 50_000_000f },
+                new FakeSensor { Name = "Write Rate", SensorType = SensorType.Throughput, Value =  2_000_000f },
+            },
+        };
+        var snap = SnapshotBuilder.Build(
+            new IHardware[] { disk },
+            default,
+            new Dictionary<string, long>(),
+            new Dictionary<int, PhysicalDiskInfo>());
+
+        Assert.Equal(50_000_000.0, snap.Storage![0].ReadBps);
+        Assert.Equal(2_000_000.0, snap.Storage![0].WriteBps);
+    }
+
+    [Fact]
+    public void BuildCpu_reads_vcore_from_voltage_sensor()
+    {
+        var cpu = new FakeHardware
+        {
+            Name = "Test CPU",
+            HardwareTypeValue = HardwareType.Cpu,
+            SensorsArray = new ISensor[]
+            {
+                new FakeSensor { Name = "Vcore", SensorType = SensorType.Voltage, Value = 1.234f },
+            },
+        };
+
+        var info = SnapshotBuilder.BuildCpu(cpu);
+        Assert.Equal(1.234, info.VoltageV!.Value, 3);
+    }
+
+    [Fact]
+    public void BuildGpus_reads_hot_spot_temperature()
+    {
+        var gpu = new FakeHardware
+        {
+            Name = "NVIDIA GeForce RTX 4070 Laptop GPU",
+            HardwareTypeValue = HardwareType.GpuNvidia,
+            SensorsArray = new ISensor[]
+            {
+                new FakeSensor { Name = "GPU Hot Spot", SensorType = SensorType.Temperature, Value = 85f },
+            },
+        };
+
+        var gpus = SnapshotBuilder.BuildGpus(new IHardware[] { gpu });
+        Assert.Single(gpus);
+        Assert.Equal(85.0, gpus[0].HotSpotTempC);
+    }
+
+    [Fact]
+    public void BuildBattery_collapses_discharge_rate_to_negative_rate_w()
+    {
+        var batt = new FakeHardware
+        {
+            Name = "Battery",
+            HardwareTypeValue = HardwareType.Battery,
+            SensorsArray = new ISensor[]
+            {
+                new FakeSensor { Name = "Charge Level",   SensorType = SensorType.Level,   Value = 64f },
+                new FakeSensor { Name = "Discharge Rate", SensorType = SensorType.Power,   Value = 12.4f },
+                new FakeSensor { Name = "Voltage",        SensorType = SensorType.Voltage, Value = 11.2f },
+            },
+        };
+
+        var info = SnapshotBuilder.BuildBattery(new IHardware[] { batt });
+        Assert.NotNull(info);
+        Assert.Equal(64.0, info!.ChargePct);
+        Assert.Equal(-12.4, info.RateW!.Value, 2);
+        Assert.Equal(11.2, info.VoltageV!.Value, 2);
+    }
+
+    [Fact]
+    public void BuildBattery_returns_null_when_no_battery_hardware_present()
+    {
+        var info = SnapshotBuilder.BuildBattery(Array.Empty<IHardware>());
+        Assert.Null(info);
+    }
+
+    [Fact]
+    public void Build_populates_uptime_seconds()
+    {
+        var snap = SnapshotBuilder.Build(
+            Array.Empty<IHardware>(),
+            default,
+            new Dictionary<string, long>(),
+            new Dictionary<int, PhysicalDiskInfo>());
+        Assert.NotNull(snap.UptimeSec);
+        Assert.True(snap.UptimeSec!.Value > 0);
     }
 
     [Fact]

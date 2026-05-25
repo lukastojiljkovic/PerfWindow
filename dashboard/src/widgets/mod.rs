@@ -30,3 +30,15 @@ pub fn temp_color(celsius: f64, kind: TempKind, theme: &Theme) -> Color32 {
         theme.ok
     }
 }
+
+/// ok / warn / hot colour for a drive's remaining-life percentage.
+/// 100 % is a new drive, 0 % is end-of-life.
+pub fn health_color(percent: f64, theme: &Theme) -> Color32 {
+    if percent < 50.0 {
+        theme.hot
+    } else if percent < 80.0 {
+        theme.warn
+    } else {
+        theme.ok
+    }
+}

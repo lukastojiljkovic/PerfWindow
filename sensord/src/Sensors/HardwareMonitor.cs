@@ -18,6 +18,7 @@ public sealed class HardwareMonitor : IDisposable
             IsStorageEnabled = true,
             IsNetworkEnabled = true,
             IsControllerEnabled = true,
+            IsBatteryEnabled = true,
         };
         _computer.Open();
     }

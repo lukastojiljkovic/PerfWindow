@@ -29,6 +29,12 @@ public static class SnapshotBuilder
             .DefaultIfEmpty(null)
             .Max();
 
+        // Vcore / VID is exposed under several vendor-specific names. Try the
+        // common ones in order; first hit wins.
+        double? voltage = cpu.Val(SensorType.Voltage, "Vcore")
+                       ?? cpu.Val(SensorType.Voltage, "CPU VID")
+                       ?? cpu.Val(SensorType.Voltage, "CPU Core");
+
         return new CpuInfo(
             Name: cpu.Name,
             Load: cpu.Val(SensorType.Load, "CPU Total"),
@@ -36,7 +42,8 @@ public static class SnapshotBuilder
             Temp: temp,
             ClockMhz: clock,
             PowerW: cpu.Val(SensorType.Power, "Package"),
-            CoreTemps: coreTemps.Count > 0 ? coreTemps : null);
+            CoreTemps: coreTemps.Count > 0 ? coreTemps : null,
+            VoltageV: voltage);
     }
 
     public static List<GpuInfo> BuildGpus(IEnumerable<IHardware> hardware)
@@ -51,6 +58,11 @@ public static class SnapshotBuilder
                 || hw.Name.Contains("Radeon Graphics", StringComparison.OrdinalIgnoreCase)
                 || hw.Name.Contains("Vega", StringComparison.OrdinalIgnoreCase);
 
+            // Vendor drivers name the GPU die hot-spot reading differently.
+            // NVIDIA: "GPU Hot Spot"; AMD: "GPU Hot Spot" or "GPU Junction".
+            double? hotSpot = hw.Val(SensorType.Temperature, "GPU Hot Spot")
+                           ?? hw.Val(SensorType.Temperature, "GPU Junction");
+
             gpus.Add(new GpuInfo(
                 Name: hw.Name,
                 Kind: integrated ? "integrated" : "discrete",
@@ -61,7 +73,8 @@ public static class SnapshotBuilder
                 ClockMhz: hw.Val(SensorType.Clock, "GPU Core"),
                 FanRpm: hw.Val(SensorType.Fan, "GPU"),
                 PowerW: hw.Val(SensorType.Power, "GPU"),
-                MemoryLoad: hw.Val(SensorType.Load, "GPU Memory Controller")));
+                MemoryLoad: hw.Val(SensorType.Load, "GPU Memory Controller"),
+                HotSpotTempC: hotSpot));
         }
         return PreferDiscreteGpus(gpus);
     }
@@ -128,13 +141,29 @@ public static class SnapshotBuilder
                 usedGb = null;
             }
 
+            // LHM exposes drive wear as a `Level` sensor. "Remaining Life" is
+            // the common name across SATA SSD/HDD and most NVMe drivers; some
+            // NVMe-only firmwares emit only the NVMe-spec "Available Spare",
+            // which is semantically identical (0–100 %, 100 = new). We
+            // intentionally skip "Percentage Used" (inverse semantics) to keep
+            // the JSON contract single-meaning.
+            double? health = hw.Val(SensorType.Level, "Remaining Life")
+                          ?? hw.Val(SensorType.Level, "Available Spare");
+
+            // Per-drive throughput, bytes/second.
+            double? readBps = hw.Val(SensorType.Throughput, "Read Rate");
+            double? writeBps = hw.Val(SensorType.Throughput, "Write Rate");
+
             list.Add(new StorageInfo(
                 Name: hw.Name,
                 Kind: kind,
                 Temp: hw.FirstVal(SensorType.Temperature),
                 Activity: hw.Val(SensorType.Load, "Total Activity"),
                 UsedGb: usedGb,
-                TotalGb: totalGb));
+                TotalGb: totalGb,
+                Health: health,
+                ReadBps: readBps,
+                WriteBps: writeBps));
         }
         return list;
     }
@@ -177,6 +206,74 @@ public static class SnapshotBuilder
             }
         }
         return (fans, voltages);
+    }
+
+    /// <summary>
+    /// Picks the first <c>HardwareType.Battery</c> from the LHM inventory and
+    /// flattens its sensors into a <see cref="BatteryInfo"/>. Returns
+    /// <c>null</c> on desktops (no battery hardware present).
+    /// </summary>
+    /// <remarks>
+    /// LHM exposes charging and discharging as two separate <c>Power</c>
+    /// sensors. We collapse them into a single signed <c>rate_w</c>:
+    /// positive while charging, negative while discharging. Capacities are
+    /// reported in mWh under <c>SensorType.Energy</c>.
+    /// </remarks>
+    public static BatteryInfo? BuildBattery(IEnumerable<IHardware> hardware)
+    {
+        var batt = hardware.FirstOrDefault(h => h.HardwareType == HardwareType.Battery);
+        if (batt is null) return null;
+
+        // LHM exposes one combined "Charge/Discharge Rate" power sensor that is
+        // positive while charging and negative while discharging. Older driver
+        // builds report two separate "Charge Rate" / "Discharge Rate" sensors;
+        // try the combined form first, then collapse the split form into the
+        // same signed convention.
+        double? combinedRate = batt.Val(SensorType.Power, "Charge/Discharge Rate");
+        double? rateW = combinedRate;
+        if (rateW is null)
+        {
+            double? dischargeRate = FindPowerExact(batt, "Discharge Rate");
+            double? chargeRate = FindPowerExact(batt, "Charge Rate");
+            rateW = dischargeRate.HasValue ? -dischargeRate.Value
+                  : chargeRate.HasValue ? chargeRate.Value
+                  : (double?)null;
+        }
+
+        double? remainingSecRaw = batt.Val(SensorType.TimeSpan, "Remaining Time (Estimated)");
+        long? remainingSec = remainingSecRaw.HasValue ? (long)remainingSecRaw.Value : (long?)null;
+
+        // LHM names "Fully-Charged Capacity" (with the hyphen); the older
+        // "Full Charged Capacity" form is kept as a fallback for safety.
+        double? fullCap = batt.Val(SensorType.Energy, "Fully-Charged Capacity")
+                       ?? batt.Val(SensorType.Energy, "Full Charged Capacity");
+
+        return new BatteryInfo(
+            ChargePct: batt.Val(SensorType.Level, "Charge Level"),
+            RateW: rateW,
+            VoltageV: batt.Val(SensorType.Voltage, "Voltage"),
+            DesignCapacityMwh: batt.Val(SensorType.Energy, "Designed Capacity"),
+            FullCapacityMwh: fullCap,
+            TimeRemainingSec: remainingSec);
+    }
+
+    /// <summary>
+    /// Exact-name <c>SensorType.Power</c> lookup. Used in <see cref="BuildBattery"/>
+    /// because the substring-matching default would mis-attribute a probe for
+    /// "Charge Rate" to a "Discharge Rate" sensor.
+    /// </summary>
+    private static double? FindPowerExact(IHardware hw, string exactName)
+    {
+        foreach (var s in hw.Sensors)
+        {
+            if (s.SensorType == SensorType.Power
+                && s.Name.Equals(exactName, StringComparison.OrdinalIgnoreCase)
+                && s.Value is float v)
+            {
+                return v;
+            }
+        }
+        return null;
     }
 
     public static NetInfo? BuildNet(IEnumerable<IHardware> hardware, IReadOnlyDictionary<string, long> linkSpeeds)
@@ -224,6 +321,8 @@ public static class SnapshotBuilder
             Board: BuildBoard(boardHw),
             Fans: fans.Count > 0 ? fans : null,
             Voltages: voltages.Count > 0 ? voltages : null,
-            Net: BuildNet(hardware, linkSpeeds));
+            Net: BuildNet(hardware, linkSpeeds),
+            Battery: BuildBattery(hardware),
+            UptimeSec: Environment.TickCount64 / 1000);
     }
 }

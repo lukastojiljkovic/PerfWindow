@@ -1,7 +1,7 @@
 //! The CPU component panel.
 
 use super::{card, panel_title};
-use crate::format::{format_temp, TempUnit};
+use crate::format::{finite, format_temp, TempUnit};
 use crate::history::RingBuffer;
 use crate::ipc::CpuInfo;
 use crate::theme::Theme;
@@ -41,6 +41,9 @@ pub fn cpu_panel(
 
                 stat_row(ui, theme, "CLOCK", &format_clock(cpu.clock_mhz), None);
                 stat_row(ui, theme, "POWER", &format_power(cpu.power_w), None);
+                if let Some(v) = finite(cpu.voltage_v) {
+                    stat_row(ui, theme, "VCORE", &format!("{v:.3} V"), None);
+                }
             });
         });
 

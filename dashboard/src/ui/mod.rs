@@ -11,6 +11,7 @@
 //! submodule paints the retro CRT overlay — grid, scanlines, vignette — last of
 //! all each frame.
 
+pub mod changelog_modal;
 pub mod effects;
 pub mod settings;
 pub mod update_banner;
@@ -18,7 +19,9 @@ pub mod update_modal;
 
 use crate::app::{PerfApp, Status};
 use crate::config::ThemeId;
-use crate::format::{finite, format_bytes_per_sec, format_percent, letter_spaced, TempUnit};
+use crate::format::{
+    finite, format_bytes_per_sec, format_percent, format_uptime, letter_spaced, TempUnit,
+};
 use crate::panels;
 use crate::theme::Theme;
 use egui::{Align, FontId, Layout, Margin, RichText, Sense, Stroke, Vec2};
@@ -190,11 +193,13 @@ fn chip(ui: &mut egui::Ui, theme: &Theme, label: &str, on: bool) -> egui::Respon
 /// Draw the footer: a `chrome`-filled strip opened by a 1 px `border` top rule.
 ///
 /// Left to right: a status dot — the running app version when sensord is
-/// streaming, NO SIGNAL when it isn't — the configured refresh rate and the
-/// latest snapshot's headline CPU / GPU / network figures. Matches `.pw-foot`
-/// in the mockup.
-pub fn footer(ui: &mut egui::Ui, app: &PerfApp) {
-    let theme = &app.theme;
+/// streaming, NO SIGNAL when it isn't — the configured refresh rate, system
+/// uptime, and the latest snapshot's headline CPU / GPU / network figures.
+/// While `sensord` is alive, the version label is a clickable widget that
+/// opens the in-app changelog viewer; in `NO SIGNAL` state it stays a plain
+/// label. Matches `.pw-foot` in the mockup.
+pub fn footer(ui: &mut egui::Ui, app: &mut PerfApp) {
+    let theme = app.theme.clone();
     let frame = egui::Frame::NONE
         .fill(theme.chrome)
         .inner_margin(Margin::symmetric(STRIP_PADDING_X, STRIP_PADDING_Y_FOOT));
@@ -203,43 +208,58 @@ pub fn footer(ui: &mut egui::Ui, app: &PerfApp) {
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 15.0;
 
-            // Status dot: shows the running app version when sensord is alive,
-            // NO SIGNAL when it isn't. The version is baked in at compile time
-            // from Cargo.toml so the footer cannot drift from the actual binary.
             let running = app.status == Status::Running;
-            let (dot_text, dot_color) = if running {
-                (concat!("\u{25cf} v", env!("CARGO_PKG_VERSION")), theme.ok)
+            if running {
+                // Clickable version label opens the changelog modal.
+                let dot_text = concat!("\u{25cf} v", env!("CARGO_PKG_VERSION"));
+                let resp = ui
+                    .add(
+                        egui::Label::new(
+                            RichText::new(dot_text)
+                                .family(theme.font_data.egui())
+                                .size(10.0)
+                                .color(theme.ok),
+                        )
+                        .sense(Sense::click()),
+                    )
+                    .on_hover_cursor(egui::CursorIcon::PointingHand)
+                    .on_hover_text("Show changelog");
+                if resp.clicked() {
+                    app.show_changelog = true;
+                }
             } else {
-                ("\u{25cf} NO SIGNAL", theme.hot)
-            };
-            ui.label(
-                RichText::new(dot_text)
-                    .family(theme.font_data.egui())
-                    .size(10.0)
-                    .color(dot_color),
-            );
+                ui.label(
+                    RichText::new("\u{25cf} NO SIGNAL")
+                        .family(theme.font_data.egui())
+                        .size(10.0)
+                        .color(theme.hot),
+                );
+            }
 
             // Refresh rate.
             foot_item(
                 ui,
-                theme,
+                &theme,
                 &format!("refresh {}", app.config.refresh.label()),
             );
 
             // Headline snapshot figures.
             if let Some(snap) = &app.latest {
+                if let Some(secs) = snap.uptime_sec {
+                    foot_item(ui, &theme, &format!("UP {}", format_uptime(secs)));
+                }
                 if let Some(cpu) = &snap.cpu {
-                    foot_item(ui, theme, &format!("CPU {}%", format_percent(cpu.load)));
+                    foot_item(ui, &theme, &format!("CPU {}%", format_percent(cpu.load)));
                 }
                 if let Some(gpus) = &snap.gpu {
                     if let Some(gpu) = gpus.first() {
-                        foot_item(ui, theme, &format!("GPU {}%", format_percent(gpu.load)));
+                        foot_item(ui, &theme, &format!("GPU {}%", format_percent(gpu.load)));
                     }
                 }
                 if let Some(net) = &snap.net {
                     let down = format_bytes_per_sec(finite(net.down_bps).unwrap_or(0.0));
                     let up = format_bytes_per_sec(finite(net.up_bps).unwrap_or(0.0));
-                    foot_item(ui, theme, &format!("NET \u{2193}{down} \u{2191}{up}"));
+                    foot_item(ui, &theme, &format!("NET \u{2193}{down} \u{2191}{up}"));
                 }
             }
         });
@@ -307,6 +327,9 @@ pub fn card_grid(ui: &mut egui::Ui, app: &mut PerfApp) {
             cards.push(Card::Ram);
         }
         cards.push(Card::Network);
+        if snap.battery.is_some() {
+            cards.push(Card::Battery);
+        }
         if snap.storage.is_some() {
             cards.push(Card::Storage);
         }
@@ -334,10 +357,12 @@ const ROW_1_CARD_HEIGHT: f32 = 255.0;
 /// Baseline for the Storage card (title row + column header + padding).
 const STORAGE_BASE_HEIGHT: f32 = 72.0;
 /// Per-disk row height inside the Storage card.
-const STORAGE_DISK_ROW_HEIGHT: f32 = 28.0;
+const STORAGE_DISK_ROW_HEIGHT: f32 = 42.0;
 /// Fixed outer height of the Sensors card when populated. Wide enough for
 /// up to ~6 readouts in two columns.
 const SENSORS_CARD_HEIGHT: f32 = 210.0;
+/// Fixed outer height of the Battery card (donut + four stat rows, no sparkline).
+const BATTERY_CARD_HEIGHT: f32 = 170.0;
 
 impl Card {
     /// Predicted outer card height for this card given the snapshot data.
@@ -351,6 +376,7 @@ impl Card {
                 STORAGE_BASE_HEIGHT + STORAGE_DISK_ROW_HEIGHT * n
             }
             Card::Sensors => SENSORS_CARD_HEIGHT,
+            Card::Battery => BATTERY_CARD_HEIGHT,
         }
     }
 }
@@ -365,6 +391,7 @@ enum Card {
     Storage,
     Sensors,
     Network,
+    Battery,
 }
 
 impl Card {
@@ -379,15 +406,26 @@ impl Card {
 }
 
 /// Compute the column span for each card given the column budget. Storage
-/// expands to fill the row when nothing else follows it — typically when
-/// Sensors is filtered out on a laptop.
+/// is elastic:
+/// * Without a Battery card, it falls back to today's behaviour — base span
+///   of 2, expanded to fill the row when nothing else follows it.
+/// * With a Battery card in the same row, it shrinks to `cols - 1` minus a
+///   further column when Sensors is also present, so Battery / Storage /
+///   Sensors line up in a single second row.
 fn layout_spans(cards: &[Card], cols: usize) -> Vec<usize> {
     let mut spans: Vec<usize> = cards.iter().map(|c| c.base_span().min(cols)).collect();
+    let has_battery = cards.iter().any(|c| matches!(c, Card::Battery));
+    let has_sensors = cards.iter().any(|c| matches!(c, Card::Sensors));
     for i in 0..spans.len() {
         if matches!(cards[i], Card::Storage) {
-            let following_spans: usize = spans[i + 1..].iter().sum();
-            if following_spans == 0 {
-                spans[i] = cols;
+            if has_battery {
+                let reserved = 1 + if has_sensors { 1 } else { 0 };
+                spans[i] = cols.saturating_sub(reserved).max(1);
+            } else {
+                let following_spans: usize = spans[i + 1..].iter().sum();
+                if following_spans == 0 {
+                    spans[i] = cols;
+                }
             }
         }
     }
@@ -527,6 +565,11 @@ fn paint_card(
                 app.history.network.as_ref(),
                 min_h,
             );
+        }
+        Card::Battery => {
+            if let Some(batt) = &snap.battery {
+                panels::battery::battery_panel(ui, theme, batt, min_h);
+            }
         }
     }
 }

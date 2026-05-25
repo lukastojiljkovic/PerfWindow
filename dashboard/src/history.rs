@@ -191,6 +191,8 @@ mod tests {
                 down_pct: Some(0.1),
                 up_pct: Some(0.025),
             }),
+            battery: None,
+            uptime_sec: None,
         };
         h.record(&snap);
         h.record(&snap);
@@ -219,6 +221,7 @@ mod tests {
                 fan_rpm: None,
                 power_w: None,
                 memory_load: Some(15.0),
+                hot_spot_temp: None,
             }]),
             ram: None,
             storage: None,
@@ -226,6 +229,8 @@ mod tests {
             fans: None,
             voltages: None,
             net: None,
+            battery: None,
+            uptime_sec: None,
         };
         h.record(&snap);
         h.record(&snap);

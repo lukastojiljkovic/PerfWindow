@@ -5,6 +5,7 @@
 //! [`card`] frame. The grid layout that places these panels is wired up in a
 //! later task.
 
+pub mod battery;
 pub mod cpu;
 pub mod gpu;
 pub mod network;

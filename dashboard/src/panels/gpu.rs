@@ -1,7 +1,7 @@
 //! The GPU component panel (also used for integrated GPUs).
 
 use super::{card, panel_title};
-use crate::format::{format_gb_pair, format_temp, TempUnit};
+use crate::format::{finite, format_gb_pair, format_temp, TempUnit};
 use crate::history::GpuHistory;
 use crate::ipc::GpuInfo;
 use crate::theme::Theme;
@@ -37,6 +37,12 @@ pub fn gpu_panel(
                 let temp_value = format_temp(gpu.temp, unit);
                 let temp_col = gpu.temp.map(|t| temp_color(t, TempKind::Processor, theme));
                 stat_row(ui, theme, "TEMP", &temp_value, temp_col);
+
+                if let Some(hot) = finite(gpu.hot_spot_temp) {
+                    let hot_value = format_temp(Some(hot), unit);
+                    let hot_col = Some(temp_color(hot, TempKind::Processor, theme));
+                    stat_row(ui, theme, "HOTSPOT", &hot_value, hot_col);
+                }
 
                 stat_row(
                     ui,
