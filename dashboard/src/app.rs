@@ -44,6 +44,10 @@ pub struct PerfApp {
     pub update_download_outcome: SharedDownloadOutcome,
     pub want_quit: bool,
     pub show_changelog: bool,
+    /// Last `WindowLevel` value pushed to the viewport. Used to detect
+    /// `config.always_on_top` toggles so we send `ViewportCommand::WindowLevel`
+    /// only on transitions, not every frame.
+    pub applied_on_top: bool,
     update_source: Arc<GitHubReleaseSource>,
     os_is_light: bool,
 }
@@ -99,6 +103,7 @@ impl PerfApp {
             update_download_outcome: Arc::new(std::sync::Mutex::new(None)),
             want_quit: false,
             show_changelog: false,
+            applied_on_top: false,
             update_source,
             os_is_light,
         };
@@ -106,6 +111,22 @@ impl PerfApp {
             s.set_interval(app.config.refresh.as_millis());
         }
         app
+    }
+
+    /// Push the configured window-on-top preference to the OS only when it
+    /// has actually flipped since the last frame, so we don't spam the
+    /// viewport with a no-op `WindowLevel` command on every repaint.
+    fn sync_window_level(&mut self, ctx: &egui::Context) {
+        if self.config.always_on_top == self.applied_on_top {
+            return;
+        }
+        let level = if self.config.always_on_top {
+            egui::WindowLevel::AlwaysOnTop
+        } else {
+            egui::WindowLevel::Normal
+        };
+        ctx.send_viewport_cmd(egui::ViewportCommand::WindowLevel(level));
+        self.applied_on_top = self.config.always_on_top;
     }
 
     /// Fire a manual update check, ignoring the cache TTL. Called by the
@@ -247,6 +268,7 @@ impl PerfApp {
             update_download_outcome: Arc::new(Mutex::new(None)),
             want_quit: false,
             show_changelog: false,
+            applied_on_top: false,
             update_source: Arc::new(GitHubReleaseSource::new(OWNER, REPO)),
             os_is_light: false,
             config,
@@ -259,6 +281,7 @@ impl eframe::App for PerfApp {
         let ctx = ui.ctx().clone();
         self.ingest();
         self.poll_download_outcome();
+        self.sync_window_level(&ctx);
 
         // Title bar on top, footer on the bottom, the card grid filling the
         // scrollable centre. Panels are nested with `show_inside` (we render

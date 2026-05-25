@@ -60,6 +60,8 @@ pub struct Config {
     pub check_updates_on_startup: bool,
     #[serde(default = "default_cpu_heat_map")]
     pub cpu_heat_map: bool,
+    #[serde(default = "default_always_on_top")]
+    pub always_on_top: bool,
 }
 
 fn default_check_updates() -> bool {
@@ -67,6 +69,10 @@ fn default_check_updates() -> bool {
 }
 
 fn default_cpu_heat_map() -> bool {
+    false
+}
+
+fn default_always_on_top() -> bool {
     false
 }
 
@@ -79,6 +85,7 @@ impl Default for Config {
             refresh: RefreshRate::S1,
             check_updates_on_startup: true,
             cpu_heat_map: false,
+            always_on_top: false,
         }
     }
 }
@@ -135,6 +142,7 @@ mod tests {
             refresh: RefreshRate::S2,
             check_updates_on_startup: true,
             cpu_heat_map: false,
+            always_on_top: false,
         };
         let parsed = Config::from_toml_str(&c.to_toml_string());
         assert_eq!(parsed.theme, ThemeId::Amber);
@@ -187,5 +195,21 @@ mod tests {
         };
         let parsed = Config::from_toml_str(&c.to_toml_string());
         assert!(parsed.cpu_heat_map);
+    }
+
+    #[test]
+    fn always_on_top_defaults_to_false_when_missing() {
+        let parsed = Config::from_toml_str("");
+        assert!(!parsed.always_on_top);
+    }
+
+    #[test]
+    fn always_on_top_round_trips_when_true() {
+        let c = Config {
+            always_on_top: true,
+            ..Config::default()
+        };
+        let parsed = Config::from_toml_str(&c.to_toml_string());
+        assert!(parsed.always_on_top);
     }
 }
