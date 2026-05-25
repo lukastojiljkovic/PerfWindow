@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ## [Unreleased]
 
-## [0.5.0] — 2026-05-25
+## [0.5.1] — 2026-05-25
 
 A "sensor expansion" release. PerfWindow now bundles the **PawnIO**
 kernel driver (which `LibreHardwareMonitor` 0.9.5+ requires for MSR
@@ -91,8 +91,13 @@ every metric so a non-expert reader can tell `TjMax` apart from
 
 ### Removed
 - The legacy `R0sensord` driver service is stopped and deleted on
-  install and uninstall if a pre-0.5.0 build left it behind. PawnIO
+  install and uninstall if a pre-0.5.1 build left it behind. PawnIO
   manages its own driver service under a different name.
+
+### Dependencies
+- `System.Management` 10.0.2 → 10.0.8 (sensord). Patch update; no
+  behaviour change expected.
+- `xunit` 2.9.2 → 2.9.3 (sensord tests). Patch update.
 
 ## [0.4.1] — 2026-05-25
 
@@ -299,8 +304,8 @@ User-facing application behaviour is unchanged.
   matching uninstaller that removes the exclusions, the `R0sensord` driver
   service, the install directory and the per-user data directory.
 
-[Unreleased]: https://github.com/lukastojiljkovic/PerfWindow/compare/v0.5.0...HEAD
-[0.5.0]: https://github.com/lukastojiljkovic/PerfWindow/releases/tag/v0.5.0
+[Unreleased]: https://github.com/lukastojiljkovic/PerfWindow/compare/v0.5.1...HEAD
+[0.5.1]: https://github.com/lukastojiljkovic/PerfWindow/releases/tag/v0.5.1
 [0.4.1]: https://github.com/lukastojiljkovic/PerfWindow/releases/tag/v0.4.1
 [0.4.0]: https://github.com/lukastojiljkovic/PerfWindow/releases/tag/v0.4.0
 [0.3.0]: https://github.com/lukastojiljkovic/PerfWindow/releases/tag/v0.3.0
