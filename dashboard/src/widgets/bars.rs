@@ -80,12 +80,18 @@ pub fn core_strip(ui: &mut egui::Ui, theme: &Theme, loads: &[f32]) {
 /// when `loads[i]` is present. If `loads` is shorter than `temps`, the extra
 /// temperatures are ignored. Cells wrap into rows that fit the available
 /// width.
+///
+/// `p_core_count = Some(n)` switches the corner tag from a flat `C0..Cn` to
+/// the hybrid-CPU `P1..Pn` / `E1..Em` split, and tints P-Core borders with
+/// `theme.accent` while E-Cores keep the standard `theme.border`. `None`
+/// renders uniformly (older / non-hybrid CPUs).
 pub fn core_grid(
     ui: &mut egui::Ui,
     theme: &Theme,
     loads: &[f32],
     temps: &[Option<f32>],
     unit: crate::format::TempUnit,
+    p_core_count: Option<usize>,
 ) {
     if loads.is_empty() {
         return;
@@ -127,10 +133,24 @@ pub fn core_grid(
             lerp_color(theme.accent, theme.hot, (load_frac - 0.5) * 2.0)
         };
         painter.rect_filled(cell_rect, 0.0, bg);
+
+        // On hybrid CPUs, P-Core cells get an accent-tinted border so the
+        // performance cluster reads at a glance; E-Cores keep the standard
+        // border colour. Non-hybrid renders uniformly.
+        let (is_p_core, is_e_core) = match p_core_count {
+            Some(n) if i < n => (true, false),
+            Some(_) => (false, true),
+            None => (false, false),
+        };
+        let border_color = if is_p_core {
+            theme.accent
+        } else {
+            theme.border
+        };
         painter.rect_stroke(
             cell_rect,
             0.0,
-            egui::Stroke::new(1.0, theme.border),
+            egui::Stroke::new(1.0, border_color),
             egui::StrokeKind::Inside,
         );
 
@@ -153,8 +173,14 @@ pub fn core_grid(
         );
         painter.galley(text_pos, galley, fg);
 
-        // Corner tag: "C0" / "C1" / ... in dim, anchored top-left.
-        let corner = format!("C{i}");
+        // Corner tag. Hybrid CPUs: "P1..Pn" then "E1..Em". Non-hybrid: "C0..".
+        let corner = if is_p_core {
+            format!("P{}", i + 1)
+        } else if is_e_core {
+            format!("E{}", i - p_core_count.unwrap_or(0) + 1)
+        } else {
+            format!("C{i}")
+        };
         let corner_galley = painter.layout_no_wrap(corner, corner_font.clone(), theme.dim);
         painter.galley(
             egui::Pos2::new(cell_min.x + CORNER_PAD, cell_min.y + 1.0),

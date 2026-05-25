@@ -1,5 +1,5 @@
 use crate::theme::{FontFamily, Theme};
-use egui::{Color32, FontId, Pos2, Sense, Stroke, Vec2};
+use egui::{Color32, FontId, Pos2, Response, Sense, Stroke, Vec2};
 
 /// Row height for the stat widget (label + value on one line, plus a 4 px gap
 /// at the bottom for the border rule).
@@ -11,18 +11,22 @@ const ROW_H: f32 = 22.0;
 /// label`). Right side: `value` in ~14 px bold data-font (matches `.pw-stat
 /// b`), coloured `value_color` if `Some`, else `theme.ink`. A 1 px rule in
 /// `theme.border` is drawn across the bottom. Matches `.pw-stat` in the mockup.
+///
+/// Returns the row's egui [`Response`] so callers can chain
+/// [`Response::on_hover_text`] (or [`crate::ui::tooltips::tip`]) to attach an
+/// explanation tooltip.
 pub fn stat_row(
     ui: &mut egui::Ui,
     theme: &Theme,
     label: &str,
     value: &str,
     value_color: Option<Color32>,
-) {
+) -> Response {
     let available_w = ui.available_width();
-    let (rect, _response) = ui.allocate_exact_size(Vec2::new(available_w, ROW_H), Sense::hover());
+    let (rect, response) = ui.allocate_exact_size(Vec2::new(available_w, ROW_H), Sense::hover());
 
     if !ui.is_rect_visible(rect) {
-        return;
+        return response;
     }
 
     let painter = ui.painter_at(rect);
@@ -56,4 +60,6 @@ pub fn stat_row(
         [Pos2::new(rect.min.x, rule_y), Pos2::new(rect.max.x, rule_y)],
         Stroke::new(1.0, theme.border),
     ));
+
+    response
 }

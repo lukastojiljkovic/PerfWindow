@@ -5,6 +5,7 @@ use crate::format::{format_gb_from_mb, format_gb_pair};
 use crate::history::RingBuffer;
 use crate::ipc::RamInfo;
 use crate::theme::Theme;
+use crate::ui::tooltips::tip;
 use crate::widgets::bars::bar_meter;
 use crate::widgets::gauge::donut;
 use crate::widgets::sparkline::sparkline;
@@ -32,11 +33,20 @@ pub fn ram_panel(
 
         // Usage donut on the left, three stat rows on the right.
         ui.horizontal(|ui| {
-            donut(ui, theme, ram.load.unwrap_or(0.0) as f32, "%", "USED");
+            donut(ui, theme, ram.load.unwrap_or(0.0) as f32, "%", "USED").on_hover_text(
+                "Physical RAM in use, 0–100 %. Cache is counted as free — Windows \
+                 reclaims it on demand.",
+            );
             ui.vertical(|ui| {
-                stat_row(ui, theme, "USED", &gb(ram.used_mb), None);
-                stat_row(ui, theme, "FREE", &gb(ram.available_mb), None);
-                stat_row(ui, theme, "CACHED", &gb(ram.cached_mb), None);
+                tip(stat_row(ui, theme, "USED", &gb(ram.used_mb), None), "USED");
+                tip(
+                    stat_row(ui, theme, "FREE", &gb(ram.available_mb), None),
+                    "FREE",
+                );
+                tip(
+                    stat_row(ui, theme, "CACHED", &gb(ram.cached_mb), None),
+                    "CACHED",
+                );
             });
         });
 

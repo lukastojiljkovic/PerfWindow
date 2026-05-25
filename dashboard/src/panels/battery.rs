@@ -4,6 +4,7 @@ use super::{card, panel_title};
 use crate::format::{finite, format_uptime};
 use crate::ipc::BatteryInfo;
 use crate::theme::Theme;
+use crate::ui::tooltips::tip;
 use crate::widgets::gauge::donut;
 use crate::widgets::health_color;
 use crate::widgets::stat::stat_row;
@@ -20,21 +21,30 @@ pub fn battery_panel(ui: &mut egui::Ui, theme: &Theme, batt: &BatteryInfo, min_h
 
         ui.horizontal(|ui| {
             let charge = batt.charge_pct.unwrap_or(0.0) as f32;
-            donut(ui, theme, charge, "%", "CHARGE");
+            donut(ui, theme, charge, "%", "CHARGE").on_hover_text(
+                "Battery charge level, 0–100 %. Reading comes from the embedded \
+                 controller via the Windows power API.",
+            );
             ui.vertical(|ui| {
                 let (state_str, state_col) = format_state(batt.rate_w, theme);
-                stat_row(ui, theme, "STATE", &state_str, state_col);
-                stat_row(ui, theme, "RATE", &format_rate(batt.rate_w), None);
-                stat_row(
-                    ui,
-                    theme,
+                tip(stat_row(ui, theme, "STATE", &state_str, state_col), "STATE");
+                tip(
+                    stat_row(ui, theme, "RATE", &format_rate(batt.rate_w), None),
+                    "RATE",
+                );
+                tip(
+                    stat_row(
+                        ui,
+                        theme,
+                        "TIME",
+                        &format_time_remaining(batt.time_remaining_sec, batt.rate_w),
+                        None,
+                    ),
                     "TIME",
-                    &format_time_remaining(batt.time_remaining_sec, batt.rate_w),
-                    None,
                 );
                 let (h_str, h_col) =
                     format_health(batt.full_capacity_mwh, batt.design_capacity_mwh, theme);
-                stat_row(ui, theme, "HEALTH", &h_str, h_col);
+                tip(stat_row(ui, theme, "HEALTH", &h_str, h_col), "HEALTH");
             });
         });
     });

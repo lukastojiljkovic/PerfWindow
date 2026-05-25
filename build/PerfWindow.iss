@@ -2,9 +2,15 @@
 ;
 ; Produces PerfWindow-Setup.exe: installs PerfWindow.exe + sensord.exe into
 ; Program Files, adds a Start Menu shortcut and an Add/Remove Programs entry,
-; optionally registers the Windows Defender exclusion the WinRing0 sensor
-; driver needs, and ships an uninstaller that removes every file, the driver
-; service and the Defender exclusions.
+; bundles the Microsoft Visual C++ runtime and the PawnIO kernel driver, and
+; ships an uninstaller that removes every file and any legacy registry data
+; PerfWindow left behind.
+;
+; PawnIO replaces WinRing0 (LibreHardwareMonitor 0.9.5+); it is a signed
+; driver that Microsoft Defender does not flag, so no Defender exclusions are
+; needed any longer. The installer still purges the legacy WinRing0 Defender
+; entries written by PerfWindow 0.4.1 and earlier, so an upgrade leaves the
+; machine clean.
 ;
 ; Build it with  build\build.ps1  (which compiles the app, then runs ISCC).
 
@@ -49,6 +55,7 @@ Source: "..\dashboard\target\release\PerfWindow.exe"; DestDir: "{app}"; Flags: i
 Source: "..\dashboard\target\release\sensord.exe";    DestDir: "{app}"; Flags: ignoreversion
 Source: "..\LICENSE";                                 DestDir: "{app}"; Flags: ignoreversion
 Source: "vendor\vc_redist.x64.exe";                                     Flags: dontcopy
+Source: "vendor\PawnIO_setup.exe";                                      Flags: dontcopy
 
 [Icons]
 Name: "{group}\{#AppName}";           Filename: "{app}\PerfWindow.exe"
@@ -59,9 +66,10 @@ Name: "{autodesktop}\{#AppName}";     Filename: "{app}\PerfWindow.exe"; Tasks: d
 Filename: "{app}\PerfWindow.exe"; Description: "Launch {#AppName}"; Flags: nowait postinstall skipifsilent
 
 [UninstallDelete]
-; sensord.sys (the WinRing0 driver) is written into {app} at runtime, and
 ; PerfWindow keeps config/runtime data outside {app}; remove all of it so the
-; machine is left exactly as it was before installation.
+; machine is left exactly as it was before installation. PawnIO is left alone
+; on the assumption it may be shared with other LibreHardwareMonitor-based
+; tools — the user can uninstall it from Add/Remove Programs.
 Type: filesandordirs; Name: "{app}"
 Type: filesandordirs; Name: "{userappdata}\{#AppName}"
 Type: filesandordirs; Name: "{localappdata}\{#AppName}"
@@ -69,21 +77,28 @@ Type: filesandordirs; Name: "{localappdata}\{#AppName}"
 [Code]
 const
   VC_REDIST_KEY = 'SOFTWARE\Microsoft\VisualStudio\14.0\VC\Runtimes\X64';
-  { Microsoft Defender threat ID for "VulnerableDriver:WinNT/Winring0".
-    Defender's vulnerable-driver detection fires inside the kernel scanner
-    once LibreHardwareMonitor loads the driver service; file-path exclusions
-    cannot suppress it because the detection runs against the in-kernel
-    image, not the .sys on disk. Registering this ID as Allow is the only
-    setting that stops the recurring alert. }
+  { Legacy from PerfWindow 0.4.1 and earlier: the Defender ThreatID for
+    "VulnerableDriver:WinNT/Winring0", allowed at install time so the alert
+    did not surface while LHM held WinRing0 open. LHM 0.9.5+ no longer uses
+    WinRing0, so the allow rule is dead weight. We still remove it on every
+    install and uninstall to leave Defender's allow-list clean for users
+    upgrading from a build that registered it. }
   WIN_RING0_THREAT_ID = '2147937641';
-
-var
-  DefenderPage: TInputOptionWizardPage;
 
 { Wrap a string in single quotes for embedding in a PowerShell command. }
 function PsQuote(const S: String): String;
 begin
   Result := Chr(39) + S + Chr(39);
+end;
+
+{ Run a PowerShell command hidden and wait for it. Best-effort. }
+procedure RunPowerShell(const Command: String);
+var
+  ResultCode: Integer;
+begin
+  Exec('powershell.exe',
+       '-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -Command "' + Command + '"',
+       '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
 end;
 
 { True iff a 14.x (Visual C++ 2015-2022) x64 runtime is registered on this
@@ -141,10 +156,10 @@ begin
   Abort;
 end;
 
-{ End-to-end prereq sequence: skip if already installed; otherwise extract
-  the bundled redistributable, surface a status message, run it silently,
-  and route any unexpected exit code through HandleVcRedistFailure (which
-  aborts the installer). Treats vcredist codes 0, 1638 (newer already
+{ End-to-end VC++ runtime sequence: skip if already installed; otherwise
+  extract the bundled redistributable, surface a status message, run it
+  silently, and route any unexpected exit code through HandleVcRedistFailure
+  (which aborts the installer). Treats vcredist codes 0, 1638 (newer already
   installed) and 3010 (success, reboot pending) as success. }
 procedure EnsureVcRedist;
 var
@@ -160,81 +175,115 @@ begin
     HandleVcRedistFailure(ExitCode);
 end;
 
-{ Run a PowerShell command hidden and wait for it. Best-effort. }
-procedure RunPowerShell(const Command: String);
+{ Drop the bundled PawnIO setup binary into the temp dir and return its path. }
+function ExtractPawnIo: String;
+begin
+  ExtractTemporaryFile('PawnIO_setup.exe');
+  Result := ExpandConstant('{tmp}\PawnIO_setup.exe');
+end;
+
+{ Run PawnIO_setup.exe with namazso's silent-install switches (taken from the
+  official winget manifest at microsoft/winget-pkgs:
+  manifests/n/namazso/PawnIO/2.2.0). Returns its exit code, or -1 if the
+  process could not be started. }
+function InstallPawnIoSilent(const Path: String): Integer;
 var
   ResultCode: Integer;
 begin
-  Exec('powershell.exe',
-       '-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -Command "' + Command + '"',
-       '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  if Exec(Path, '-install -silent', '',
+          SW_HIDE, ewWaitUntilTerminated, ResultCode) then
+    Result := ResultCode
+  else
+    Result := -1;
 end;
 
-procedure InitializeWizard;
+{ Tell the user PawnIO installation failed but continue installing
+  PerfWindow. Unlike the VC++ runtime, PerfWindow does start without PawnIO:
+  the UI and sensord process come up and show every reading the OS can give
+  without a kernel driver (load, memory, NVMe SMART, network throughput).
+  Only CPU temperature, clock and power go missing — so we keep the install
+  and tell the user how to recover. }
+procedure HandlePawnIoFailure(ExitCode: Integer);
 begin
-  DefenderPage := CreateInputOptionPage(wpSelectTasks,
-    'Windows Defender',
-    'Allow PerfWindow to read your CPU sensors.',
-    'PerfWindow reads CPU temperature, clock and power through a kernel driver'
-    + ' (WinRing0) that is on Microsoft''s vulnerable-driver list. Without'
-    + ' configuration, Windows Defender flags the loaded driver with a'
-    + ' recurring "VulnerableDriver:WinNT/Winring0" alert. The option below'
-    + ' adds Defender exclusions for PerfWindow''s install folder, its per-user'
-    + ' data folder and the sensord.exe process, and registers an Allow rule'
-    + ' for the WinRing0 threat signature so the alert does not surface'
-    + ' again. The rest of your system stays protected, and the uninstaller'
-    + ' reverses every change. You may leave it unchecked, but CPU'
-    + ' temperature, clock and power will then show as unavailable and the'
-    + ' Defender alert will keep returning.',
-    False, False);
-  DefenderPage.Add('Configure Windows Defender for PerfWindow (recommended)');
-  DefenderPage.Values[0] := True;
+  { Continuation lines must NOT begin with '#' — Inno's preprocessor (ISPP)
+    treats a leading '#' as a directive marker and aborts compilation with
+    "Unknown preprocessor directive" on the otherwise valid Pascal literal
+    `#13#10`. Keep every continuation line opening with the '+' operator. }
+  MsgBox(
+    'PawnIO driver installation failed (code ' + IntToStr(ExitCode) + ').'
+    + #13#10 + #13#10
+    + 'PerfWindow will still install, but CPU temperature, clock and power'
+    + ' readings will be unavailable until PawnIO is installed manually from'
+    + #13#10 + 'https://pawnio.eu',
+    mbInformation, MB_OK);
 end;
 
-{ Tell Windows Defender to skip PerfWindow's folders and the sensord process,
-  and to allow the specific WinRing0 threat signature. The reconciliation pass
-  scans Defender's detection history for any other ID a definition update may
-  have introduced for the same driver and allows those too, so a future
-  Microsoft update that renumbers the signature self-heals on the next install. }
-procedure AddDefenderExclusions;
+{ End-to-end PawnIO sequence: extract the bundled installer, surface a status
+  message, run it silently, and route any unexpected exit code through
+  HandlePawnIoFailure (a non-fatal warning). Treats codes 0 and 3010 (success
+  with pending reboot) as success. PawnIO_setup.exe is upgrade-aware
+  (UpgradeBehavior=uninstallPrevious in the winget manifest), so we don't
+  bother detecting an existing install — re-running it on a current install
+  is a no-op. }
+procedure EnsurePawnIo;
+var
+  ExitCode: Integer;
+  PawnIoPath: String;
+begin
+  WizardForm.StatusLabel.Caption := 'Installing PawnIO kernel driver...';
+  PawnIoPath := ExtractPawnIo;
+  ExitCode := InstallPawnIoSilent(PawnIoPath);
+  if not ((ExitCode = 0) or (ExitCode = 3010)) then
+    HandlePawnIoFailure(ExitCode);
+end;
+
+{ Strip the legacy WinRing0 Defender entries written by PerfWindow 0.4.1 and
+  earlier. Safe to call on a clean machine (every cmdlet has -ErrorAction
+  SilentlyContinue). A reconciliation pass also walks the Defender detection
+  history and removes any other ID a definition update may have introduced
+  for the same driver, mirroring the install-side reconciliation we used to
+  do — so users upgrading from 0.4.1 finish with no PerfWindow-owned Defender
+  state at all. }
+procedure CleanupLegacyDefenderEntries;
 begin
   RunPowerShell(
-    'Add-MpPreference -ExclusionPath ' + PsQuote(ExpandConstant('{app}')) + ';'
-    + 'Add-MpPreference -ExclusionPath ' + PsQuote(ExpandConstant('{localappdata}\{#AppName}')) + ';'
-    + 'Add-MpPreference -ExclusionProcess ' + PsQuote('sensord.exe') + ';'
-    + 'Add-MpPreference -ThreatIDDefaultAction_Ids ' + WIN_RING0_THREAT_ID + ' -ThreatIDDefaultAction_Actions Allow;'
+    'Remove-MpPreference -ExclusionPath ' + PsQuote(ExpandConstant('{app}')) + ' -ErrorAction SilentlyContinue;'
+    + 'Remove-MpPreference -ExclusionPath ' + PsQuote(ExpandConstant('{localappdata}\{#AppName}')) + ' -ErrorAction SilentlyContinue;'
+    + 'Remove-MpPreference -ExclusionProcess ' + PsQuote('sensord.exe') + ' -ErrorAction SilentlyContinue;'
+    + 'Remove-MpPreference -ThreatIDDefaultAction_Ids ' + WIN_RING0_THREAT_ID + ' -ErrorAction SilentlyContinue;'
     + 'Get-MpThreatDetection -ErrorAction SilentlyContinue'
     + ' | Where-Object { $_.Resources -match ''winring'' }'
-    + ' | ForEach-Object { Add-MpPreference -ThreatIDDefaultAction_Ids $_.ThreatID -ThreatIDDefaultAction_Actions Allow }');
+    + ' | ForEach-Object { try { Remove-MpPreference -ThreatIDDefaultAction_Ids $_.ThreatID -ErrorAction Stop } catch { } }');
+end;
+
+{ Stop and delete the legacy R0sensord WinRing0 driver service if it is still
+  registered from a pre-0.4.2 install. PawnIO uses its own service name and
+  manages its own lifecycle, so there is nothing to do for it here. }
+procedure CleanupLegacyDriverService;
+var
+  ResultCode: Integer;
+begin
+  Exec('sc.exe', 'stop R0sensord',   '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Exec('sc.exe', 'delete R0sensord', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
 end;
 
 procedure CurStepChanged(CurStep: TSetupStep);
 begin
-  if CurStep = ssInstall then
+  if CurStep = ssInstall then begin
     EnsureVcRedist;
-  if (CurStep = ssPostInstall) and DefenderPage.Values[0] then
-    AddDefenderExclusions;
+    EnsurePawnIo;
+  end;
+  if CurStep = ssPostInstall then begin
+    CleanupLegacyDefenderEntries;
+    CleanupLegacyDriverService;
+  end;
 end;
 
-{ On uninstall: drop the Defender exclusions and any leftover driver service. }
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
-var
-  ResultCode: Integer;
 begin
   if CurUninstallStep <> usUninstall then
     Exit;
 
-  RunPowerShell(
-    'Remove-MpPreference -ExclusionPath ' + PsQuote(ExpandConstant('{app}')) + ';'
-    + 'Remove-MpPreference -ExclusionPath ' + PsQuote(ExpandConstant('{localappdata}\{#AppName}')) + ';'
-    + 'Remove-MpPreference -ExclusionProcess ' + PsQuote('sensord.exe') + ';'
-    + 'Remove-MpPreference -ThreatIDDefaultAction_Ids ' + WIN_RING0_THREAT_ID + ';'
-    + 'Get-MpThreatDetection -ErrorAction SilentlyContinue'
-    + ' | Where-Object { $_.Resources -match ''winring'' }'
-    + ' | ForEach-Object { try { Remove-MpPreference -ThreatIDDefaultAction_Ids $_.ThreatID -ErrorAction Stop } catch { } }');
-
-  { LibreHardwareMonitor removes this service itself on a clean exit; delete it
-    here too in case PerfWindow was killed before it could. }
-  Exec('sc.exe', 'stop R0sensord',   '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-  Exec('sc.exe', 'delete R0sensord', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  CleanupLegacyDefenderEntries;
+  CleanupLegacyDriverService;
 end;

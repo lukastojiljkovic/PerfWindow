@@ -35,6 +35,31 @@ public static class SnapshotBuilder
                        ?? cpu.Val(SensorType.Voltage, "CPU VID")
                        ?? cpu.Val(SensorType.Voltage, "CPU Core");
 
+        // Distance-to-TjMax: how much thermal headroom the hottest core has.
+        // LHM exposes one Temperature sensor per core named "<X> Distance to
+        // TjMax" — we report the minimum across all cores (smallest headroom =
+        // closest to throttling).
+        double? distanceToTjMax = cpu.Sensors
+            .Where(s => s.SensorType == SensorType.Temperature
+                     && s.Name.Contains("Distance to TjMax", StringComparison.OrdinalIgnoreCase)
+                     && s.Value is float)
+            .Select(s => (double?)s.Value)
+            .DefaultIfEmpty(null)
+            .Min();
+
+        // Intel hybrid-CPU split: count P-Core/E-Core entries from the
+        // Temperature group (Clock would also work; Temperature is present even
+        // when per-core clock readings are not). Counts are null on non-hybrid
+        // CPUs so the dashboard can fall back to its uniform heat-map.
+        int pCoreCount = cpu.Sensors.Count(s =>
+            s.SensorType == SensorType.Temperature
+            && s.Name.StartsWith("P-Core #", StringComparison.OrdinalIgnoreCase)
+            && !s.Name.Contains("Distance to TjMax", StringComparison.OrdinalIgnoreCase));
+        int eCoreCount = cpu.Sensors.Count(s =>
+            s.SensorType == SensorType.Temperature
+            && s.Name.StartsWith("E-Core #", StringComparison.OrdinalIgnoreCase)
+            && !s.Name.Contains("Distance to TjMax", StringComparison.OrdinalIgnoreCase));
+
         return new CpuInfo(
             Name: cpu.Name,
             Load: cpu.Val(SensorType.Load, "CPU Total"),
@@ -43,10 +68,22 @@ public static class SnapshotBuilder
             ClockMhz: clock,
             PowerW: cpu.Val(SensorType.Power, "Package"),
             CoreTemps: coreTemps.Count > 0 ? coreTemps : null,
-            VoltageV: voltage);
+            VoltageV: voltage,
+            DistanceToTjMaxC: distanceToTjMax,
+            PowerCoresW: cpu.Val(SensorType.Power, "CPU Cores"),
+            PowerMemoryW: cpu.Val(SensorType.Power, "CPU Memory"),
+            PowerPlatformW: cpu.Val(SensorType.Power, "CPU Platform"),
+            PCoreCount: pCoreCount > 0 ? pCoreCount : null,
+            ECoreCount: eCoreCount > 0 ? eCoreCount : null);
     }
 
-    public static List<GpuInfo> BuildGpus(IEnumerable<IHardware> hardware)
+    /// <summary>
+    /// Builds the full per-GPU list (including integrated GPUs) without any
+    /// filter. Used directly by <see cref="Build"/> to seed both the discrete
+    /// list (via <see cref="PreferDiscreteGpus"/>) and the iGPU slot (via
+    /// <see cref="PickIntegratedGpu"/>).
+    /// </summary>
+    internal static List<GpuInfo> BuildAllGpus(IEnumerable<IHardware> hardware)
     {
         var gpus = new List<GpuInfo>();
         foreach (var hw in hardware)
@@ -63,6 +100,18 @@ public static class SnapshotBuilder
             double? hotSpot = hw.Val(SensorType.Temperature, "GPU Hot Spot")
                            ?? hw.Val(SensorType.Temperature, "GPU Junction");
 
+            // GDDR/VRAM die hot spot — a separate physical sensor from the
+            // GPU core temp and the hot-spot reading above. NVIDIA labels it
+            // "GPU Memory Junction"; the fallback covers AMD "GPU Memory Hot
+            // Spot" if that ever appears.
+            double? memoryJunction = hw.Val(SensorType.Temperature, "GPU Memory Junction")
+                                  ?? hw.Val(SensorType.Temperature, "GPU Memory Hot Spot");
+
+            // GPU voltage rail. NVIDIA labels it "GPU Core Voltage"; Intel iGPU
+            // simply "GPU Core" under the Voltage type.
+            double? voltage = hw.Val(SensorType.Voltage, "GPU Core Voltage")
+                           ?? hw.Val(SensorType.Voltage, "GPU Core");
+
             gpus.Add(new GpuInfo(
                 Name: hw.Name,
                 Kind: integrated ? "integrated" : "discrete",
@@ -74,22 +123,52 @@ public static class SnapshotBuilder
                 FanRpm: hw.Val(SensorType.Fan, "GPU"),
                 PowerW: hw.Val(SensorType.Power, "GPU"),
                 MemoryLoad: hw.Val(SensorType.Load, "GPU Memory Controller"),
-                HotSpotTempC: hotSpot));
+                HotSpotTempC: hotSpot,
+                MemoryJunctionTempC: memoryJunction,
+                PcieRxBps: hw.Val(SensorType.Throughput, "GPU PCIe Rx"),
+                PcieTxBps: hw.Val(SensorType.Throughput, "GPU PCIe Tx"),
+                DedicatedVramUsedMb: hw.Val(SensorType.SmallData, "D3D Dedicated Memory Used"),
+                SharedVramUsedMb: hw.Val(SensorType.SmallData, "D3D Shared Memory Used"),
+                VoltageV: voltage));
         }
-        return PreferDiscreteGpus(gpus);
+        return gpus;
     }
 
     /// <summary>
-    /// Drops integrated GPUs when a discrete GPU is present — beside a real GPU
-    /// the integrated one is redundant clutter (no temperature, no clock, only
-    /// shared memory). Integrated GPUs are kept only as a fallback for machines
-    /// that have no discrete GPU at all.
+    /// Discrete-only GPU list for the main GPU panel. Wraps
+    /// <see cref="BuildAllGpus"/> + <see cref="PreferDiscreteGpus"/>.
+    /// </summary>
+    public static List<GpuInfo> BuildGpus(IEnumerable<IHardware> hardware)
+        => PreferDiscreteGpus(BuildAllGpus(hardware));
+
+    /// <summary>
+    /// Drops integrated GPUs from the discrete-GPU list. The dashboard renders
+    /// integrated GPUs in their own dedicated panel (via
+    /// <see cref="PickIntegratedGpu"/>), so the discrete list is only the
+    /// "real" GPUs. On machines with no discrete GPU the integrated entry is
+    /// retained here as the sole rendered GPU.
     /// </summary>
     internal static List<GpuInfo> PreferDiscreteGpus(List<GpuInfo> gpus)
     {
         if (gpus.Any(g => g.Kind == "discrete"))
             gpus.RemoveAll(g => g.Kind == "integrated");
         return gpus;
+    }
+
+    /// <summary>
+    /// Picks the integrated GPU for the dedicated iGPU panel. Returns null
+    /// when no integrated GPU is enumerated, or when the only GPU is
+    /// integrated (it already appears as the sole entry in
+    /// <see cref="PreferDiscreteGpus"/>'s result — duplicating it into the
+    /// iGPU slot would render the same card twice).
+    /// </summary>
+    internal static GpuInfo? PickIntegratedGpu(IEnumerable<GpuInfo> allGpus)
+    {
+        var list = allGpus.ToList();
+        var integrated = list.FirstOrDefault(g => g.Kind == "integrated");
+        if (integrated is null) return null;
+        bool hasDiscrete = list.Any(g => g.Kind == "discrete");
+        return hasDiscrete ? integrated : null;
     }
 
     public static RamInfo BuildRam(IHardware? memory, PagefileInfo pf)
@@ -154,6 +233,20 @@ public static class SnapshotBuilder
             double? readBps = hw.Val(SensorType.Throughput, "Read Rate");
             double? writeBps = hw.Val(SensorType.Throughput, "Write Rate");
 
+            // Lifetime metrics. LHM exposes "Power On Count" and "Power On
+            // Hours" as Factor sensors on most NVMe drives and many SATA
+            // SSDs (some HDDs too). Available Spare is NVMe-spec, separate
+            // from the "Health" reading above (which we already collapse from
+            // Remaining Life / Available Spare): when both exist the
+            // <see cref="StorageInfo.Health"/> field carries the Remaining
+            // Life number while <c>available_spare_pct</c> carries the
+            // NVMe-spec spare reading verbatim.
+            double? powerOnHoursD = hw.Val(SensorType.Factor, "Power On Hours");
+            double? powerOnCountD = hw.Val(SensorType.Factor, "Power On Count");
+            long? powerOnHours = powerOnHoursD.HasValue ? (long)powerOnHoursD.Value : (long?)null;
+            long? powerOnCount = powerOnCountD.HasValue ? (long)powerOnCountD.Value : (long?)null;
+            double? availableSparePct = hw.Val(SensorType.Level, "Available Spare");
+
             list.Add(new StorageInfo(
                 Name: hw.Name,
                 Kind: kind,
@@ -163,7 +256,10 @@ public static class SnapshotBuilder
                 TotalGb: totalGb,
                 Health: health,
                 ReadBps: readBps,
-                WriteBps: writeBps));
+                WriteBps: writeBps,
+                PowerOnHours: powerOnHours,
+                PowerOnCount: powerOnCount,
+                AvailableSparePct: availableSparePct));
         }
         return list;
     }
@@ -308,14 +404,17 @@ public static class SnapshotBuilder
         var memHw = hardware.FirstOrDefault(h => h.HardwareType == HardwareType.Memory);
         var boardHw = hardware.FirstOrDefault(h => h.HardwareType == HardwareType.Motherboard);
         var (fans, voltages) = BuildBoardSensors(boardHw);
-        var gpus = BuildGpus(hardware);
+        var allGpus = BuildAllGpus(hardware);
+        var discreteGpus = PreferDiscreteGpus(new List<GpuInfo>(allGpus));
+        var integratedGpu = PickIntegratedGpu(allGpus);
         var storage = BuildStorage(hardware, diskInfo);
 
         return new Snapshot(
             Version: 1,
             Timestamp: DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
             Cpu: cpuHw is null ? null : BuildCpu(cpuHw),
-            Gpu: gpus.Count > 0 ? gpus : null,
+            Gpu: discreteGpus.Count > 0 ? discreteGpus : null,
+            Igpu: integratedGpu,
             Ram: BuildRam(memHw, pf),
             Storage: storage.Count > 0 ? storage : null,
             Board: BuildBoard(boardHw),
