@@ -43,6 +43,7 @@ pub struct PerfApp {
     pub update_download_progress: crate::update::download::SharedProgress,
     pub update_download_outcome: SharedDownloadOutcome,
     pub want_quit: bool,
+    pub show_changelog: bool,
     update_source: Arc<GitHubReleaseSource>,
     os_is_light: bool,
 }
@@ -97,6 +98,7 @@ impl PerfApp {
             )),
             update_download_outcome: Arc::new(std::sync::Mutex::new(None)),
             want_quit: false,
+            show_changelog: false,
             update_source,
             os_is_light,
         };
@@ -244,6 +246,7 @@ impl PerfApp {
             update_download_progress: Arc::new(Mutex::new(DownloadProgress::default())),
             update_download_outcome: Arc::new(Mutex::new(None)),
             want_quit: false,
+            show_changelog: false,
             update_source: Arc::new(GitHubReleaseSource::new(OWNER, REPO)),
             os_is_light: false,
             config,
@@ -299,6 +302,7 @@ impl eframe::App for PerfApp {
         // `egui::Window` and so takes the `Context`, not a nested `Ui`.
         crate::ui::settings::settings_modal(&ctx, self);
         crate::ui::update_modal::update_modal(&ctx, self);
+        crate::ui::changelog_modal::changelog_modal(&ctx, &self.theme, &mut self.show_changelog);
 
         // The scanline + vignette overlay paints last so it sits on top of
         // every panel and the modal. (The grid is drawn earlier, inside the

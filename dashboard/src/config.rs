@@ -165,8 +165,10 @@ mod tests {
 
     #[test]
     fn check_updates_round_trips_when_false() {
-        let mut c = Config::default();
-        c.check_updates_on_startup = false;
+        let c = Config {
+            check_updates_on_startup: false,
+            ..Config::default()
+        };
         let parsed = Config::from_toml_str(&c.to_toml_string());
         assert!(!parsed.check_updates_on_startup);
     }
@@ -179,8 +181,10 @@ mod tests {
 
     #[test]
     fn cpu_heat_map_round_trips_when_true() {
-        let mut c = Config::default();
-        c.cpu_heat_map = true;
+        let c = Config {
+            cpu_heat_map: true,
+            ..Config::default()
+        };
         let parsed = Config::from_toml_str(&c.to_toml_string());
         assert!(parsed.cpu_heat_map);
     }

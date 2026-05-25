@@ -12,8 +12,8 @@ fn main() -> eframe::Result {
             // so the user cannot shrink the window into the cards; min width
             // sits just below the 4-col breakpoint so the grid can collapse
             // to 3 cols when the user shrinks the window deliberately.
-            .with_inner_size([1180.0, 580.0])
-            .with_min_inner_size([960.0, 580.0]),
+            .with_inner_size([1180.0, 600.0])
+            .with_min_inner_size([960.0, 600.0]),
         ..Default::default()
     };
     eframe::run_native(

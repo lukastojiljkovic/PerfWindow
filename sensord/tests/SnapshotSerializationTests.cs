@@ -9,9 +9,10 @@ public class SnapshotSerializationTests
     {
         var snap = new Snapshot(
             Version: 1, Timestamp: 1747645200,
-            Cpu: new CpuInfo("Test CPU", 34.2, new double[] { 38.1, 55.0 }, 58.0, 4400, 52.0, null),
+            Cpu: new CpuInfo("Test CPU", 34.2, new double[] { 38.1, 55.0 }, 58.0, 4400, 52.0, null, null),
             Gpu: null, Ram: null, Storage: null, Board: null,
-            Fans: null, Voltages: null, Net: null);
+            Fans: null, Voltages: null, Net: null,
+            Battery: null, UptimeSec: null);
 
         string json = JsonSerializer.Serialize(snap, SensordJsonContext.Default.Snapshot);
 
@@ -24,7 +25,7 @@ public class SnapshotSerializationTests
     [Fact]
     public void Omits_null_sections()
     {
-        var snap = new Snapshot(1, 1, null, null, null, null, null, null, null, null);
+        var snap = new Snapshot(1, 1, null, null, null, null, null, null, null, null, null, null);
         string json = JsonSerializer.Serialize(snap, SensordJsonContext.Default.Snapshot);
         Assert.DoesNotContain("\"gpu\"", json);
         Assert.DoesNotContain("\"cpu\"", json);

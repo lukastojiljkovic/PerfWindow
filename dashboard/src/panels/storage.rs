@@ -1,23 +1,26 @@
 //! The storage component panel: a per-disk table.
 
 use super::{card, panel_title};
-use crate::format::{finite, format_temp, TempUnit};
+use crate::format::{finite, format_bytes_per_sec, format_temp, TempUnit};
 use crate::ipc::StorageInfo;
 use crate::theme::Theme;
 use crate::widgets::bars::bar_meter;
-use crate::widgets::{temp_color, TempKind};
+use crate::widgets::{health_color, temp_color, TempKind};
 use egui::{FontId, Pos2, Sense, Stroke, Vec2};
 
 /// Fixed width of the TEMP column (mockup `.pw-disk` grid `42px`).
 const TEMP_COL_W: f32 = 42.0;
+/// Fixed width of the HEALTH column (sized to fit "100%" with breathing room).
+const HEALTH_COL_W: f32 = 50.0;
 /// Fixed width of the CAPACITY column (mockup `.pw-disk` grid `80px`).
 const CAP_COL_W: f32 = 80.0;
 /// Horizontal gap between columns (mockup `.pw-disk { gap: 11px }`).
 const COL_GAP: f32 = 11.0;
 /// Flexible-column ratio: DISK gets `1.7fr`, ACTIVITY gets `1fr`.
 const DISK_FR: f32 = 1.7;
-/// Height of one disk row (mockup `.pw-disk { padding: 7px 0 }` over an 11 px line).
-const DISK_ROW_H: f32 = 25.0;
+/// Height of one disk row (taller to fit a secondary `R\u{2193} … W\u{2191} …`
+/// throughput line under the disk name).
+const DISK_ROW_H: f32 = 38.0;
 /// Activity percentage at/above which the activity bar switches to its warn colour.
 const ACTIVITY_WARN: f64 = 80.0;
 
@@ -51,19 +54,19 @@ pub fn storage_panel(
     });
 }
 
-/// Split the available row width into the four column widths
-/// (`DISK`, `TEMP`, `ACTIVITY`, `CAPACITY`) honouring the `1.7fr / 42 / 1fr / 80`
-/// grid and the 11 px inter-column gaps.
+/// Split the available row width into the five column widths
+/// (`DISK`, `TEMP`, `ACTIVITY`, `HEALTH`, `CAPACITY`) honouring the
+/// `1.7fr / 42 / 1fr / 50 / 80` grid and the 11 px inter-column gaps.
 ///
 /// The flexible pool is floored at zero, so every returned width is
 /// non-negative. If `total_w` is narrower than the fixed columns the cells
 /// simply sum to more than `total_w`; the per-row `painter_at` clip in
 /// `disk_row` trims that overflow harmlessly.
-fn column_widths(total_w: f32) -> [f32; 4] {
-    let flexible = (total_w - TEMP_COL_W - CAP_COL_W - 3.0 * COL_GAP).max(0.0);
+fn column_widths(total_w: f32) -> [f32; 5] {
+    let flexible = (total_w - TEMP_COL_W - HEALTH_COL_W - CAP_COL_W - 4.0 * COL_GAP).max(0.0);
     let disk_w = flexible * (DISK_FR / (DISK_FR + 1.0));
     let activity_w = flexible - disk_w;
-    [disk_w, TEMP_COL_W, activity_w, CAP_COL_W]
+    [disk_w, TEMP_COL_W, activity_w, HEALTH_COL_W, CAP_COL_W]
 }
 
 /// Draw the faint, upper-cased column-header row (mockup `.pw-disk-h`).
@@ -77,9 +80,15 @@ fn header_row(ui: &mut egui::Ui, theme: &Theme) {
 
     let painter = ui.painter_at(rect);
     let font = FontId::new(8.0, theme.font_data.egui());
-    let labels = ["DISK", "TEMP", "ACTIVITY", "CAPACITY"];
-    // TEMP is centred and CAPACITY right-aligned, mirroring their data cells.
-    let aligns = [Align::Left, Align::Center, Align::Left, Align::Right];
+    let labels = ["DISK", "TEMP", "ACTIVITY", "HEALTH", "CAPACITY"];
+    // TEMP and HEALTH are centred; CAPACITY is right-aligned, mirroring their data cells.
+    let aligns = [
+        Align::Left,
+        Align::Center,
+        Align::Left,
+        Align::Center,
+        Align::Right,
+    ];
 
     let mut x = rect.min.x;
     for ((label, &w), align) in labels.iter().zip(widths.iter()).zip(aligns.iter()) {
@@ -113,13 +122,31 @@ fn disk_row(ui: &mut egui::Ui, theme: &Theme, disk: &StorageInfo, unit: TempUnit
 
     let center_y = rect.center().y;
 
-    // --- DISK: "<Kind> · <name>", ink. Laid out with a hard wrap width and an
-    // ellipsis so a long disk name never spills into the TEMP column. ---
+    // --- DISK: "<Kind> · <name>", ink, on the upper half. A secondary line
+    // beneath shows current read/write throughput when both readings exist. ---
     let name = format!("{} · {}", kind_label(&disk.kind), disk.name);
     let name_font = FontId::new(11.0, theme.font_data.egui());
     let name_galley = painter.layout_job(ellipsised_job(&name, name_font, theme.ink, widths[0]));
-    let name_y = center_y - name_galley.size().y / 2.0;
+    // Place the name near the top of the row so the secondary R/W line fits
+    // underneath without overlapping the centred TEMP/ACTIVITY/HEALTH/CAPACITY cells.
+    let name_y = rect.min.y + 4.0;
+    let name_h = name_galley.size().y;
     painter.galley(Pos2::new(rect.min.x, name_y), name_galley, theme.ink);
+
+    if let (Some(r), Some(w)) = (finite(disk.read_bps), finite(disk.write_bps)) {
+        let rw_str = format!(
+            "R\u{2193} {}   W\u{2191} {}",
+            format_bytes_per_sec(r),
+            format_bytes_per_sec(w),
+        );
+        let rw_font = FontId::new(9.0, theme.font_data.egui());
+        let rw_galley = painter.layout_no_wrap(rw_str, rw_font, theme.dim);
+        painter.galley(
+            Pos2::new(rect.min.x, name_y + name_h + 2.0),
+            rw_galley,
+            theme.dim,
+        );
+    }
 
     // --- TEMP: centred, temperature-coloured when present. ---
     let temp_x0 = rect.min.x + widths[0] + COL_GAP;
@@ -155,12 +182,28 @@ fn disk_row(ui: &mut egui::Ui, theme: &Theme, disk: &StorageInfo, unit: TempUnit
         bar_meter(&mut bar_ui, theme, fraction, warn);
     }
 
+    // --- HEALTH: centred, coloured by remaining-life severity. ---
+    let health_x0 = act_x0 + widths[2] + COL_GAP;
+    let health = finite(disk.health);
+    let (health_str, health_col) = match health {
+        Some(pct) => (format!("{:.0}%", pct), health_color(pct, theme)),
+        None => ("—".to_string(), theme.dim),
+    };
+    let health_font = FontId::new(11.0, theme.font_data.egui());
+    let health_galley = painter.layout_no_wrap(health_str, health_font, health_col);
+    let health_x = health_x0 + (widths[3] - health_galley.size().x) / 2.0;
+    painter.galley(
+        Pos2::new(health_x, center_y - health_galley.size().y / 2.0),
+        health_galley,
+        health_col,
+    );
+
     // --- CAPACITY: right-aligned, dim. ---
-    let cap_x0 = act_x0 + widths[2] + COL_GAP;
+    let cap_x0 = health_x0 + widths[3] + COL_GAP;
     let cap_str = format_capacity(finite(disk.used_gb), finite(disk.total_gb));
     let cap_font = FontId::new(11.0, theme.font_data.egui());
     let cap_galley = painter.layout_no_wrap(cap_str, cap_font, theme.dim);
-    let cap_x = cap_x0 + widths[3] - cap_galley.size().x;
+    let cap_x = cap_x0 + widths[4] - cap_galley.size().x;
     painter.galley(
         Pos2::new(cap_x, center_y - cap_galley.size().y / 2.0),
         cap_galley,

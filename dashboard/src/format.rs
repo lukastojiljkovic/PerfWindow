@@ -94,6 +94,21 @@ pub fn format_percent(load: Option<f64>) -> String {
     }
 }
 
+/// Render a positive seconds count as `"3d 14h"`, `"12h 30m"`, `"45m"` or
+/// `"<1m"`. Negative input is clamped to zero.
+pub fn format_uptime(secs: i64) -> String {
+    let s = secs.max(0);
+    let d = s / 86_400;
+    let h = (s % 86_400) / 3_600;
+    let m = (s % 3_600) / 60;
+    match (d, h, m) {
+        (d, h, _) if d > 0 => format!("{d}d {h}h"),
+        (_, h, m) if h > 0 => format!("{h}h {m}m"),
+        (_, _, m) if m > 0 => format!("{m}m"),
+        _ => "<1m".to_string(),
+    }
+}
+
 /// Insert thin spaces between characters to approximate CSS `letter-spacing`
 /// on the wordmark, chips and arrow labels.
 pub fn letter_spaced(text: &str) -> String {
@@ -187,5 +202,17 @@ mod tests {
         assert_eq!(letter_spaced("AB"), "A\u{2009}B");
         assert_eq!(letter_spaced("X"), "X");
         assert_eq!(letter_spaced(""), "");
+    }
+
+    #[test]
+    fn formats_uptime_in_human_terms() {
+        assert_eq!(format_uptime(0), "<1m");
+        assert_eq!(format_uptime(30), "<1m");
+        assert_eq!(format_uptime(60), "1m");
+        assert_eq!(format_uptime(45 * 60), "45m");
+        assert_eq!(format_uptime(3 * 3600), "3h 0m");
+        assert_eq!(format_uptime(3 * 3600 + 25 * 60), "3h 25m");
+        assert_eq!(format_uptime(4 * 86_400 + 14 * 3600), "4d 14h");
+        assert_eq!(format_uptime(-5), "<1m");
     }
 }

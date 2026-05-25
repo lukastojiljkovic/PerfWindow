@@ -7,6 +7,55 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ## [Unreleased]
 
+## [0.4.0] — 2026-05-25
+
+### Added
+- **Battery panel** for laptops: charge donut, instantaneous charge or
+  discharge rate (W) with a direction arrow, estimated time remaining
+  while discharging, and battery health (Full Charged Capacity ÷ Design
+  Capacity, colour-banded like disk health). The card is conditional on
+  a battery being present; desktops are unaffected.
+- **Per-disk Read / Write throughput** under each storage row, formatted
+  with the same human-friendly bytes-per-second formatter as the
+  Network panel. Disk row height grew from 25 to 38 px to fit the
+  secondary line.
+- **GPU Hot Spot temperature** stat row in the GPU panel, when the
+  vendor driver exposes it. On most NVIDIA discrete GPUs hot-spot runs
+  10–15 °C above the GPU Core reading.
+- **CPU Vcore** stat row in the CPU panel, when the sensor is exposed.
+  Sources `Vcore`, `CPU VID`, or `CPU Core` from the LHM voltage
+  sensors in that order.
+- **System uptime** in the footer, formatted as `UP 3d 14h`, sourced
+  from `Environment.TickCount64` on the sensord side.
+- **Clickable footer version** opens an in-app changelog viewer that
+  embeds `CHANGELOG.md` at compile time and parses it with a tiny
+  hand-rolled markdown scanner. No browser hand-off, no new
+  dependency; closes with the window ✕ or ESC.
+
+### Changed
+- The `sensord` NDJSON schema gains optional fields: `uptime_sec`,
+  `battery`, `storage[].read_bps`, `storage[].write_bps`,
+  `cpu.voltage_v`, and `gpu[].hot_spot_temp`. All are absent when the
+  underlying hardware doesn't expose the reading; the dashboard
+  tolerates older `sensord` builds via `#[serde(default)]`.
+- Battery-aware layout: when a battery is present, the second grid row
+  shows Battery + Storage (+ Sensors if populated). Storage's column
+  span shrinks to keep the row to exactly the available column count.
+
+## [0.3.1] — 2026-05-25
+
+### Added
+- Per-drive **HEALTH** column in the Storage panel, showing the drive's
+  remaining-life percentage (0–100 %, where 100 % is a new drive). The
+  reading is sourced from the drive's SMART data via LibreHardwareMonitor's
+  "Remaining Life" sensor, with a fallback to the NVMe-spec
+  "Available Spare" sensor for drives that expose only the latter. The
+  value is colour-coded: ok at ≥ 80 %, warn at 50–80 %, hot below 50 %.
+  Drives that expose neither sensor render an em-dash and stay neutral.
+- New `health` field in the `storage[]` entries of the `sensord` NDJSON
+  schema. Older `sensord` builds without this field continue to parse
+  cleanly thanks to a `#[serde(default)]` on the dashboard side.
+
 ## [0.3.0] — 2026-05-24
 
 ### Added
@@ -159,7 +208,9 @@ User-facing application behaviour is unchanged.
   matching uninstaller that removes the exclusions, the `R0sensord` driver
   service, the install directory and the per-user data directory.
 
-[Unreleased]: https://github.com/lukastojiljkovic/PerfWindow/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/lukastojiljkovic/PerfWindow/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/lukastojiljkovic/PerfWindow/releases/tag/v0.4.0
+[0.3.1]: https://github.com/lukastojiljkovic/PerfWindow/releases/tag/v0.3.1
 [0.3.0]: https://github.com/lukastojiljkovic/PerfWindow/releases/tag/v0.3.0
 [0.2.6]: https://github.com/lukastojiljkovic/PerfWindow/releases/tag/v0.2.6
 [0.2.5]: https://github.com/lukastojiljkovic/PerfWindow/releases/tag/v0.2.5
