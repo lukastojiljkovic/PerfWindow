@@ -7,6 +7,51 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ## [Unreleased]
 
+## [0.7.0] — 2026-05-25
+
+A **chrome + sensors** release: window controls, two new data sources
+(ASUS ATK fans, active display info), a richer GPU LOAD tooltip with
+per-engine DXGI breakdown, and a responsive panel layout that drops
+non-essential rows when the window is shrunk so the dashboard always
+fits without scrolling.
+
+### Added
+- **F11 fullscreen** toggle. Hides the OS window chrome (title bar,
+  minimise / close / maximise) while fullscreen so the dashboard fills
+  the screen edge-to-edge; F11 again restores the windowed state.
+- **ASUS ATK fan readings** in the footer. `sensord` reads the
+  `AsusAtkWmi_WMNB` WMI bridge that the ATK Package driver installs on
+  every ASUS gaming laptop and most ASUS desktops; CPU and GPU fan
+  values surface as `"CPU FAN 89  GPU FAN 104"`. Silently skipped on
+  non-ASUS hardware — the WMI call swallows every failure path and
+  returns no data.
+- **Active display info** in the footer. `sensord` reads the primary
+  monitor's resolution and refresh rate via Win32 `EnumDisplaySettings`
+  and surfaces `"1920x1080 @ 60Hz"` next to the other footer figures.
+- **GPU LOAD tooltip — per-engine DXGI breakdown.** Hovering the GPU
+  load donut now shows a per-engine table (3D, Copy, Video Decode,
+  Video Encode, Optical Flow, Overlay, Security, VR) sorted by
+  utilisation. Engines below 0.5 % are hidden so the tooltip is
+  readable on idle GPUs. The discrete-GPU panel and the iGPU panel
+  share this.
+
+### Changed
+- **Panels are now responsive.** Below ~1100 px window width the
+  dashboard enters `Compact` mode and hides secondary stat rows
+  (CPU's TJMAX / VCORE, GPU's HOTSPOT / JUNCTION / PCIE / V, RAM's
+  CACHED / DIMM) so each card fits without an internal scroll bar.
+  The default launch size (1180×600) and any larger window stay in
+  `Full` mode and show every reading. Heat-map, sparklines and donut
+  remain in both modes.
+
+### Known limitations
+- Intel iGPU temperature is still absent on hardware where LHM's IGCL
+  path does not return it (the FX507VI dev laptop is one such). The
+  iGPU panel surfaces every reading IGCL does expose (Clock, Power,
+  Voltage, shared memory) and hides the TEMP row when no sensor is
+  present. Bundling an Intel IGCL DLL would unlock it but requires a
+  redistribution review and is deferred.
+
 ## [0.6.1] — 2026-05-25
 
 ### Fixed
@@ -380,7 +425,8 @@ User-facing application behaviour is unchanged.
   matching uninstaller that removes the exclusions, the `R0sensord` driver
   service, the install directory and the per-user data directory.
 
-[Unreleased]: https://github.com/lukastojiljkovic/PerfWindow/compare/v0.6.1...HEAD
+[Unreleased]: https://github.com/lukastojiljkovic/PerfWindow/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/lukastojiljkovic/PerfWindow/releases/tag/v0.7.0
 [0.6.1]: https://github.com/lukastojiljkovic/PerfWindow/releases/tag/v0.6.1
 [0.6.0]: https://github.com/lukastojiljkovic/PerfWindow/releases/tag/v0.6.0
 [0.5.1]: https://github.com/lukastojiljkovic/PerfWindow/releases/tag/v0.5.1

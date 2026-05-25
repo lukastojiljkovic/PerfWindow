@@ -20,7 +20,15 @@ public record Snapshot(
     [property: JsonPropertyName("voltages")] IReadOnlyList<VoltageInfo>? Voltages,
     [property: JsonPropertyName("net")] NetInfo? Net,
     [property: JsonPropertyName("battery")] BatteryInfo? Battery,
-    [property: JsonPropertyName("uptime_sec")] long? UptimeSec);
+    [property: JsonPropertyName("uptime_sec")] long? UptimeSec,
+    [property: JsonPropertyName("atk_fans")] IReadOnlyList<FanInfo>? AtkFans,
+    [property: JsonPropertyName("display")] DisplayInfo? Display);
+
+/// <summary>Active display info — resolution and refresh rate of the primary monitor.</summary>
+public record DisplayInfo(
+    [property: JsonPropertyName("width")] int Width,
+    [property: JsonPropertyName("height")] int Height,
+    [property: JsonPropertyName("refresh_hz")] int RefreshHz);
 
 /// <summary>
 /// CPU metrics. Units: <c>load</c>/<c>cores</c> = 0–100 %; <c>temp</c>,
@@ -83,7 +91,13 @@ public record GpuInfo(
     [property: JsonPropertyName("pcie_tx_bps")] double? PcieTxBps,
     [property: JsonPropertyName("dedicated_vram_used_mb")] double? DedicatedVramUsedMb,
     [property: JsonPropertyName("shared_vram_used_mb")] double? SharedVramUsedMb,
-    [property: JsonPropertyName("voltage_v")] double? VoltageV);
+    [property: JsonPropertyName("voltage_v")] double? VoltageV,
+    [property: JsonPropertyName("d3d_engines")] IReadOnlyList<D3DEngineLoad>? D3DEngines);
+
+/// <summary>Per-engine GPU utilisation reading (e.g. "3D", "Copy", "Video Encode"). <c>load</c> is 0-100 %.</summary>
+public record D3DEngineLoad(
+    [property: JsonPropertyName("name")] string Name,
+    [property: JsonPropertyName("load")] double Load);
 
 /// <summary>RAM metrics. All sizes in MB. <c>cached_mb</c> = OS file-cache (system cache pages × page size). <c>load</c> = 0–100 %. <c>dimm_temps</c> lists per-module DIMM temperatures (°C) when the SPD hub exposes them — typical on DDR5 platforms.</summary>
 public record RamInfo(

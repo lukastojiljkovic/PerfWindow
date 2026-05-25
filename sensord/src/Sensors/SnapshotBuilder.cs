@@ -135,9 +135,45 @@ public static class SnapshotBuilder
                 PcieTxBps: hw.Val(SensorType.Throughput, "GPU PCIe Tx"),
                 DedicatedVramUsedMb: hw.Val(SensorType.SmallData, "D3D Dedicated Memory Used"),
                 SharedVramUsedMb: hw.Val(SensorType.SmallData, "D3D Shared Memory Used"),
-                VoltageV: voltage));
+                VoltageV: voltage,
+                D3DEngines: CollectD3DEngines(hw)));
         }
         return gpus;
+    }
+
+    /// <summary>
+    /// Group the LHM <c>SensorType.Load</c> sensors whose names start with
+    /// <c>"D3D "</c> (the DXGI per-engine counters: 3D, Copy, Video Decode,
+    /// Video Encode, Optical Flow Accelerator, Overlay, VR, Security) into
+    /// a single non-null reading per distinct engine name. Multiple LHM
+    /// sensors carry the same engine label when the hardware exposes more
+    /// than one queue per engine (e.g. several Copy engines on NVIDIA); we
+    /// collapse those by summing — that matches what a user thinks of as
+    /// "how busy is the Copy engine" and matches Task Manager's display.
+    ///
+    /// Returns null when no D3D sensor is enumerated so the JSON field stays
+    /// absent rather than an empty array.
+    /// </summary>
+    internal static List<D3DEngineLoad>? CollectD3DEngines(IHardware hw)
+    {
+        var byName = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
+        foreach (var s in hw.Sensors)
+        {
+            if (s.SensorType != SensorType.Load) continue;
+            if (!s.Name.StartsWith("D3D ", StringComparison.OrdinalIgnoreCase)) continue;
+            if (s.Value is not float v) continue;
+            string label = s.Name.Substring(4).Trim();
+            if (label.Length == 0) continue;
+            byName[label] = byName.TryGetValue(label, out var prior) ? prior + v : v;
+        }
+        if (byName.Count == 0) return null;
+
+        // Stable order: highest current load first so the tooltip leads with
+        // the engine that matters now.
+        return byName
+            .OrderByDescending(kv => kv.Value)
+            .Select(kv => new D3DEngineLoad(kv.Key, kv.Value))
+            .ToList();
     }
 
     /// <summary>
@@ -460,6 +496,8 @@ public static class SnapshotBuilder
             Voltages: voltages.Count > 0 ? voltages : null,
             Net: BuildNet(hardware, linkSpeeds),
             Battery: BuildBattery(hardware),
-            UptimeSec: Environment.TickCount64 / 1000);
+            UptimeSec: Environment.TickCount64 / 1000,
+            AtkFans: AtkReader.Read(),
+            Display: DisplayReader.Read());
     }
 }

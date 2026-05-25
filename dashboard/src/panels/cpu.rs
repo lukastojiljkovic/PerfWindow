@@ -6,6 +6,7 @@ use crate::history::RingBuffer;
 use crate::ipc::CpuInfo;
 use crate::theme::Theme;
 use crate::ui::tooltips::tip;
+use crate::ui::LayoutDensity;
 use crate::widgets::bars::{core_grid, core_strip};
 use crate::widgets::gauge::donut;
 use crate::widgets::sparkline::sparkline;
@@ -20,6 +21,7 @@ use crate::widgets::{temp_color, TempKind};
 /// `cpu_heat_map` config flag, toggled from the title-bar chip.
 ///
 /// Every absent (`None`) reading renders as `"—"`; nothing here can panic.
+#[allow(clippy::too_many_arguments)]
 pub fn cpu_panel(
     ui: &mut egui::Ui,
     theme: &Theme,
@@ -27,6 +29,7 @@ pub fn cpu_panel(
     history: Option<&RingBuffer>,
     unit: TempUnit,
     show_heat_map: bool,
+    density: LayoutDensity,
     min_h: f32,
 ) {
     card(ui, theme, min_h, |ui| {
@@ -45,14 +48,17 @@ pub fn cpu_panel(
 
                 // TJMAX (Distance to TjMax). Only renders when sensord reports
                 // the per-core MSR — laptops on PawnIO; many AMD desktops too.
-                if let Some(d) = finite(cpu.distance_to_tjmax_c) {
-                    let val = format!("{d:.0} \u{00B0}C");
-                    // Lower headroom = closer to throttling. Re-use the
-                    // temp-colour ramp by treating "headroom remaining" as
-                    // its inverse: 5 °C of headroom ≈ ~90 °C silicon.
-                    let pseudo_temp = (95.0_f64 - d).clamp(0.0, 105.0);
-                    let col = temp_color(pseudo_temp, TempKind::Processor, theme);
-                    tip(stat_row(ui, theme, "TJMAX", &val, Some(col)), "TJMAX");
+                // Suppressed in Compact mode (essentials only).
+                if density == LayoutDensity::Full {
+                    if let Some(d) = finite(cpu.distance_to_tjmax_c) {
+                        let val = format!("{d:.0} \u{00B0}C");
+                        // Lower headroom = closer to throttling. Re-use the
+                        // temp-colour ramp by treating "headroom remaining" as
+                        // its inverse: 5 °C of headroom ≈ ~90 °C silicon.
+                        let pseudo_temp = (95.0_f64 - d).clamp(0.0, 105.0);
+                        let col = temp_color(pseudo_temp, TempKind::Processor, theme);
+                        tip(stat_row(ui, theme, "TJMAX", &val, Some(col)), "TJMAX");
+                    }
                 }
 
                 tip(
@@ -70,11 +76,15 @@ pub fn cpu_panel(
                     power_resp.on_hover_text(text);
                 }
 
-                if let Some(v) = finite(cpu.voltage_v) {
-                    tip(
-                        stat_row(ui, theme, "VCORE", &format!("{v:.3} V"), None),
-                        "VCORE",
-                    );
+                // VCORE is a "detail" reading — useful but not essential.
+                // Skipped in Compact mode so the panel fits without scroll.
+                if density == LayoutDensity::Full {
+                    if let Some(v) = finite(cpu.voltage_v) {
+                        tip(
+                            stat_row(ui, theme, "VCORE", &format!("{v:.3} V"), None),
+                            "VCORE",
+                        );
+                    }
                 }
             });
         });
