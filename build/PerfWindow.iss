@@ -205,13 +205,16 @@ end;
   and tell the user how to recover. }
 procedure HandlePawnIoFailure(ExitCode: Integer);
 begin
+  { Continuation lines must NOT begin with '#' — Inno's preprocessor (ISPP)
+    treats a leading '#' as a directive marker and aborts compilation with
+    "Unknown preprocessor directive" on the otherwise valid Pascal literal
+    `#13#10`. Keep every continuation line opening with the '+' operator. }
   MsgBox(
-    'PawnIO driver installation failed (code ' + IntToStr(ExitCode) + ').' + #13#10 +
-    #13#10 +
-    'PerfWindow will still install, but CPU temperature, clock and power' +
-    ' readings will be unavailable until PawnIO is installed manually from' +
-    #13#10 +
-    'https://pawnio.eu',
+    'PawnIO driver installation failed (code ' + IntToStr(ExitCode) + ').'
+    + #13#10 + #13#10
+    + 'PerfWindow will still install, but CPU temperature, clock and power'
+    + ' readings will be unavailable until PawnIO is installed manually from'
+    + #13#10 + 'https://pawnio.eu',
     mbInformation, MB_OK);
 end;
 
