@@ -100,7 +100,7 @@ pub fn cpu_panel(
                 cpu.p_core_count.map(|n| n as usize),
             );
         } else {
-            core_strip(ui, theme, &cores);
+            core_strip(ui, theme, &cores, cpu.p_core_count.map(|n| n as usize));
         }
 
         // Load-history sparkline.

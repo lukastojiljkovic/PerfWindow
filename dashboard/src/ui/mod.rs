@@ -421,22 +421,26 @@ impl Card {
     }
 }
 
-/// Compute the column span for each card given the column budget. Storage
-/// is elastic:
-/// * Without a Battery card, it falls back to today's behaviour — base span
-///   of 2, expanded to fill the row when nothing else follows it.
-/// * With a Battery card in the same row, it shrinks to `cols - 1` minus a
-///   further column when Sensors is also present, so Battery / Storage /
-///   Sensors line up in a single second row.
+/// Compute the column span for each card given the column budget. Storage is
+/// elastic so it always fills the row width that the other "row 2" cards
+/// (Network, Battery, Sensors) leave behind:
+/// * `Network` is always present, so 1 column is always reserved for it.
+/// * Each of `Battery` and `Sensors` reserves another column when they exist.
+/// * Storage then takes the remainder, with a 2-column minimum so it does not
+///   collapse to a single thin column when many "row 2" cards are present.
 fn layout_spans(cards: &[Card], cols: usize) -> Vec<usize> {
     let mut spans: Vec<usize> = cards.iter().map(|c| c.base_span().min(cols)).collect();
+    let has_network = cards.iter().any(|c| matches!(c, Card::Network));
     let has_battery = cards.iter().any(|c| matches!(c, Card::Battery));
     let has_sensors = cards.iter().any(|c| matches!(c, Card::Sensors));
+    let reserved = (has_network as usize) + (has_battery as usize) + (has_sensors as usize);
+
     for i in 0..spans.len() {
         if matches!(cards[i], Card::Storage) {
-            if has_battery {
-                let reserved = 1 + if has_sensors { 1 } else { 0 };
-                spans[i] = cols.saturating_sub(reserved).max(1);
+            // If "row 2" cards are present, share the row with them; otherwise
+            // let Storage take the full width when nothing follows.
+            if reserved > 0 {
+                spans[i] = cols.saturating_sub(reserved).max(2);
             } else {
                 let following_spans: usize = spans[i + 1..].iter().sum();
                 if following_spans == 0 {
@@ -561,7 +565,7 @@ fn paint_card(
         }
         Card::Ram => {
             if let Some(ram) = &snap.ram {
-                panels::ram::ram_panel(ui, theme, ram, app.history.ram.as_ref(), min_h);
+                panels::ram::ram_panel(ui, theme, ram, app.history.ram.as_ref(), unit, min_h);
             }
         }
         Card::Storage => {

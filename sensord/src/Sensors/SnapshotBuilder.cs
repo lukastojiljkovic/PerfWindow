@@ -23,8 +23,14 @@ public static class SnapshotBuilder
                     ?? cpu.Val(SensorType.Temperature, "Core (Tctl")
                     ?? cpu.FirstVal(SensorType.Temperature);
 
+        // Pick the highest per-core clock as the displayed value. LHM names
+        // cores differently across vendors / generations: non-hybrid Intel and
+        // AMD use "CPU Core #N"; Intel hybrid (12th gen+) uses "P-Core #N" and
+        // "E-Core #N". We accept all three and only exclude "Bus Speed", which
+        // is the chipset bus base, not a CPU core clock.
         double? clock = cpu.Sensors
-            .Where(s => s.SensorType == SensorType.Clock && s.Name.StartsWith("CPU Core"))
+            .Where(s => s.SensorType == SensorType.Clock
+                     && !s.Name.Equals("Bus Speed", StringComparison.OrdinalIgnoreCase))
             .Select(s => (double?)s.Value)
             .DefaultIfEmpty(null)
             .Max();
@@ -171,7 +177,7 @@ public static class SnapshotBuilder
         return hasDiscrete ? integrated : null;
     }
 
-    public static RamInfo BuildRam(IHardware? memory, PagefileInfo pf)
+    public static RamInfo BuildRam(IHardware? memory, PagefileInfo pf, IEnumerable<IHardware>? allHardware = null)
     {
         double? usedGb = memory?.Val(SensorType.Data, "Memory Used");
         double? availGb = memory?.Val(SensorType.Data, "Memory Available");
@@ -182,7 +188,39 @@ public static class SnapshotBuilder
             Load: memory?.Val(SensorType.Load, "Memory"),
             CachedMb: pf.CachedMb,
             PagefileUsedMb: pf.UsedMb,
-            PagefileTotalMb: pf.TotalMb);
+            PagefileTotalMb: pf.TotalMb,
+            DimmTemps: allHardware is null ? null : CollectDimmTemps(allHardware));
+    }
+
+    /// <summary>
+    /// Pull per-module DIMM temperatures from LHM's individual memory-module
+    /// hardware entries (identifier <c>/memory/dimm/N</c>, surfaced by LHM 0.9.6
+    /// for DDR5 SO-DIMMs and most DDR4 desktop kits whose SPD hub exposes a
+    /// thermal sensor). Returns <c>null</c> when no DIMM module is enumerated
+    /// so the JSON field stays absent rather than an empty array.
+    /// </summary>
+    internal static IReadOnlyList<DimmTemp>? CollectDimmTemps(IEnumerable<IHardware> hardware)
+    {
+        var list = new List<DimmTemp>();
+        foreach (var hw in hardware)
+        {
+            if (hw.HardwareType != HardwareType.Memory) continue;
+            string id = hw.Identifier.ToString() ?? string.Empty;
+            if (!id.Contains("/memory/dimm/", StringComparison.OrdinalIgnoreCase)) continue;
+
+            // LHM names the headline sensor "DIMM #N" exactly. Other
+            // Temperature sensors on the same DIMM hardware are SPD spec
+            // metadata (limits, resolution) — we skip those.
+            foreach (var s in hw.Sensors)
+            {
+                if (s.SensorType != SensorType.Temperature) continue;
+                if (s.Value is not float v) continue;
+                if (!s.Name.StartsWith("DIMM ", StringComparison.OrdinalIgnoreCase)) continue;
+                list.Add(new DimmTemp(s.Name, v));
+                break;
+            }
+        }
+        return list.Count > 0 ? list : null;
     }
 
     public static List<StorageInfo> BuildStorage(IEnumerable<IHardware> hardware,
@@ -415,7 +453,7 @@ public static class SnapshotBuilder
             Cpu: cpuHw is null ? null : BuildCpu(cpuHw),
             Gpu: discreteGpus.Count > 0 ? discreteGpus : null,
             Igpu: integratedGpu,
-            Ram: BuildRam(memHw, pf),
+            Ram: BuildRam(memHw, pf, hardware),
             Storage: storage.Count > 0 ? storage : null,
             Board: BuildBoard(boardHw),
             Fans: fans.Count > 0 ? fans : null,
