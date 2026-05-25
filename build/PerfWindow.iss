@@ -218,20 +218,39 @@ begin
     mbInformation, MB_OK);
 end;
 
-{ End-to-end PawnIO sequence: extract the bundled installer, surface a status
-  message, run it silently, and route any unexpected exit code through
-  HandlePawnIoFailure (a non-fatal warning). Treats codes 0 and 3010 (success
-  with pending reboot) as success. PawnIO_setup.exe is upgrade-aware
-  (UpgradeBehavior=uninstallPrevious in the winget manifest), so we don't
-  bother detecting an existing install — re-running it on a current install
-  is a no-op. }
+{ End-to-end PawnIO sequence: extract the bundled installer, run a
+  best-effort silent uninstall of any prior install (cleans the registry
+  entry and any half-uninstalled state), then run the silent install and
+  route an unexpected install exit code through HandlePawnIoFailure
+  (a non-fatal warning).
+
+  Why the explicit uninstall step: PawnIO_setup.exe -install -silent does
+  NOT upgrade in place. When a prior version (or even the same version) is
+  registered in the Windows Uninstall registry — and especially when that
+  prior install is half-uninstalled — the installer aborts with Windows
+  error 183 (ERROR_ALREADY_EXISTS) and the driver service is never created.
+  The official Microsoft winget manifest for this package documents an
+  UpgradeBehavior of "uninstallPrevious", confirming that the supported
+  upgrade path is uninstall-then-install, which is what we do here.
+
+  Uninstall exit code is ignored on purpose: a fresh machine has nothing to
+  uninstall (uninstall returns non-zero), and that is fine — the subsequent
+  install handles the clean case correctly. Install exit code is the only
+  one that gates HandlePawnIoFailure. Treats install codes 0 and 3010
+  (success with pending reboot) as success. }
 procedure EnsurePawnIo;
 var
   ExitCode: Integer;
+  IgnoredCode: Integer;
   PawnIoPath: String;
 begin
   WizardForm.StatusLabel.Caption := 'Installing PawnIO kernel driver...';
   PawnIoPath := ExtractPawnIo;
+  { Step 1: best-effort uninstall. Cleans any prior install (any version)
+    plus any half-uninstalled state from a previously aborted install. }
+  Exec(PawnIoPath, '-uninstall -silent', '',
+       SW_HIDE, ewWaitUntilTerminated, IgnoredCode);
+  { Step 2: install. Whatever was there is gone; this should start clean. }
   ExitCode := InstallPawnIoSilent(PawnIoPath);
   if not ((ExitCode = 0) or (ExitCode = 3010)) then
     HandlePawnIoFailure(ExitCode);
