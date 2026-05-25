@@ -22,7 +22,7 @@ toml = "1.1.2"
 winreg = "0.56.0"
 ureq = { version = "2.10", default-features = false, features = ["tls"] }
 semver = "1"
-thiserror = "1"
+thiserror = "2"
 
 [build-dependencies]
 winresource = "0.1.31"
