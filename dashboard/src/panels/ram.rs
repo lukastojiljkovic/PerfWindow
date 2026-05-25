@@ -1,7 +1,7 @@
 //! The RAM component panel.
 
 use super::{card, panel_title};
-use crate::format::{format_gb_from_mb, format_gb_pair};
+use crate::format::{format_gb_from_mb, format_gb_pair, format_temp, TempUnit};
 use crate::history::RingBuffer;
 use crate::ipc::RamInfo;
 use crate::theme::Theme;
@@ -10,6 +10,7 @@ use crate::widgets::bars::bar_meter;
 use crate::widgets::gauge::donut;
 use crate::widgets::sparkline::sparkline;
 use crate::widgets::stat::stat_row;
+use crate::widgets::{temp_color, TempKind};
 use egui::{FontId, Sense, Vec2};
 
 /// Height of the SWAP row (matches the mockup's `.pw-swap { height: 24px }`).
@@ -26,6 +27,7 @@ pub fn ram_panel(
     theme: &Theme,
     ram: &RamInfo,
     history: Option<&RingBuffer>,
+    unit: TempUnit,
     min_h: f32,
 ) {
     card(ui, theme, min_h, |ui| {
@@ -47,6 +49,23 @@ pub fn ram_panel(
                     stat_row(ui, theme, "CACHED", &gb(ram.cached_mb), None),
                     "CACHED",
                 );
+
+                // DIMM temperature — surface the hottest module on the row,
+                // full per-module breakdown on hover. Only present when the
+                // SPD hub exposes a thermal sensor (DDR5; most DDR4 desktop
+                // kits). Older sensord builds and older hardware skip it.
+                if let Some(dimms) = ram.dimm_temps.as_ref().filter(|d| !d.is_empty()) {
+                    let hottest = dimms.iter().map(|d| d.temp_c).fold(f64::MIN, f64::max);
+                    let value = format_temp(Some(hottest), unit);
+                    let col = Some(temp_color(hottest, TempKind::Processor, theme));
+                    let label = if dimms.len() > 1 { "DIMM MAX" } else { "DIMM" };
+                    let resp = stat_row(ui, theme, label, &value, col);
+                    let mut hover = String::from("Per-module DIMM temperatures (°C):\n");
+                    for d in dimms {
+                        hover.push_str(&format!("  {:<10} {:.1}\n", d.label, d.temp_c));
+                    }
+                    resp.on_hover_text(hover.trim_end().to_string());
+                }
             });
         });
 

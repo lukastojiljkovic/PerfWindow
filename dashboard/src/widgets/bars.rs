@@ -34,13 +34,22 @@ pub fn bar_meter(ui: &mut egui::Ui, theme: &Theme, fraction: f32, warn: bool) ->
 /// Bars are separated by 3 px gaps and sit on the baseline (grow upward).
 /// Fill is `theme.accent` at ~0.72 opacity.
 /// Matches the `.pw-cores` element in the mockup.
-pub fn core_strip(ui: &mut egui::Ui, theme: &Theme, loads: &[f32]) {
+///
+/// `p_core_count = Some(n)` switches to hybrid-CPU coloring: the first `n`
+/// bars (P-Cores) paint at full `theme.accent` opacity and a wider visual gap
+/// separates them from the trailing E-Core bars, which paint dimmer.
+/// `None` paints uniformly at the standard 0.72 opacity.
+pub fn core_strip(ui: &mut egui::Ui, theme: &Theme, loads: &[f32], p_core_count: Option<usize>) {
     if loads.is_empty() {
         return;
     }
 
     let strip_h = 24.0;
     let gap = 3.0;
+    // Extra horizontal pixels inserted once, between the P-Core cluster and
+    // the E-Core cluster, so the eye can find the boundary even when every
+    // bar has the same load.
+    let cluster_gap_extra = 8.0;
     let available_w = ui.available_width();
     let (rect, _response) = ui.allocate_exact_size(Vec2::new(available_w, strip_h), Sense::hover());
 
@@ -51,24 +60,42 @@ pub fn core_strip(ui: &mut egui::Ui, theme: &Theme, loads: &[f32]) {
     let painter = ui.painter_at(rect);
     let n = loads.len() as f32;
     let total_gap = gap * (n - 1.0);
+    let extra = if matches!(p_core_count, Some(c) if c > 0 && c < loads.len()) {
+        cluster_gap_extra
+    } else {
+        0.0
+    };
     // When the available width is too small for `n` bars + gaps, the `.max(1.0)`
     // floor trades exact tiling for a 1 px minimum: trailing bars then overflow
     // `rect`, which `painter_at(rect)` clipping absorbs harmlessly.
-    let bar_w = ((available_w - total_gap) / n).max(1.0);
+    let bar_w = ((available_w - total_gap - extra) / n).max(1.0);
 
-    // accent at 0.72 opacity
-    let bar_color = theme.accent.gamma_multiply(0.72);
+    let p_color = theme.accent.gamma_multiply(0.85);
+    let e_color = theme.accent.gamma_multiply(0.45);
+    let uniform_color = theme.accent.gamma_multiply(0.72);
 
+    let mut x = rect.min.x;
     for (i, &load) in loads.iter().enumerate() {
         let fraction = (load / 100.0).clamp(0.0, 1.0);
         let bar_h = (fraction * strip_h).max(2.0);
 
-        let x = rect.min.x + i as f32 * (bar_w + gap);
+        let color = match p_core_count {
+            Some(c) if i < c => p_color,
+            Some(_) => e_color,
+            None => uniform_color,
+        };
+
         let bar_rect = Rect::from_min_size(
             egui::Pos2::new(x, rect.max.y - bar_h),
             Vec2::new(bar_w, bar_h),
         );
-        painter.rect_filled(bar_rect, 0.0, bar_color);
+        painter.rect_filled(bar_rect, 0.0, color);
+
+        x += bar_w + gap;
+        // Insert the cluster gap after the last P-Core bar.
+        if matches!(p_core_count, Some(c) if i + 1 == c) {
+            x += cluster_gap_extra;
+        }
     }
 }
 

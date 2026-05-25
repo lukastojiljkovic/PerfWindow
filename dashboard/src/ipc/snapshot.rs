@@ -106,6 +106,18 @@ pub struct RamInfo {
     pub cached_mb: Option<f64>,
     pub pagefile_used_mb: Option<f64>,
     pub pagefile_total_mb: Option<f64>,
+    /// Per-module DIMM temperatures (°C). Populated on platforms whose SPD
+    /// hub exposes a thermal sensor — every DDR5 SO-DIMM and most DDR4
+    /// desktop kits. Older `sensord` builds omit the field.
+    #[serde(default)]
+    pub dimm_temps: Option<Vec<DimmTemp>>,
+}
+
+/// One memory-module temperature reading, as emitted by sensord.
+#[derive(Debug, Clone, Deserialize)]
+pub struct DimmTemp {
+    pub label: String,
+    pub temp_c: f64,
 }
 
 #[derive(Debug, Clone, Deserialize)]

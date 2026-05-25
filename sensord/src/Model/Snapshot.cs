@@ -85,7 +85,7 @@ public record GpuInfo(
     [property: JsonPropertyName("shared_vram_used_mb")] double? SharedVramUsedMb,
     [property: JsonPropertyName("voltage_v")] double? VoltageV);
 
-/// <summary>RAM metrics. All sizes in MB. <c>cached_mb</c> = OS file-cache (system cache pages × page size). <c>load</c> = 0–100 %.</summary>
+/// <summary>RAM metrics. All sizes in MB. <c>cached_mb</c> = OS file-cache (system cache pages × page size). <c>load</c> = 0–100 %. <c>dimm_temps</c> lists per-module DIMM temperatures (°C) when the SPD hub exposes them — typical on DDR5 platforms.</summary>
 public record RamInfo(
     [property: JsonPropertyName("used_mb")] double? UsedMb,
     [property: JsonPropertyName("total_mb")] double? TotalMb,
@@ -93,7 +93,13 @@ public record RamInfo(
     [property: JsonPropertyName("load")] double? Load,
     [property: JsonPropertyName("cached_mb")] double? CachedMb,
     [property: JsonPropertyName("pagefile_used_mb")] double? PagefileUsedMb,
-    [property: JsonPropertyName("pagefile_total_mb")] double? PagefileTotalMb);
+    [property: JsonPropertyName("pagefile_total_mb")] double? PagefileTotalMb,
+    [property: JsonPropertyName("dimm_temps")] IReadOnlyList<DimmTemp>? DimmTemps);
+
+/// <summary>One DIMM (memory module) temperature reading. <c>label</c> is the SPD slot label (e.g. "DIMM #0").</summary>
+public record DimmTemp(
+    [property: JsonPropertyName("label")] string Label,
+    [property: JsonPropertyName("temp_c")] double TempC);
 
 /// <summary>
 /// Per-drive storage metrics. <c>kind</c>: "nvme" | "ssd" | "hdd"; sizes in

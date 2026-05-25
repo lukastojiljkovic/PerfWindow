@@ -7,6 +7,66 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ## [Unreleased]
 
+## [0.6.0] — 2026-05-25
+
+A **layout & data-gap** release. v0.5.x exposed every new sensor the
+PawnIO-era LibreHardwareMonitor surfaces, but the dashboard had two
+remaining issues: CPU clock never displayed on Intel hybrid CPUs (12th
+gen+) and the GPU panel was so tall that it dictated row 1's height,
+leaving CPU / iGPU / RAM as empty boxes. Row 2 also wasted half its
+width while Storage flowed under it. This release fixes those and adds
+DIMM temperature, GPU clock, P-Core / E-Core distinction in the default
+heat strip, and an iGPU panel that hides the rows its hardware does not
+populate.
+
+### Fixed
+- **CPU CLOCK now displays on Intel hybrid CPUs.** `BuildCpu` filtered
+  `SensorType.Clock` sensors by `Name.StartsWith("CPU Core")`, which
+  never matches the `"P-Core #N"` / `"E-Core #N"` names LHM emits on
+  12th-gen and later Intel CPUs. The filter now takes every Clock
+  reading except the chipset `Bus Speed` base, so `Max()` picks the
+  highest boost clock across all cores regardless of vendor.
+
+### Added
+- **GPU / iGPU CLOCK row.** `sensord` already reported it; the panel
+  did not render it. Now appears in the left stat column between
+  JUNCTION and V (or wherever fits), formatted as MHz under 1 GHz and
+  GHz at and above.
+- **Per-module DIMM temperature.** `sensord` collects the `"DIMM #N"`
+  Temperature sensors LHM exposes from each memory module (DDR5 SO-DIMM
+  on the dev laptop, most DDR4 desktop kits with an SPD thermal sensor).
+  The hottest reading shows as a `DIMM` or `DIMM MAX` row in the RAM
+  panel; hovering reveals the full per-module breakdown.
+- **iGPU VRAM shows shared MB amount.** Instead of the literal
+  `"shared"`, the row now reads `"332 MB shared"` (or whatever DXGI
+  reports), with the dedicated / shared breakdown on hover.
+- **P-Core / E-Core distinction in the default heat strip.** The strip
+  view (the non-heat-map default) now paints P-Cores at the standard
+  accent opacity and E-Cores dimmer, with a small extra gap between
+  the two clusters. Heat-map mode keeps its existing border / tag
+  distinction.
+
+### Changed
+- **GPU panel uses a two-column stat layout** (TEMP / HOTSPOT / JUNCTION
+  / CLOCK / V on the left, MEM USE / VRAM / PCIE / POWER on the right).
+  The card height drops from ~440 px to ~270 px and stops dictating
+  row 1, so CPU / iGPU / RAM no longer carry huge empty bands.
+- **iGPU panel hides rows the hardware does not populate.** Intel UHD
+  has no temperature sensor or memory-controller load reading and
+  reports near-zero power; those rows now skip rather than render as
+  em-dashes, so the card stays compact and informative.
+- **Layout: row 2 fills evenly.** Storage now shares row 2 with
+  Network and Battery (and Sensors when present) instead of wrapping
+  to its own row and leaving 50 % of row 2 empty. On a 4-column grid
+  this places Network · Battery · Storage (span 2) on the same row.
+- `ram_panel` takes the active temperature unit so the new DIMM row
+  honours the Settings `°C` / `°F` toggle.
+
+### Removed
+- The "iGPU panel of em-dashes" anti-pattern: every row that used to
+  read `"—"` or `"0 W"` for an integrated GPU is now suppressed when
+  the underlying sensor is absent.
+
 ## [0.5.1] — 2026-05-25
 
 A "sensor expansion" release. PerfWindow now bundles the **PawnIO**
@@ -304,7 +364,8 @@ User-facing application behaviour is unchanged.
   matching uninstaller that removes the exclusions, the `R0sensord` driver
   service, the install directory and the per-user data directory.
 
-[Unreleased]: https://github.com/lukastojiljkovic/PerfWindow/compare/v0.5.1...HEAD
+[Unreleased]: https://github.com/lukastojiljkovic/PerfWindow/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/lukastojiljkovic/PerfWindow/releases/tag/v0.6.0
 [0.5.1]: https://github.com/lukastojiljkovic/PerfWindow/releases/tag/v0.5.1
 [0.4.1]: https://github.com/lukastojiljkovic/PerfWindow/releases/tag/v0.4.1
 [0.4.0]: https://github.com/lukastojiljkovic/PerfWindow/releases/tag/v0.4.0
