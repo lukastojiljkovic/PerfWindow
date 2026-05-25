@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ## [Unreleased]
 
+## [0.6.1] — 2026-05-25
+
+### Fixed
+- **PawnIO chain-install on upgrade.** Updating PerfWindow from 0.5.x to
+  0.6.0 over an already-installed PawnIO 2.2.0 caused the bundled
+  `PawnIO_setup.exe -install -silent` to abort with Windows error 183
+  (`ERROR_ALREADY_EXISTS`) and surface a "PawnIO driver installation
+  failed" dialog. The installer never overwrote the existing registry
+  entry, so the silent `-install` switch refused to proceed. The 0.6.1
+  installer now runs `-uninstall -silent` first as a best-effort cleanup
+  (no-op on fresh machines, ignored on failure) and then `-install
+  -silent`, mirroring the upstream winget manifest's
+  `UpgradeBehavior: uninstallPrevious` policy. Fresh installs and
+  upgrades both end with PawnIO fully installed and CPU MSR readings
+  populated.
+
 ## [0.6.0] — 2026-05-25
 
 A **layout & data-gap** release. v0.5.x exposed every new sensor the
@@ -364,7 +380,8 @@ User-facing application behaviour is unchanged.
   matching uninstaller that removes the exclusions, the `R0sensord` driver
   service, the install directory and the per-user data directory.
 
-[Unreleased]: https://github.com/lukastojiljkovic/PerfWindow/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/lukastojiljkovic/PerfWindow/compare/v0.6.1...HEAD
+[0.6.1]: https://github.com/lukastojiljkovic/PerfWindow/releases/tag/v0.6.1
 [0.6.0]: https://github.com/lukastojiljkovic/PerfWindow/releases/tag/v0.6.0
 [0.5.1]: https://github.com/lukastojiljkovic/PerfWindow/releases/tag/v0.5.1
 [0.4.1]: https://github.com/lukastojiljkovic/PerfWindow/releases/tag/v0.4.1
