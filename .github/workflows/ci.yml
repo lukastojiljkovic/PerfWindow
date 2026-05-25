@@ -102,7 +102,7 @@ jobs:
       - name: Build
         shell: pwsh
         run: pwsh build/build.ps1
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: PerfWindow-Setup-pr-${{ github.sha }}
           path: dist/PerfWindow-Setup.exe
