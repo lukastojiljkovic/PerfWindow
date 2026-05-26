@@ -256,6 +256,29 @@ begin
     HandlePawnIoFailure(ExitCode);
 end;
 
+{ Install the PerfWindow sensor service as a LocalSystem auto-start service.
+  Idempotent: `sc create` returns error 1073 (ERROR_SERVICE_EXISTS) on a
+  re-install; we treat that as success and let `sc start` continue.
+  The service hosts sensord.exe --service from {app}, talking to dashboards
+  over the named pipe \\.\pipe\PerfWindowSensor. }
+procedure InstallSensorService;
+var
+  Cmd: String;
+  ResultCode: Integer;
+begin
+  WizardForm.StatusLabel.Caption := 'Installing PerfWindow sensor service...';
+  Cmd := 'create PerfWindowSensor binPath= "\"' + ExpandConstant('{app}\sensord.exe') + '\" --service"'
+       + ' start= auto'
+       + ' DisplayName= "PerfWindow Sensor"'
+       + ' obj= LocalSystem';
+  Exec('sc.exe', Cmd, '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Exec('sc.exe',
+       'description PerfWindowSensor "Provides hardware sensor readings to PerfWindow."',
+       '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Exec('sc.exe', 'start PerfWindowSensor', '',
+       SW_HIDE, ewWaitUntilTerminated, ResultCode);
+end;
+
 { Strip the legacy WinRing0 Defender entries written by PerfWindow 0.4.1 and
   earlier. Safe to call on a clean machine (every cmdlet has -ErrorAction
   SilentlyContinue). A reconciliation pass also walks the Defender detection
@@ -291,6 +314,7 @@ begin
   if CurStep = ssInstall then begin
     EnsureVcRedist;
     EnsurePawnIo;
+    InstallSensorService;
   end;
   if CurStep = ssPostInstall then begin
     CleanupLegacyDefenderEntries;
