@@ -22,13 +22,20 @@ public record Snapshot(
     [property: JsonPropertyName("battery")] BatteryInfo? Battery,
     [property: JsonPropertyName("uptime_sec")] long? UptimeSec,
     [property: JsonPropertyName("atk_fans")] IReadOnlyList<FanInfo>? AtkFans,
-    [property: JsonPropertyName("display")] DisplayInfo? Display);
+    [property: JsonPropertyName("display")] DisplayInfo? Display,
+    [property: JsonPropertyName("health")] HealthInfo? Health);
 
 /// <summary>Active display info — resolution and refresh rate of the primary monitor.</summary>
 public record DisplayInfo(
     [property: JsonPropertyName("width")] int Width,
     [property: JsonPropertyName("height")] int Height,
     [property: JsonPropertyName("refresh_hz")] int RefreshHz);
+
+/// <summary>Service-side health summary, attached to every snapshot. <c>pawnio</c>: "ok" | "missing" | "denied". <c>degraded</c>: true if any reading is unavailable. <c>notes</c>: human-readable detail (optional).</summary>
+public record HealthInfo(
+    [property: JsonPropertyName("pawnio")] string Pawnio,
+    [property: JsonPropertyName("degraded")] bool Degraded,
+    [property: JsonPropertyName("notes")] string? Notes);
 
 /// <summary>
 /// CPU metrics. Units: <c>load</c>/<c>cores</c> = 0–100 %; <c>temp</c>,
