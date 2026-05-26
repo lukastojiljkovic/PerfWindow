@@ -259,8 +259,8 @@ end;
 { Install the PerfWindow sensor service as a LocalSystem auto-start service.
   Idempotent: `sc create` returns error 1073 (ERROR_SERVICE_EXISTS) on a
   re-install; we treat that as success and let `sc start` continue.
-  The service hosts sensord.exe --service from {app}, talking to dashboards
-  over the named pipe \\.\pipe\PerfWindowSensor. }
+  The service hosts sensord.exe --service from the install directory,
+  talking to dashboards over the named pipe \\.\pipe\PerfWindowSensor. }
 procedure InstallSensorService;
 var
   Cmd: String;
