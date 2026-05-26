@@ -2426,6 +2426,7 @@ dependencies = [
  "thiserror 2.0.18",
  "toml",
  "ureq",
+ "webbrowser",
  "winreg",
  "winresource",
 ]

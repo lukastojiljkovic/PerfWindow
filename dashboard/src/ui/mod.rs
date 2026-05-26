@@ -13,6 +13,7 @@
 
 pub mod changelog_modal;
 pub mod effects;
+pub mod health_banner;
 pub mod service_dialog;
 pub mod settings;
 pub mod tooltips;

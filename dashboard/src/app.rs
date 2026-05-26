@@ -64,6 +64,10 @@ pub struct PerfApp {
     /// True between the moment the user clicks "Start" and the moment the
     /// pipe reconnect succeeds. Disables the Start button while polling.
     pub service_starting: bool,
+    /// Set to true when the user clicks Dismiss on the sensord health banner,
+    /// hiding it for the rest of the session even if the degraded condition
+    /// persists. Reset on next launch (not persisted).
+    pub health_banner_dismissed: bool,
     update_source: Arc<GitHubReleaseSource>,
     os_is_light: bool,
 }
@@ -133,6 +137,7 @@ impl PerfApp {
             service_dialog_open: false,
             service_dialog_message: String::new(),
             service_starting: false,
+            health_banner_dismissed: false,
             update_source,
             os_is_light,
         };
@@ -366,6 +371,7 @@ impl PerfApp {
             service_dialog_open: false,
             service_dialog_message: String::new(),
             service_starting: false,
+            health_banner_dismissed: false,
             update_source: Arc::new(GitHubReleaseSource::new(OWNER, REPO)),
             os_is_light: false,
             config,
@@ -397,6 +403,13 @@ impl eframe::App for PerfApp {
                 .frame(egui::Frame::NONE)
                 .show_inside(ui, |ui| {
                     crate::ui::update_banner::update_banner(ui, self);
+                });
+        }
+        if crate::ui::health_banner::is_visible(self) {
+            egui::Panel::top("pw_health_banner")
+                .frame(egui::Frame::NONE)
+                .show_inside(ui, |ui| {
+                    crate::ui::health_banner::health_banner(ui, self);
                 });
         }
         egui::Panel::bottom("pw_footer")
