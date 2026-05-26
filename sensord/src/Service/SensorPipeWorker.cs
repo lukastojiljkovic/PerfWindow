@@ -42,14 +42,16 @@ internal sealed class SensorPipeWorker : BackgroundService
             catch (Exception ex)
             {
                 _log.LogError(ex, "pipe loop error");
-                await Task.Delay(1000, stoppingToken);
+                try { await Task.Delay(1000, stoppingToken); }
+                catch (OperationCanceledException) { break; }
             }
         }
     }
 
     private static async Task ServeOne(Stream pipe, CancellationToken token)
     {
-        var writer = new StreamWriter(pipe, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false))
+        using var writer = new StreamWriter(
+            pipe, new UTF8Encoding(false), bufferSize: 1024, leaveOpen: true)
         {
             AutoFlush = true,
             NewLine = "\n"
