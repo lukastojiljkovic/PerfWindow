@@ -498,6 +498,7 @@ public static class SnapshotBuilder
             Battery: BuildBattery(hardware),
             UptimeSec: Environment.TickCount64 / 1000,
             AtkFans: AtkReader.Read(),
-            Display: DisplayReader.Read());
+            Display: DisplayReader.Read(),
+            Health: null);
     }
 }

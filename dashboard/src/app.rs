@@ -1,6 +1,6 @@
 use crate::config::Config;
 use crate::history::History;
-use crate::ipc::{Sensord, Snapshot};
+use crate::ipc::{SensordKind, Snapshot};
 use crate::theme::{self, system, Theme};
 use crate::update::{
     check::{spawn_check, STARTUP_DELAY_MS},
@@ -31,9 +31,12 @@ pub struct PerfApp {
     pub config: Config,
     pub theme: Theme,
     pub history: History,
-    pub sensord: Option<Sensord>,
+    pub sensord: Option<SensordKind>,
     pub latest: Option<Snapshot>,
     pub status: Status,
+    /// `true` when launched with `--dev` (spawn child sensord); `false` for the
+    /// production path that connects to the installed service over the named pipe.
+    pub dev_mode: bool,
     pub settings_open: bool,
     pub update_state: SharedUpdateState,
     pub update_banner_dismissed: bool,
@@ -51,12 +54,26 @@ pub struct PerfApp {
     /// True while the window is in F11 fullscreen mode. Transient — not
     /// persisted to config. Toggled by the F11 keypress handler.
     pub fullscreen: bool,
+    /// True while the "Sensor service is not running" modal is on screen.
+    /// Set on startup when the production-mode pipe connect failed, and
+    /// dismissed once the reconnect attempt succeeds (or the user cancels).
+    pub service_dialog_open: bool,
+    /// The body text shown inside the service dialog. Mutated by the dialog
+    /// itself to report the outcome of the `sc.exe start` elevation prompt.
+    pub service_dialog_message: String,
+    /// True between the moment the user clicks "Start" and the moment the
+    /// pipe reconnect succeeds. Disables the Start button while polling.
+    pub service_starting: bool,
+    /// Set to true when the user clicks Dismiss on the sensord health banner,
+    /// hiding it for the rest of the session even if the degraded condition
+    /// persists. Reset on next launch (not persisted).
+    pub health_banner_dismissed: bool,
     update_source: Arc<GitHubReleaseSource>,
     os_is_light: bool,
 }
 
 impl PerfApp {
-    pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
+    pub fn new(cc: &eframe::CreationContext<'_>, dev_mode: bool) -> Self {
         theme::install_fonts(&cc.egui_ctx);
         let config = Config::load();
         let os_is_light = system::windows_is_light();
@@ -64,9 +81,17 @@ impl PerfApp {
         theme.apply(&cc.egui_ctx);
 
         let ctx = cc.egui_ctx.clone();
-        let sensord = Sensord::spawn(move || ctx.request_repaint())
-            .inspect_err(|e| eprintln!("PerfWindow: failed to start sensord: {e}"))
-            .ok();
+        let sensord: Option<crate::ipc::SensordKind> = if dev_mode {
+            crate::ipc::process::Sensord::spawn(move || ctx.request_repaint())
+                .inspect_err(|e| eprintln!("PerfWindow: failed to spawn sensord child: {e}"))
+                .ok()
+                .map(crate::ipc::SensordKind::Child)
+        } else {
+            crate::ipc::pipe::PipeSensord::connect(move || ctx.request_repaint())
+                .inspect_err(|e| eprintln!("PerfWindow: failed to connect to sensord pipe: {e}"))
+                .ok()
+                .map(crate::ipc::SensordKind::Pipe)
+        };
 
         let status = if sensord.is_some() {
             Status::Running
@@ -94,6 +119,7 @@ impl PerfApp {
             sensord,
             latest: None,
             status,
+            dev_mode,
             settings_open: false,
             update_state,
             update_banner_dismissed: false,
@@ -108,9 +134,20 @@ impl PerfApp {
             show_changelog: false,
             applied_on_top: false,
             fullscreen: false,
+            service_dialog_open: false,
+            service_dialog_message: String::new(),
+            service_starting: false,
+            health_banner_dismissed: false,
             update_source,
             os_is_light,
         };
+        if app.sensord.is_none() && !dev_mode {
+            app.service_dialog_open = true;
+            app.service_dialog_message =
+                "PerfWindow's sensor service is not running. Click Start to launch it. \
+                 Windows will ask for permission once; after that PerfWindow runs without prompts."
+                    .into();
+        }
         if let Some(s) = &mut app.sensord {
             s.set_interval(app.config.refresh.as_millis());
         }
@@ -181,29 +218,38 @@ impl PerfApp {
 
     /// Restart `sensord` after it has died, re-arming the live feed.
     ///
-    /// The old [`Sensord`] is dropped *first* (`self.sensord = None`): its
-    /// [`Drop`] closes stdin so the child exits cleanly, then joins the reader
-    /// thread. Only once the old child has exited is the replacement spawned —
-    /// the new [`Sensord::spawn`] simply launches the sibling `sensord.exe`
-    /// next to `PerfWindow.exe` (located by `ipc::process::sensord_path`), so
-    /// no file is rewritten and the strict ordering is for resource cleanup
-    /// rather than file contention.
+    /// The old [`SensordKind`] is dropped *first* (`self.sensord = None`): its
+    /// [`Drop`] closes the writer (pipe) or stdin (child), then joins the
+    /// reader thread. Only once the old connection is fully torn down is the
+    /// replacement constructed — in `dev_mode`, that means `Sensord::spawn`
+    /// launches the sibling `sensord.exe`; in the production path it means
+    /// `PipeSensord::connect` re-opens the named pipe exposed by the installed
+    /// service. The strict ordering is for resource cleanup, not file
+    /// contention.
     ///
     /// `history` is deliberately kept, so the sparklines carry on uninterrupted
     /// across the gap. `latest` is cleared (its readings are now stale) and the
-    /// configured refresh interval is re-sent to the fresh child. `status` ends
-    /// as [`Status::Running`] only if the respawn succeeded; a failed spawn is
-    /// logged and leaves it [`Status::SensordDown`].
-    pub fn respawn_sensord(&mut self, ctx: &egui::Context) {
+    /// configured refresh interval is re-sent to the fresh feed. `status` ends
+    /// as [`Status::Running`] only if the respawn succeeded; a failed
+    /// spawn/connect is logged and leaves it [`Status::SensordDown`].
+    pub fn respawn_sensord(&mut self, ctx: &egui::Context, dev_mode: bool) {
         // Drop the old child *before* spawning: its `Drop` waits for the
         // existing reader thread to finish before we hand a fresh stdout
         // pipe to the replacement.
         self.sensord = None;
 
         let repaint_ctx = ctx.clone();
-        self.sensord = Sensord::spawn(move || repaint_ctx.request_repaint())
-            .inspect_err(|e| eprintln!("PerfWindow: failed to restart sensord: {e}"))
-            .ok();
+        self.sensord = if dev_mode {
+            crate::ipc::process::Sensord::spawn(move || repaint_ctx.request_repaint())
+                .inspect_err(|e| eprintln!("PerfWindow: failed to restart sensord child: {e}"))
+                .ok()
+                .map(crate::ipc::SensordKind::Child)
+        } else {
+            crate::ipc::pipe::PipeSensord::connect(move || repaint_ctx.request_repaint())
+                .inspect_err(|e| eprintln!("PerfWindow: failed to reconnect sensord pipe: {e}"))
+                .ok()
+                .map(crate::ipc::SensordKind::Pipe)
+        };
 
         self.status = if self.sensord.is_some() {
             Status::Running
@@ -229,13 +275,47 @@ impl PerfApp {
         }
     }
 
+    /// Poll the named pipe once per frame while the service-start dialog is
+    /// armed, so the UI catches the service coming up the instant Windows
+    /// finishes launching it.
+    ///
+    /// Cheap by construction: bails immediately when `service_starting` is
+    /// false, and short-circuits the moment a connection succeeds (closing
+    /// the dialog and flipping `status` back to `Running`). One reconnect
+    /// attempt per frame is plenty — the service typically takes well under
+    /// a second to start, and `PipeSensord::connect` returns immediately
+    /// when the pipe isn't yet open.
+    pub fn try_reconnect_if_starting(&mut self, ctx: &egui::Context) {
+        if !self.service_starting {
+            return;
+        }
+        if self.sensord.is_some() {
+            self.service_starting = false;
+            self.service_dialog_open = false;
+            return;
+        }
+        // Attempt one reconnect per frame; cheap, and stops as soon as it works.
+        let repaint = ctx.clone();
+        self.sensord = crate::ipc::pipe::PipeSensord::connect(move || repaint.request_repaint())
+            .ok()
+            .map(crate::ipc::SensordKind::Pipe);
+        if self.sensord.is_some() {
+            if let Some(s) = &mut self.sensord {
+                s.set_interval(self.config.refresh.as_millis());
+            }
+            self.status = Status::Running;
+            self.service_starting = false;
+            self.service_dialog_open = false;
+        }
+    }
+
     /// Pull the newest snapshot out of the shared state and update history.
     fn ingest(&mut self) {
         let Some(sensord) = &self.sensord else {
             self.status = Status::SensordDown;
             return;
         };
-        if let Ok(state) = sensord.state.lock() {
+        if let Ok(state) = sensord.state().lock() {
             if !state.alive {
                 self.status = Status::SensordDown;
             }
@@ -276,6 +356,7 @@ impl PerfApp {
             sensord: None,
             latest: None,
             status: Status::Running,
+            dev_mode: false,
             settings_open: false,
             update_state: new_shared(),
             update_banner_dismissed: false,
@@ -288,6 +369,10 @@ impl PerfApp {
             show_changelog: false,
             applied_on_top: false,
             fullscreen: false,
+            service_dialog_open: false,
+            service_dialog_message: String::new(),
+            service_starting: false,
+            health_banner_dismissed: false,
             update_source: Arc::new(GitHubReleaseSource::new(OWNER, REPO)),
             os_is_light: false,
             config,
@@ -321,6 +406,13 @@ impl eframe::App for PerfApp {
                     crate::ui::update_banner::update_banner(ui, self);
                 });
         }
+        if crate::ui::health_banner::is_visible(self) {
+            egui::Panel::top("pw_health_banner")
+                .frame(egui::Frame::NONE)
+                .show_inside(ui, |ui| {
+                    crate::ui::health_banner::health_banner(ui, self);
+                });
+        }
         egui::Panel::bottom("pw_footer")
             .frame(egui::Frame::NONE)
             .show_inside(ui, |ui| {
@@ -346,6 +438,8 @@ impl eframe::App for PerfApp {
         crate::ui::settings::settings_modal(&ctx, self);
         crate::ui::update_modal::update_modal(&ctx, self);
         crate::ui::changelog_modal::changelog_modal(&ctx, &self.theme, &mut self.show_changelog);
+        self.try_reconnect_if_starting(&ctx);
+        crate::ui::service_dialog::service_dialog(&ctx, self);
 
         // The scanline + vignette overlay paints last so it sits on top of
         // every panel and the modal. (The grid is drawn earlier, inside the

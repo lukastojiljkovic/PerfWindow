@@ -256,6 +256,29 @@ begin
     HandlePawnIoFailure(ExitCode);
 end;
 
+{ Install the PerfWindow sensor service as a LocalSystem auto-start service.
+  Idempotent: `sc create` returns error 1073 (ERROR_SERVICE_EXISTS) on a
+  re-install; we treat that as success and let `sc start` continue.
+  The service hosts sensord.exe --service from the install directory,
+  talking to dashboards over the named pipe \\.\pipe\PerfWindowSensor. }
+procedure InstallSensorService;
+var
+  Cmd: String;
+  ResultCode: Integer;
+begin
+  WizardForm.StatusLabel.Caption := 'Installing PerfWindow sensor service...';
+  Cmd := 'create PerfWindowSensor binPath= "\"' + ExpandConstant('{app}\sensord.exe') + '\" --service"'
+       + ' start= auto'
+       + ' DisplayName= "PerfWindow Sensor"'
+       + ' obj= LocalSystem';
+  Exec('sc.exe', Cmd, '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Exec('sc.exe',
+       'description PerfWindowSensor "Provides hardware sensor readings to PerfWindow."',
+       '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Exec('sc.exe', 'start PerfWindowSensor', '',
+       SW_HIDE, ewWaitUntilTerminated, ResultCode);
+end;
+
 { Strip the legacy WinRing0 Defender entries written by PerfWindow 0.4.1 and
   earlier. Safe to call on a clean machine (every cmdlet has -ErrorAction
   SilentlyContinue). A reconciliation pass also walks the Defender detection
@@ -286,11 +309,63 @@ begin
   Exec('sc.exe', 'delete R0sensord', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
 end;
 
+{ Stop and delete the PerfWindowSensor service. Best-effort: a partially
+  installed machine may not have the service at all, which is fine. Run
+  before file deletion so the binary isn't locked. }
+procedure UninstallSensorService;
+var
+  ResultCode: Integer;
+begin
+  Exec('sc.exe', 'stop PerfWindowSensor',   '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Exec('sc.exe', 'delete PerfWindowSensor', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+end;
+
+{ Ask the user whether to remove the PawnIO driver too, and if Yes run
+  PawnIO's own uninstaller via the QuietUninstallString registry value
+  (falling back to UninstallString + /SILENT). }
+procedure UninstallPawnIo;
+var
+  Cmd: String;
+  ResultCode: Integer;
+begin
+  if MsgBox(
+       'PerfWindow installed the PawnIO kernel driver to read hardware sensors.'
+       + #13#10 + #13#10
+       + 'Other monitoring tools (HWiNFO, LibreHardwareMonitor) may also use it.'
+       + #13#10 + #13#10
+       + 'Remove PawnIO driver?',
+       mbConfirmation, MB_YESNO) <> IDYES then
+    Exit;
+
+  if RegQueryStringValue(HKEY_LOCAL_MACHINE,
+       'SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\PawnIO_is1',
+       'QuietUninstallString', Cmd) then
+  begin
+    { Use shell to parse the quoted path + args. }
+    ShellExec('', Cmd, '', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    Exit;
+  end;
+
+  if RegQueryStringValue(HKEY_LOCAL_MACHINE,
+       'SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\PawnIO_is1',
+       'UninstallString', Cmd) then
+  begin
+    Cmd := Cmd + ' /SILENT';
+    ShellExec('', Cmd, '', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    Exit;
+  end;
+
+  MsgBox(
+    'PawnIO uninstaller not found in registry. If you want to remove it, use Add/Remove Programs.',
+    mbInformation, MB_OK);
+end;
+
 procedure CurStepChanged(CurStep: TSetupStep);
 begin
   if CurStep = ssInstall then begin
     EnsureVcRedist;
     EnsurePawnIo;
+    InstallSensorService;
   end;
   if CurStep = ssPostInstall then begin
     CleanupLegacyDefenderEntries;
@@ -303,6 +378,8 @@ begin
   if CurUninstallStep <> usUninstall then
     Exit;
 
+  UninstallSensorService;
   CleanupLegacyDefenderEntries;
   CleanupLegacyDriverService;
+  UninstallPawnIo;
 end;

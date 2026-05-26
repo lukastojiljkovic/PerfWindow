@@ -7,6 +7,62 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ## [Unreleased]
 
+## [0.8.0] — 2026-05-27
+
+A **service architecture** release: `sensord` moves out of a child process
+into a Windows Service (`PerfWindowSensor`, runs as `LocalSystem`). The
+dashboard drops the `requireAdministrator` manifest and runs as the
+current user, fixing `ERROR_ELEVATION_REQUIRED` (Win32 740) on
+environments that silently deny UAC elevation. Hardware-reading
+capability is unchanged; the install/launch UX gains one UAC prompt at
+install time and zero per launch from then on.
+
+### Architecture
+
+- **Sensor backend now a Windows Service** (`PerfWindowSensor`) running
+  as `LocalSystem`. Dashboard runs as the current user (`asInvoker`
+  manifest), so every subsequent launch is UAC-free.
+- IPC moved from child-process stdin/stdout to a named pipe
+  (`\\.\pipe\PerfWindowSensor`, full-duplex NDJSON, single-client,
+  ACL'd to Authenticated Users).
+
+### Added
+
+- Service-side **`health` payload** in every snapshot
+  (`health.pawnio = ok | missing | denied`).
+- Dashboard **health banner** when the service reports degraded mode,
+  with **Install PawnIO** (opens https://pawnio.eu) and **Dismiss**
+  actions, styled to match the existing update banner.
+- Dashboard **"Sensor service is not running" modal** with a **Start**
+  button that calls `sc start PerfWindowSensor` via UAC elevation. One
+  UAC prompt instead of one per launch.
+- Installer **creates and starts** `PerfWindowSensor` automatically
+  post-install (`sc create … obj= LocalSystem start= auto`).
+- Uninstaller **stops and deletes** the service, then **asks** whether
+  to remove the PawnIO driver too. If yes, runs PawnIO's own uninstaller
+  via the registry `QuietUninstallString` (fallback: `UninstallString +
+  /SILENT`).
+- Dev flag `--dev` on `PerfWindow.exe` falls back to the v0.7.0
+  child-spawn IPC, so `cargo run -p perfwindow` works without
+  installing the service.
+- Integration test (`dashboard/tests/pipe_integration.rs`) that
+  spawns the real service, opens the pipe, and asserts a snapshot
+  with the new `health` field arrives.
+
+### Changed
+
+- `PerfWindow.exe` manifest: `requireAdministrator` → `asInvoker`. No
+  more UAC prompts in normal use.
+- `sensord.exe` now has three modes: `--probe` (diagnostic, unchanged),
+  `--service` (Worker host for SCM), default (console child for dev).
+
+### Fixed
+
+- **`ERROR_ELEVATION_REQUIRED` (Win32 740)** on environments that
+  silently denied UAC elevation for the dashboard binary. The dashboard
+  no longer requests elevation; the service it talks to was already
+  elevated by SCM.
+
 ## [0.7.0] — 2026-05-25
 
 A **chrome + sensors** release: window controls, two new data sources

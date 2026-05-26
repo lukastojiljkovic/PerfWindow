@@ -13,6 +13,8 @@
 
 pub mod changelog_modal;
 pub mod effects;
+pub mod health_banner;
+pub mod service_dialog;
 pub mod settings;
 pub mod tooltips;
 pub mod update_banner;
@@ -741,7 +743,7 @@ pub fn error_overlay(ui: &mut egui::Ui, app: &mut PerfApp, ctx: &egui::Context) 
 
     // Applied after the layout closures so `app` is borrowed mutably just once.
     if respawn {
-        app.respawn_sensord(ctx);
+        app.respawn_sensord(ctx, app.dev_mode);
     }
 }
 
