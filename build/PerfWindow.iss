@@ -309,6 +309,57 @@ begin
   Exec('sc.exe', 'delete R0sensord', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
 end;
 
+{ Stop and delete the PerfWindowSensor service. Best-effort: a partially
+  installed machine may not have the service at all, which is fine. Run
+  before file deletion so the binary isn't locked. }
+procedure UninstallSensorService;
+var
+  ResultCode: Integer;
+begin
+  Exec('sc.exe', 'stop PerfWindowSensor',   '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Exec('sc.exe', 'delete PerfWindowSensor', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+end;
+
+{ Ask the user whether to remove the PawnIO driver too, and if Yes run
+  PawnIO's own uninstaller via the QuietUninstallString registry value
+  (falling back to UninstallString + /SILENT). }
+procedure UninstallPawnIo;
+var
+  Cmd: String;
+  ResultCode: Integer;
+begin
+  if MsgBox(
+       'PerfWindow installed the PawnIO kernel driver to read hardware sensors.'
+       + #13#10 + #13#10
+       + 'Other monitoring tools (HWiNFO, LibreHardwareMonitor) may also use it.'
+       + #13#10 + #13#10
+       + 'Remove PawnIO driver?',
+       mbConfirmation, MB_YESNO) <> IDYES then
+    Exit;
+
+  if RegQueryStringValue(HKEY_LOCAL_MACHINE,
+       'SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\PawnIO_is1',
+       'QuietUninstallString', Cmd) then
+  begin
+    { Use shell to parse the quoted path + args. }
+    ShellExec('', Cmd, '', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    Exit;
+  end;
+
+  if RegQueryStringValue(HKEY_LOCAL_MACHINE,
+       'SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\PawnIO_is1',
+       'UninstallString', Cmd) then
+  begin
+    Cmd := Cmd + ' /SILENT';
+    ShellExec('', Cmd, '', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    Exit;
+  end;
+
+  MsgBox(
+    'PawnIO uninstaller not found in registry. If you want to remove it, use Add/Remove Programs.',
+    mbInformation, MB_OK);
+end;
+
 procedure CurStepChanged(CurStep: TSetupStep);
 begin
   if CurStep = ssInstall then begin
@@ -327,6 +378,8 @@ begin
   if CurUninstallStep <> usUninstall then
     Exit;
 
+  UninstallSensorService;
   CleanupLegacyDefenderEntries;
   CleanupLegacyDriverService;
+  UninstallPawnIo;
 end;
