@@ -1,8 +1,13 @@
 using System.Net.NetworkInformation;
 using System.Text.Json;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Hosting.WindowsServices;
+using Microsoft.Extensions.Logging;
 using Sensord.Control;
 using Sensord.Model;
 using Sensord.Sensors;
+using Sensord.Service;
 
 namespace Sensord;
 
@@ -12,28 +17,62 @@ internal static class Program
     private static volatile bool _running = true;
     private static readonly ManualResetEventSlim _shutdown = new(false);
 
-    private static void Main(string[] args)
+    private static int Main(string[] args)
     {
-        // Stage the WinRing0 kernel driver in a Defender-excluded folder. Must
-        // run before any LibreHardwareMonitor code touches the temp directory.
         RedirectDriverTempDir();
 
-        // Diagnostic mode: dump the full LHM hardware/sensor tree and exit.
         if (args.Contains("--probe"))
         {
             HardwareProbe.Run(Console.Out);
-            return;
+            return 0;
         }
 
+        if (args.Contains("--service"))
+        {
+            string pipeName = ExtractPipeName(args) ?? PipeServer.DefaultPipeName;
+            return RunService(pipeName);
+        }
+
+        RunConsoleChild();
+        return 0;
+    }
+
+    private static int RunService(string pipeName)
+    {
+        var builder = Host.CreateApplicationBuilder();
+        builder.Services.AddWindowsService(options =>
+        {
+            options.ServiceName = "PerfWindowSensor";
+        });
+        builder.Logging.AddEventLog(settings =>
+        {
+            settings.SourceName = "PerfWindowSensor";
+        });
+        builder.Services.AddSingleton<SensorPipeWorker>(sp =>
+            new SensorPipeWorker(sp.GetRequiredService<ILogger<SensorPipeWorker>>(), pipeName));
+        builder.Services.AddHostedService(sp => sp.GetRequiredService<SensorPipeWorker>());
+        builder.Build().Run();
+        return 0;
+    }
+
+    /// <summary>Extract the value of <c>--pipe-name X</c> from args, or <c>null</c>.</summary>
+    private static string? ExtractPipeName(string[] args)
+    {
+        for (int i = 0; i < args.Length - 1; i++)
+            if (args[i] == "--pipe-name")
+                return args[i + 1];
+        return null;
+    }
+
+    private static void RunConsoleChild()
+    {
         var stdout = Console.OpenStandardOutput();
         using var writer = new StreamWriter(stdout) { AutoFlush = true };
 
         var stdinThread = new Thread(ReadControl) { IsBackground = true };
         stdinThread.Start();
 
-        // Physical-disk geometry is static; read it once before the poll loop.
         var diskInfo = DiskInfoReader.Read();
-
         using var monitor = new HardwareMonitor();
         do
         {
