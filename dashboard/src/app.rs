@@ -1,6 +1,6 @@
 use crate::config::Config;
 use crate::history::History;
-use crate::ipc::{Sensord, Snapshot};
+use crate::ipc::{SensordKind, Snapshot};
 use crate::theme::{self, system, Theme};
 use crate::update::{
     check::{spawn_check, STARTUP_DELAY_MS},
@@ -31,9 +31,12 @@ pub struct PerfApp {
     pub config: Config,
     pub theme: Theme,
     pub history: History,
-    pub sensord: Option<Sensord>,
+    pub sensord: Option<SensordKind>,
     pub latest: Option<Snapshot>,
     pub status: Status,
+    /// `true` when launched with `--dev` (spawn child sensord); `false` for the
+    /// production path that connects to the installed service over the named pipe.
+    pub dev_mode: bool,
     pub settings_open: bool,
     pub update_state: SharedUpdateState,
     pub update_banner_dismissed: bool,
@@ -56,7 +59,7 @@ pub struct PerfApp {
 }
 
 impl PerfApp {
-    pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
+    pub fn new(cc: &eframe::CreationContext<'_>, dev_mode: bool) -> Self {
         theme::install_fonts(&cc.egui_ctx);
         let config = Config::load();
         let os_is_light = system::windows_is_light();
@@ -64,9 +67,17 @@ impl PerfApp {
         theme.apply(&cc.egui_ctx);
 
         let ctx = cc.egui_ctx.clone();
-        let sensord = Sensord::spawn(move || ctx.request_repaint())
-            .inspect_err(|e| eprintln!("PerfWindow: failed to start sensord: {e}"))
-            .ok();
+        let sensord: Option<crate::ipc::SensordKind> = if dev_mode {
+            crate::ipc::process::Sensord::spawn(move || ctx.request_repaint())
+                .inspect_err(|e| eprintln!("PerfWindow: failed to spawn sensord child: {e}"))
+                .ok()
+                .map(crate::ipc::SensordKind::Child)
+        } else {
+            crate::ipc::pipe::PipeSensord::connect(move || ctx.request_repaint())
+                .inspect_err(|e| eprintln!("PerfWindow: failed to connect to sensord pipe: {e}"))
+                .ok()
+                .map(crate::ipc::SensordKind::Pipe)
+        };
 
         let status = if sensord.is_some() {
             Status::Running
@@ -94,6 +105,7 @@ impl PerfApp {
             sensord,
             latest: None,
             status,
+            dev_mode,
             settings_open: false,
             update_state,
             update_banner_dismissed: false,
@@ -181,29 +193,38 @@ impl PerfApp {
 
     /// Restart `sensord` after it has died, re-arming the live feed.
     ///
-    /// The old [`Sensord`] is dropped *first* (`self.sensord = None`): its
-    /// [`Drop`] closes stdin so the child exits cleanly, then joins the reader
-    /// thread. Only once the old child has exited is the replacement spawned —
-    /// the new [`Sensord::spawn`] simply launches the sibling `sensord.exe`
-    /// next to `PerfWindow.exe` (located by `ipc::process::sensord_path`), so
-    /// no file is rewritten and the strict ordering is for resource cleanup
-    /// rather than file contention.
+    /// The old [`SensordKind`] is dropped *first* (`self.sensord = None`): its
+    /// [`Drop`] closes the writer (pipe) or stdin (child), then joins the
+    /// reader thread. Only once the old connection is fully torn down is the
+    /// replacement constructed — in `dev_mode`, that means `Sensord::spawn`
+    /// launches the sibling `sensord.exe`; in the production path it means
+    /// `PipeSensord::connect` re-opens the named pipe exposed by the installed
+    /// service. The strict ordering is for resource cleanup, not file
+    /// contention.
     ///
     /// `history` is deliberately kept, so the sparklines carry on uninterrupted
     /// across the gap. `latest` is cleared (its readings are now stale) and the
-    /// configured refresh interval is re-sent to the fresh child. `status` ends
-    /// as [`Status::Running`] only if the respawn succeeded; a failed spawn is
-    /// logged and leaves it [`Status::SensordDown`].
-    pub fn respawn_sensord(&mut self, ctx: &egui::Context) {
+    /// configured refresh interval is re-sent to the fresh feed. `status` ends
+    /// as [`Status::Running`] only if the respawn succeeded; a failed
+    /// spawn/connect is logged and leaves it [`Status::SensordDown`].
+    pub fn respawn_sensord(&mut self, ctx: &egui::Context, dev_mode: bool) {
         // Drop the old child *before* spawning: its `Drop` waits for the
         // existing reader thread to finish before we hand a fresh stdout
         // pipe to the replacement.
         self.sensord = None;
 
         let repaint_ctx = ctx.clone();
-        self.sensord = Sensord::spawn(move || repaint_ctx.request_repaint())
-            .inspect_err(|e| eprintln!("PerfWindow: failed to restart sensord: {e}"))
-            .ok();
+        self.sensord = if dev_mode {
+            crate::ipc::process::Sensord::spawn(move || repaint_ctx.request_repaint())
+                .inspect_err(|e| eprintln!("PerfWindow: failed to restart sensord child: {e}"))
+                .ok()
+                .map(crate::ipc::SensordKind::Child)
+        } else {
+            crate::ipc::pipe::PipeSensord::connect(move || repaint_ctx.request_repaint())
+                .inspect_err(|e| eprintln!("PerfWindow: failed to reconnect sensord pipe: {e}"))
+                .ok()
+                .map(crate::ipc::SensordKind::Pipe)
+        };
 
         self.status = if self.sensord.is_some() {
             Status::Running
@@ -235,7 +256,7 @@ impl PerfApp {
             self.status = Status::SensordDown;
             return;
         };
-        if let Ok(state) = sensord.state.lock() {
+        if let Ok(state) = sensord.state().lock() {
             if !state.alive {
                 self.status = Status::SensordDown;
             }
@@ -276,6 +297,7 @@ impl PerfApp {
             sensord: None,
             latest: None,
             status: Status::Running,
+            dev_mode: false,
             settings_open: false,
             update_state: new_shared(),
             update_banner_dismissed: false,

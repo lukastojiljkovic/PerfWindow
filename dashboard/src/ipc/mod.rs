@@ -11,3 +11,30 @@ pub use pipe::{ConnectError, PipeSensord};
 pub mod pipe;
 pub mod process;
 pub mod snapshot;
+
+/// Either a pipe-connected client (production) or a spawned child (dev).
+pub enum SensordKind {
+    Pipe(pipe::PipeSensord),
+    Child(process::Sensord),
+}
+
+impl SensordKind {
+    pub fn state(&self) -> &SharedState {
+        match self {
+            Self::Pipe(p) => &p.state,
+            Self::Child(c) => &c.state,
+        }
+    }
+    pub fn set_interval(&mut self, ms: u32) {
+        match self {
+            Self::Pipe(p) => p.set_interval(ms),
+            Self::Child(c) => c.set_interval(ms),
+        }
+    }
+    pub fn is_alive(&self) -> bool {
+        match self {
+            Self::Pipe(p) => p.is_alive(),
+            Self::Child(c) => c.is_alive(),
+        }
+    }
+}
