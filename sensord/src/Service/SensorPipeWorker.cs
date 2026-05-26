@@ -1,6 +1,7 @@
 using System.Net.NetworkInformation;
 using System.Text;
 using System.Text.Json;
+using LibreHardwareMonitor.Hardware;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Sensord.Control;
@@ -20,6 +21,7 @@ internal sealed class SensorPipeWorker : BackgroundService
     private readonly ILogger<SensorPipeWorker> _log;
     private readonly string _pipeName;
     private int _intervalMs = 1000;
+    private HealthInfo? _health;
 
     public SensorPipeWorker(ILogger<SensorPipeWorker> log, string pipeName)
     {
@@ -33,6 +35,9 @@ internal sealed class SensorPipeWorker : BackgroundService
 
         var diskInfo = DiskInfoReader.Read();
         using var monitor = new HardwareMonitor();
+        _health = RunProbe(monitor);
+        _log.LogInformation("PawnIO probe: {Pawnio} (degraded={Degraded})",
+            _health.Pawnio, _health.Degraded);
 
         while (!stoppingToken.IsCancellationRequested)
         {
@@ -82,7 +87,8 @@ internal sealed class SensorPipeWorker : BackgroundService
             {
                 var hardware = monitor.Refresh();
                 Snapshot snap = SnapshotBuilder.Build(
-                    hardware, PagefileReader.Read(), LinkSpeeds(), diskInfo);
+                    hardware, PagefileReader.Read(), LinkSpeeds(), diskInfo)
+                    with { Health = _health };
                 string json = JsonSerializer.Serialize(snap, SensordJsonContext.Default.Snapshot);
                 await writer.WriteLineAsync(json);
                 await Task.Delay(_intervalMs, token);
@@ -129,5 +135,23 @@ internal sealed class SensorPipeWorker : BackgroundService
             if (ni.OperationalStatus == OperationalStatus.Up)
                 map[ni.Name] = ni.Speed;
         return map;
+    }
+
+    private static HealthInfo RunProbe(HardwareMonitor monitor)
+    {
+        try
+        {
+            var hw = monitor.Refresh();
+            var temps = new List<double?>();
+            foreach (var h in hw)
+                foreach (var s in h.Sensors)
+                    if (s.SensorType == SensorType.Temperature)
+                        temps.Add(s.Value.HasValue ? (double?)s.Value.Value : null);
+            return HealthProbe.Classify(temps, exception: null);
+        }
+        catch (Exception ex)
+        {
+            return HealthProbe.Classify(temps: null, exception: ex);
+        }
     }
 }
