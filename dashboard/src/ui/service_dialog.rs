@@ -29,7 +29,11 @@ pub fn service_dialog(ctx: &egui::Context, app: &mut PerfApp) {
             ui.horizontal(|ui| {
                 let start_btn = ui.add_enabled(
                     !app.service_starting,
-                    egui::Button::new(if app.service_starting { "Starting…" } else { "Start" }),
+                    egui::Button::new(if app.service_starting {
+                        "Starting…"
+                    } else {
+                        "Start"
+                    }),
                 );
                 if start_btn.clicked() {
                     app.service_starting = true;
@@ -59,7 +63,10 @@ fn shell_exec_runas(exe: &str, args: &str) -> Result<(), String> {
     use std::ffi::OsStr;
     use std::os::windows::ffi::OsStrExt;
     let to_wide = |s: &str| -> Vec<u16> {
-        OsStr::new(s).encode_wide().chain(std::iter::once(0)).collect()
+        OsStr::new(s)
+            .encode_wide()
+            .chain(std::iter::once(0))
+            .collect()
     };
     let verb = to_wide("runas");
     let file = to_wide(exe);
@@ -104,7 +111,10 @@ fn shell_exec_runas(exe: &str, args: &str) -> Result<(), String> {
     };
     let ok = unsafe { ShellExecuteExW(&mut info as *mut _) };
     if ok == 0 {
-        Err(format!("ShellExecuteExW failed: {}", std::io::Error::last_os_error()))
+        Err(format!(
+            "ShellExecuteExW failed: {}",
+            std::io::Error::last_os_error()
+        ))
     } else {
         Ok(())
     }

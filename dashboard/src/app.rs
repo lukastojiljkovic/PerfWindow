@@ -145,7 +145,8 @@ impl PerfApp {
             app.service_dialog_open = true;
             app.service_dialog_message =
                 "PerfWindow's sensor service is not running. Click Start to launch it. \
-                 Windows will ask for permission once; after that PerfWindow runs without prompts.".into();
+                 Windows will ask for permission once; after that PerfWindow runs without prompts."
+                    .into();
         }
         if let Some(s) = &mut app.sensord {
             s.set_interval(app.config.refresh.as_millis());

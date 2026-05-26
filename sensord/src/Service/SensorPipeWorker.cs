@@ -88,7 +88,8 @@ internal sealed class SensorPipeWorker : BackgroundService
                 var hardware = monitor.Refresh();
                 Snapshot snap = SnapshotBuilder.Build(
                     hardware, PagefileReader.Read(), LinkSpeeds(), diskInfo)
-                    with { Health = _health };
+                    with
+                { Health = _health };
                 string json = JsonSerializer.Serialize(snap, SensordJsonContext.Default.Snapshot);
                 await writer.WriteLineAsync(json);
                 await Task.Delay(_intervalMs, token);

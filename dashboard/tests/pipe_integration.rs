@@ -34,7 +34,11 @@ fn locate_sensord() -> std::path::PathBuf {
 #[test]
 fn sensord_service_emits_snapshots_over_pipe() {
     let sensord = locate_sensord();
-    assert!(sensord.exists(), "sensord.exe missing at {}", sensord.display());
+    assert!(
+        sensord.exists(),
+        "sensord.exe missing at {}",
+        sensord.display()
+    );
 
     let mut child = GuardedChild(
         Command::new(&sensord)
@@ -102,8 +106,14 @@ fn sensord_service_emits_snapshots_over_pipe() {
         .next()
         .expect("at least one line")
         .expect("line read ok");
-    assert!(line.starts_with("{\"v\":"), "snapshot missing version prefix: {line}");
-    assert!(line.contains("\"health\""), "snapshot missing health: {line}");
+    assert!(
+        line.starts_with("{\"v\":"),
+        "snapshot missing version prefix: {line}"
+    );
+    assert!(
+        line.contains("\"health\""),
+        "snapshot missing health: {line}"
+    );
 
     drop(child);
 }
