@@ -54,6 +54,16 @@ pub struct PerfApp {
     /// True while the window is in F11 fullscreen mode. Transient — not
     /// persisted to config. Toggled by the F11 keypress handler.
     pub fullscreen: bool,
+    /// True while the "Sensor service is not running" modal is on screen.
+    /// Set on startup when the production-mode pipe connect failed, and
+    /// dismissed once the reconnect attempt succeeds (or the user cancels).
+    pub service_dialog_open: bool,
+    /// The body text shown inside the service dialog. Mutated by the dialog
+    /// itself to report the outcome of the `sc.exe start` elevation prompt.
+    pub service_dialog_message: String,
+    /// True between the moment the user clicks "Start" and the moment the
+    /// pipe reconnect succeeds. Disables the Start button while polling.
+    pub service_starting: bool,
     update_source: Arc<GitHubReleaseSource>,
     os_is_light: bool,
 }
@@ -120,9 +130,18 @@ impl PerfApp {
             show_changelog: false,
             applied_on_top: false,
             fullscreen: false,
+            service_dialog_open: false,
+            service_dialog_message: String::new(),
+            service_starting: false,
             update_source,
             os_is_light,
         };
+        if app.sensord.is_none() && !dev_mode {
+            app.service_dialog_open = true;
+            app.service_dialog_message =
+                "PerfWindow's sensor service is not running. Click Start to launch it. \
+                 Windows will ask for permission once; after that PerfWindow runs without prompts.".into();
+        }
         if let Some(s) = &mut app.sensord {
             s.set_interval(app.config.refresh.as_millis());
         }
@@ -250,6 +269,40 @@ impl PerfApp {
         }
     }
 
+    /// Poll the named pipe once per frame while the service-start dialog is
+    /// armed, so the UI catches the service coming up the instant Windows
+    /// finishes launching it.
+    ///
+    /// Cheap by construction: bails immediately when `service_starting` is
+    /// false, and short-circuits the moment a connection succeeds (closing
+    /// the dialog and flipping `status` back to `Running`). One reconnect
+    /// attempt per frame is plenty — the service typically takes well under
+    /// a second to start, and `PipeSensord::connect` returns immediately
+    /// when the pipe isn't yet open.
+    pub fn try_reconnect_if_starting(&mut self, ctx: &egui::Context) {
+        if !self.service_starting {
+            return;
+        }
+        if self.sensord.is_some() {
+            self.service_starting = false;
+            self.service_dialog_open = false;
+            return;
+        }
+        // Attempt one reconnect per frame; cheap, and stops as soon as it works.
+        let repaint = ctx.clone();
+        self.sensord = crate::ipc::pipe::PipeSensord::connect(move || repaint.request_repaint())
+            .ok()
+            .map(crate::ipc::SensordKind::Pipe);
+        if self.sensord.is_some() {
+            if let Some(s) = &mut self.sensord {
+                s.set_interval(self.config.refresh.as_millis());
+            }
+            self.status = Status::Running;
+            self.service_starting = false;
+            self.service_dialog_open = false;
+        }
+    }
+
     /// Pull the newest snapshot out of the shared state and update history.
     fn ingest(&mut self) {
         let Some(sensord) = &self.sensord else {
@@ -310,6 +363,9 @@ impl PerfApp {
             show_changelog: false,
             applied_on_top: false,
             fullscreen: false,
+            service_dialog_open: false,
+            service_dialog_message: String::new(),
+            service_starting: false,
             update_source: Arc::new(GitHubReleaseSource::new(OWNER, REPO)),
             os_is_light: false,
             config,
@@ -368,6 +424,8 @@ impl eframe::App for PerfApp {
         crate::ui::settings::settings_modal(&ctx, self);
         crate::ui::update_modal::update_modal(&ctx, self);
         crate::ui::changelog_modal::changelog_modal(&ctx, &self.theme, &mut self.show_changelog);
+        self.try_reconnect_if_starting(&ctx);
+        crate::ui::service_dialog::service_dialog(&ctx, self);
 
         // The scanline + vignette overlay paints last so it sits on top of
         // every panel and the modal. (The grid is drawn earlier, inside the
