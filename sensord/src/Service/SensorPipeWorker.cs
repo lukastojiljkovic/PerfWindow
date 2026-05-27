@@ -30,16 +30,29 @@ internal sealed class SensorPipeWorker : BackgroundService
         _pipeName = pipeName;
     }
 
+    /// <summary>
+    /// Mutable holder so the async <see cref="ServeOne"/> can reassign the
+    /// underlying <see cref="HardwareMonitor"/> on topology change without
+    /// needing a ref-parameter (forbidden on async methods). The
+    /// <c>finally</c> in <see cref="ExecuteAsync"/> disposes the current
+    /// monitor through this reference, so a swap during the session is
+    /// always reflected at shutdown.
+    /// </summary>
+    private sealed class MonitorRef
+    {
+        public HardwareMonitor Monitor;
+        public MonitorRef(HardwareMonitor m) { Monitor = m; }
+    }
+
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         _log.LogInformation("SensorPipeWorker started, pipe={Pipe}", _pipeName);
 
         var diskInfo = DiskInfoReader.Read();
-        // Plain `var` + try/finally below: Task 2 of the v0.9.0 plan reassigns
-        // `monitor` on topology change, which `using` would forbid. Keeping the
-        // `try/finally` shape now to avoid churn when that lands.
-        var monitor = new HardwareMonitor();
-        _health = RunProbe(monitor);
+        // Plain `var` + try/finally below: ServeOne reassigns
+        // `monitorRef.Monitor` on topology change, which `using` would forbid.
+        var monitorRef = new MonitorRef(new HardwareMonitor());
+        _health = RunProbe(monitorRef.Monitor);
         _log.LogInformation("PawnIO probe: {Pawnio} (degraded={Degraded})",
             _health.Pawnio, _health.Degraded);
 
@@ -66,18 +79,18 @@ internal sealed class SensorPipeWorker : BackgroundService
             }
 
             _log.LogInformation("Client connected");
-            await ServeOne(pipe, monitor, diskInfo, stoppingToken);
+            await ServeOne(pipe, monitorRef, diskInfo, stoppingToken);
             _log.LogInformation("Client disconnected, stopping service");
         }
         finally
         {
-            monitor.Dispose();
+            monitorRef.Monitor.Dispose();
         }
     }
 
     private async Task ServeOne(
         Stream pipe,
-        HardwareMonitor monitor,
+        MonitorRef monitorRef,
         IReadOnlyDictionary<int, PhysicalDiskInfo> diskInfo,
         CancellationToken token)
     {
@@ -100,13 +113,35 @@ internal sealed class SensorPipeWorker : BackgroundService
             () => ReadControlLoop(reader, clientCts.Token, () => clientCts.Cancel()),
             clientCts.Token);
 
+        int tickCounter = 0;
+        int currentSignature = TopologySignature.Compute(monitorRef.Monitor.Refresh());
+        var currentDiskInfo = diskInfo;
+
         while (!clientCts.Token.IsCancellationRequested)
         {
             try
             {
-                var hardware = monitor.Refresh();
+                var hardware = monitorRef.Monitor.Refresh();
+
+                if (++tickCounter >= 5)
+                {
+                    tickCounter = 0;
+                    int newSig = TopologySignature.Compute(hardware);
+                    if (newSig != currentSignature)
+                    {
+                        _log.LogInformation(
+                            "Topology change detected (sig {Old} -> {New}); recreating monitor",
+                            currentSignature, newSig);
+                        monitorRef.Monitor.Dispose();
+                        monitorRef.Monitor = new HardwareMonitor();
+                        currentDiskInfo = DiskInfoReader.Read();
+                        hardware = monitorRef.Monitor.Refresh();
+                        currentSignature = TopologySignature.Compute(hardware);
+                    }
+                }
+
                 Snapshot snap = SnapshotBuilder.Build(
-                    hardware, PagefileReader.Read(), LinkSpeeds(), diskInfo)
+                    hardware, PagefileReader.Read(), LinkSpeeds(), currentDiskInfo)
                     with
                 { Health = _health };
                 string json = JsonSerializer.Serialize(snap, SensordJsonContext.Default.Snapshot);
