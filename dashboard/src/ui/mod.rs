@@ -11,6 +11,7 @@
 //! submodule paints the retro CRT overlay — grid, scanlines, vignette — last of
 //! all each frame.
 
+pub mod capacity;
 pub mod changelog_modal;
 pub mod effects;
 pub mod health_banner;
