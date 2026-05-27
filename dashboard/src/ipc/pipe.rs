@@ -51,13 +51,46 @@ pub struct PipeSensord {
     pub state: SharedState,
 }
 
+/// Idempotently start the PerfWindowSensor service via sc.exe.
+///
+/// The installer grants Authenticated Users SERVICE_START on the service
+/// ACL, so this does not require elevation when run from a normal user
+/// account. If the service is already running, sc returns 1056
+/// (ERROR_SERVICE_ALREADY_RUNNING) — we ignore the exit code either way.
+fn try_start_service() {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    let _ = std::process::Command::new("sc.exe")
+        .args(["start", "PerfWindowSensor"])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .creation_flags(CREATE_NO_WINDOW)
+        .status();
+}
+
 impl PipeSensord {
     pub fn connect(repaint: impl Fn() + Send + 'static) -> Result<Self, ConnectError> {
-        let read = OpenOptions::new()
-            .read(true)
-            .write(true)
-            .custom_flags(FILE_FLAG_OVERLAPPED)
-            .open(PIPE_PATH)?;
+        let read = match Self::open_pipe() {
+            Ok(f) => f,
+            Err(ConnectError::NotFound) => {
+                // Service is not running — start it and wait briefly for the
+                // pipe to appear, then retry.
+                try_start_service();
+                let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+                loop {
+                    std::thread::sleep(std::time::Duration::from_millis(200));
+                    match Self::open_pipe() {
+                        Ok(f) => break f,
+                        Err(_) if std::time::Instant::now() >= deadline => {
+                            return Err(ConnectError::NotFound);
+                        }
+                        Err(_) => continue,
+                    }
+                }
+            }
+            Err(e) => return Err(e),
+        };
+
         let writer = read.try_clone()?;
 
         let state: SharedState = Arc::new(Mutex::new(SensorState {
@@ -92,6 +125,15 @@ impl PipeSensord {
             reader: Some(reader),
             state,
         })
+    }
+
+    fn open_pipe() -> Result<File, ConnectError> {
+        OpenOptions::new()
+            .read(true)
+            .write(true)
+            .custom_flags(FILE_FLAG_OVERLAPPED)
+            .open(PIPE_PATH)
+            .map_err(ConnectError::from)
     }
 
     pub fn set_interval(&mut self, ms: u32) {
