@@ -114,7 +114,7 @@ internal sealed class SensorPipeWorker : BackgroundService
             clientCts.Token);
 
         int tickCounter = 0;
-        int currentSignature = TopologySignature.Compute(monitorRef.Monitor.Refresh());
+        HashSet<string> currentIds = TopologySignature.IdentifierSet(monitorRef.Monitor.Refresh());
         var currentDiskInfo = diskInfo;
 
         while (!clientCts.Token.IsCancellationRequested)
@@ -126,17 +126,24 @@ internal sealed class SensorPipeWorker : BackgroundService
                 if (++tickCounter >= 5)
                 {
                     tickCounter = 0;
-                    int newSig = TopologySignature.Compute(hardware);
-                    if (newSig != currentSignature)
+                    var newIds = TopologySignature.IdentifierSet(hardware);
+                    if (!newIds.SetEquals(currentIds))
                     {
+                        var added = string.Join(",", newIds.Except(currentIds));
+                        var removed = string.Join(",", currentIds.Except(newIds));
                         _log.LogInformation(
-                            "Topology change detected (sig {Old} -> {New}); recreating monitor",
-                            currentSignature, newSig);
-                        monitorRef.Monitor.Dispose();
-                        monitorRef.Monitor = new HardwareMonitor();
+                            "Topology change detected (added=[{Added}] removed=[{Removed}]); recreating monitor",
+                            added, removed);
+
+                        // Construct first so a Computer.Open() failure leaves the old (working)
+                        // monitor in place; the next 5-tick window will retry the topology check.
+                        var newMonitor = new HardwareMonitor();
+                        var oldMonitor = monitorRef.Monitor;
+                        monitorRef.Monitor = newMonitor;
+                        oldMonitor.Dispose();
                         currentDiskInfo = DiskInfoReader.Read();
                         hardware = monitorRef.Monitor.Refresh();
-                        currentSignature = TopologySignature.Compute(hardware);
+                        currentIds = TopologySignature.IdentifierSet(hardware);
                     }
                 }
 

@@ -19,7 +19,29 @@ public static class TopologySignature
         return string.Join("|", ids).GetHashCode();
     }
 
+    /// <summary>
+    /// Returns the set of <c>Identifier.ToString()</c> values across the
+    /// supplied hardware tree (including all <c>SubHardware</c>). Used by the
+    /// worker to log added/removed identifiers when the topology changes.
+    /// </summary>
+    public static HashSet<string> IdentifierSet(IEnumerable<IHardware> hardware)
+    {
+        var set = new HashSet<string>(StringComparer.Ordinal);
+        Walk(hardware, set);
+        return set;
+    }
+
     private static void Walk(IEnumerable<IHardware> items, List<string> acc)
+    {
+        foreach (var h in items)
+        {
+            acc.Add(h.Identifier.ToString());
+            if (h.SubHardware is { Length: > 0 } subs)
+                Walk(subs, acc);
+        }
+    }
+
+    private static void Walk(IEnumerable<IHardware> items, HashSet<string> acc)
     {
         foreach (var h in items)
         {

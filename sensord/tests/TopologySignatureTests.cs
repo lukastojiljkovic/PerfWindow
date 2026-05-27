@@ -42,6 +42,23 @@ public class TopologySignatureTests
             TopologySignature.Compute(Array.Empty<IHardware>()));
     }
 
+    [Fact]
+    public void IdentifierSet_ReturnsEveryIdentifier_FlatAndSub()
+    {
+        IHardware sub1 = new FakeHw("storage", "0", "smart");
+        IHardware sub2 = new FakeHw("storage", "0", "io");
+        IHardware root = new FakeHw(new[] { "storage", "0" }, new[] { sub1, sub2 });
+        IHardware other = new FakeHw("cpu", "0");
+
+        var set = TopologySignature.IdentifierSet(new[] { root, other });
+
+        Assert.Contains("/storage/0", set);
+        Assert.Contains("/storage/0/smart", set);
+        Assert.Contains("/storage/0/io", set);
+        Assert.Contains("/cpu/0", set);
+        Assert.Equal(4, set.Count);
+    }
+
     /// <summary>
     /// Minimal IHardware stub: only Identifier and SubHardware are exercised
     /// by TopologySignature.Compute. Everything else throws or returns
