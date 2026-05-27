@@ -44,13 +44,32 @@ pub fn battery_panel(
                     });
                 }
 
-                if let Some(secs) = batt.time_remaining_sec.filter(|s| *s > 0) {
+                // TIME: shown unconditionally so the row keeps its slot
+                // across AC/charging/idle states; em-dash when the OS has
+                // no estimate (charging or just-plugged-in).
+                let time_value = match batt.time_remaining_sec.filter(|s| *s > 0) {
+                    Some(secs) => format_uptime(secs),
+                    None => "—".to_string(),
+                };
+                cands.push(StatCandidate {
+                    priority: 1,
+                    label: "TIME",
+                    value: time_value,
+                    color: None,
+                    tooltip_key: "TIME",
+                });
+
+                // RATE: dedicated row with directional arrow restored from
+                // v0.8.x. Folded into STATE during v0.9.0 transition; the
+                // arrow + decimals carry more information than the rounded
+                // integer in the STATE row.
+                if let Some(rate) = batt.rate_w {
                     cands.push(StatCandidate {
-                        priority: 1,
-                        label: "TIME",
-                        value: format_uptime(secs),
+                        priority: 2,
+                        label: "RATE",
+                        value: format_rate(Some(rate)),
                         color: None,
-                        tooltip_key: "TIME",
+                        tooltip_key: "RATE",
                     });
                 }
 
@@ -63,28 +82,28 @@ pub fn battery_panel(
                         ("IDLE", Some(theme.ok))
                     };
                     cands.push(StatCandidate {
-                        priority: 2,
+                        priority: 3,
                         label: "STATE",
-                        value: format!("{state}  {:.0} W", rate.abs()),
+                        value: state.to_string(),
                         color: col,
                         tooltip_key: "STATE",
                     });
                 }
 
+                // HEALTH: restored from v0.8.x as remaining life percentage.
+                // Wear is computed internally for the health colour band but
+                // the visible value matches user expectation ("100 % = new").
                 if let (Some(design), Some(full)) =
                     (batt.design_capacity_mwh, batt.full_capacity_mwh)
                 {
                     if design > 0.0 {
-                        let wear = ((1.0 - full / design) * 100.0).max(0.0);
-                        // health_color expects "remaining life %" (higher = better),
-                        // so feed the inverse of wear.
-                        let col = health_color((100.0 - wear).max(0.0), theme);
+                        let health = (full / design * 100.0).clamp(0.0, 100.0);
                         cands.push(StatCandidate {
-                            priority: 3,
-                            label: "WEAR",
-                            value: format!("{wear:.1} %"),
-                            color: Some(col),
-                            tooltip_key: "WEAR",
+                            priority: 4,
+                            label: "HEALTH",
+                            value: format!("{health:.1} %"),
+                            color: Some(health_color(health, theme)),
+                            tooltip_key: "HEALTH",
                         });
                     }
                 }
@@ -113,10 +132,6 @@ fn format_state(rate_w: Option<f64>, theme: &Theme) -> (String, Option<egui::Col
 
 /// Positive rate → `"\u{2191}12.4 W"`, negative → `"\u{2193}12.4 W"`,
 /// idle (on AC, no charge/discharge) → `"0 W"`, absent → `"—"`.
-///
-/// Currently unused: the v0.9.0 priority-ranked renderer folds rate into
-/// the STATE row. Kept for potential reuse.
-#[allow(dead_code)]
 fn format_rate(rate_w: Option<f64>) -> String {
     match finite(rate_w) {
         Some(w) if w > 0.05 => format!("\u{2191}{:.1} W", w),

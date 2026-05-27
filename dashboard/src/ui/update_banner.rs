@@ -19,10 +19,11 @@ pub fn is_visible(app: &PerfApp) -> bool {
     if app.update_banner_dismissed {
         return false;
     }
-    matches!(
-        *app.update_state.lock().unwrap(),
-        UpdateState::Available { .. }
-    )
+    let guard = match app.update_state.lock() {
+        Ok(g) => g,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    matches!(*guard, UpdateState::Available { .. })
 }
 
 /// Paint the banner. Caller hosts this inside a `Panel::top` so the layout
@@ -30,7 +31,10 @@ pub fn is_visible(app: &PerfApp) -> bool {
 pub fn update_banner(ui: &mut egui::Ui, app: &mut PerfApp) {
     let theme = app.theme.clone();
     let (tag, headline) = {
-        let guard = app.update_state.lock().unwrap();
+        let guard = match app.update_state.lock() {
+            Ok(g) => g,
+            Err(poisoned) => poisoned.into_inner(),
+        };
         if let UpdateState::Available { release, .. } = &*guard {
             (
                 "\u{25b2} NEW VERSION",

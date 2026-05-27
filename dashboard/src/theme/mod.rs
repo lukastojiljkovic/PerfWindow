@@ -271,7 +271,20 @@ impl FontFamily {
 impl Theme {
     /// Push this theme's palette into egui's `Visuals` so default widgets and
     /// the window background match. Panels paint their own colours explicitly.
+    ///
+    /// `set_theme` is called first so `set_visuals` writes into the correct
+    /// style slot (egui keeps two: `dark_style` and `light_style`, and picks
+    /// the writer based on the current preference). Without it, switching
+    /// between a dark and light PerfWindow theme keeps writing into whichever
+    /// slot egui picked for the OS preference at startup, which both makes
+    /// the new colours land in the wrong slot and clones the `Arc<Style>` on
+    /// every switch — a slow leak that the cumulative theme-cycle stresses.
     pub fn apply(&self, ctx: &egui::Context) {
+        ctx.set_theme(if self.dark {
+            egui::ThemePreference::Dark
+        } else {
+            egui::ThemePreference::Light
+        });
         let mut visuals = if self.dark {
             egui::Visuals::dark()
         } else {
@@ -303,6 +316,31 @@ mod tests {
         ] {
             let t = Theme::for_id(id);
             assert_eq!(t.id, id);
+        }
+    }
+
+    #[test]
+    fn rapid_theme_cycling_does_not_panic() {
+        // Regression for the v0.9.0 cumulative-crash report: rapidly clicking
+        // through themes used to grow egui's style Arc on every call because
+        // `apply` wrote into whichever style slot egui had picked at startup,
+        // not the slot matching the new palette. set_theme now forces the
+        // correct slot first so set_visuals lands in place. Twenty full cycles
+        // (120 calls) covers the 4–6-click crash window the user reported
+        // with comfortable headroom.
+        let ctx = egui::Context::default();
+        let palette = [
+            ThemeId::Amber,
+            ThemeId::Slate,
+            ThemeId::Phosphor,
+            ThemeId::Light,
+            ThemeId::Synthwave,
+            ThemeId::Crimson,
+        ];
+        for _ in 0..20 {
+            for id in palette {
+                Theme::for_id(id).apply(&ctx);
+            }
         }
     }
 

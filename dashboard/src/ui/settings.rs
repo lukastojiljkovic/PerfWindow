@@ -833,7 +833,13 @@ fn updates_section(ui: &mut egui::Ui, theme: &Theme, app: &PerfApp, change: &mut
         });
 
         ui.horizontal(|ui| {
-            let stamp = format_checked_at(&app.update_state.lock().unwrap());
+            // Recover even if the mutex is poisoned: any panic in the update
+            // worker should degrade the "Last checked" label to "never" rather
+            // than crash the entire settings modal.
+            let stamp = match app.update_state.lock() {
+                Ok(g) => format_checked_at(&g),
+                Err(poisoned) => format_checked_at(&poisoned.into_inner()),
+            };
             ui.label(
                 egui::RichText::new(format!("Last checked: {stamp}"))
                     .family(theme.font_data.egui())

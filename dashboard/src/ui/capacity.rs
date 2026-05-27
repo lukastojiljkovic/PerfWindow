@@ -22,10 +22,15 @@ impl Capacity {
     /// - shrinking 820x500 to 3 cols x ~263 px keeps the priority-3 rows,
     /// - very narrow forced widths collapse to a single column with the
     ///   top 3 priorities only.
+    ///
+    /// `rows: 9` covers every current panel's full candidate list (GPU has
+    /// nine: TEMP, VRAM, POWER, CLOCK, MEM USE, HOTSPOT, JUNCTION, PCIE, V).
+    /// CPU/RAM/Battery/Network publish 4–5 each, so the higher cap is a
+    /// no-op for them.
     pub fn from_card_width(width: f32) -> Self {
         if width >= 260.0 {
             Capacity {
-                rows: 6,
+                rows: 9,
                 columns: 2,
             }
         } else if width >= 180.0 {
@@ -51,21 +56,21 @@ mod tests {
         assert_eq!(
             Capacity::from_card_width(260.0),
             Capacity {
-                rows: 6,
+                rows: 9,
                 columns: 2
             }
         );
         assert_eq!(
             Capacity::from_card_width(287.0),
             Capacity {
-                rows: 6,
+                rows: 9,
                 columns: 2
             }
         );
         assert_eq!(
             Capacity::from_card_width(800.0),
             Capacity {
-                rows: 6,
+                rows: 9,
                 columns: 2
             }
         );

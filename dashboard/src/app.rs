@@ -282,7 +282,14 @@ impl PerfApp {
     /// Pull the newest snapshot out of the shared state and update history.
     fn ingest(&mut self) {
         let Some(sensord) = &self.sensord else {
-            self.status = Status::SensordDown;
+            // Don't clobber Status::Connecting — the connect state machine
+            // owns that variant and `poll_connect_events` keeps it fresh.
+            // Promoting it to SensordDown here would race every frame and
+            // mask the loading screen with the "feed stopped" overlay
+            // throughout the 5-15 s the service takes to come up.
+            if !matches!(self.status, Status::Connecting(_)) {
+                self.status = Status::SensordDown;
+            }
             return;
         };
         if let Ok(state) = sensord.state().lock() {
@@ -296,6 +303,17 @@ impl PerfApp {
                 }
             }
         }
+    }
+
+    /// Re-arm the connect state machine after the user clicks RETRY on the
+    /// loading screen's failure card. Drops the old receiver, spawns a fresh
+    /// worker, and flips `status` back to `Connecting(OpeningPipe)` so the
+    /// loading screen re-renders immediately.
+    pub fn restart_connect(&mut self, ctx: &egui::Context) {
+        let repaint = ctx.clone();
+        let (_phase, rx) = crate::ipc::connect::spawn_connect(move || repaint.request_repaint());
+        self.connect_rx = Some(rx);
+        self.status = Status::Connecting(crate::ipc::connect::ConnectPhase::OpeningPipe);
     }
 
     /// Drain pending connect events from the worker thread, advancing
@@ -534,5 +552,24 @@ mod tests {
         let mut app = PerfApp::for_tests(Config::default());
         app.status = Status::Connecting(ConnectPhase::OpeningPipe);
         assert!(matches!(app.status, Status::Connecting(_)));
+    }
+
+    #[test]
+    fn ingest_preserves_connecting_when_sensord_is_none() {
+        use crate::ipc::connect::ConnectPhase;
+        let mut app = PerfApp::for_tests(Config::default());
+        app.sensord = None;
+        app.status = Status::Connecting(ConnectPhase::StartingService);
+        app.ingest();
+        assert!(matches!(app.status, Status::Connecting(_)));
+    }
+
+    #[test]
+    fn ingest_demotes_running_to_sensord_down_when_sensord_is_none() {
+        let mut app = PerfApp::for_tests(Config::default());
+        app.sensord = None;
+        app.status = Status::Running;
+        app.ingest();
+        assert!(matches!(app.status, Status::SensordDown));
     }
 }

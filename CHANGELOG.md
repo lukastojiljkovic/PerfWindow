@@ -7,6 +7,49 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ## [Unreleased]
 
+## [0.9.1] — 2026-05-28
+
+### Fixed
+
+- **Display resolution and refresh rate now match the Windows Display panel
+  on high-DPI screens.** Sensord opts in to Per-Monitor-Aware (V2) at
+  process startup; previously Win32 returned virtualised modes (commonly
+  1024x768 @ 60Hz instead of the panel's native mode) because only the
+  dashboard process carried a DPI manifest.
+- **Loading screen now renders during the 5-15 s service startup window.**
+  `ingest()` no longer clobbers `Status::Connecting` to `SensordDown` on
+  every frame, and `card_grid` routes the connecting state to the
+  loading screen (with phase text and a retry/exit action on failure)
+  instead of the misleading "sensor feed stopped" overlay. The footer
+  shows `BOOTING` instead of `NO SIGNAL` during this window.
+- **Restored GPU JUNCTION (VRAM memory die), PCIE throughput and core
+  voltage readings.** The Full-tier capacity row budget was raised from
+  6 to 9 so every GPU candidate fits at the default viewport.
+- **Restored battery RATE row** (directional arrow + watts) as a dedicated
+  candidate, separated from the STATE row.
+- **Battery TIME row** is now always present (em-dash placeholder when the
+  OS has no estimate) instead of vanishing while charging or idle.
+- **Battery HEALTH** is reported again as remaining-life percentage (was
+  inverted to WEAR in 0.9.0).
+- **Storage TEMP column** is now drawn at every capacity tier; the
+  previous single-column gate hid it in narrow windows.
+- **Sensors panel ranks readings by category** (temperatures, fans,
+  voltages) before truncating, so voltage rows no longer all fall off
+  the card on machines with many fans.
+- **Settings modal no longer panics when the update-check mutex is
+  poisoned.** Every `update_state.lock().unwrap()` in the modal, banner
+  and update modal recovers via `into_inner()` so a background-thread
+  panic degrades to a "never" timestamp rather than crashing the UI.
+- **Rapid theme switching no longer accumulates style allocations.**
+  `Theme::apply` now calls `Context::set_theme` before `set_visuals` so
+  the new palette lands in the correct style slot instead of cloning
+  the `Arc<Style>` on every switch.
+
+### Added
+
+- **Tooltip coverage** for MEM USE, DIMM, DIMM MAX, IFACE, REMAINING,
+  BOARD and VRM labels so every visible stat row has hover text.
+
 ## [0.9.0] — 2026-05-27
 
 ### Fixed

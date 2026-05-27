@@ -222,32 +222,42 @@ pub fn footer(ui: &mut egui::Ui, app: &mut PerfApp) {
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 15.0;
 
-            let running = app.status == Status::Running;
-            if running {
-                // Clickable version label opens the changelog modal.
-                let dot_text = concat!("\u{25cf} v", env!("CARGO_PKG_VERSION"));
-                let resp = ui
-                    .add(
-                        egui::Label::new(
-                            RichText::new(dot_text)
-                                .family(theme.font_data.egui())
-                                .size(10.0)
-                                .color(theme.ok),
+            match app.status.clone() {
+                Status::Running => {
+                    // Clickable version label opens the changelog modal.
+                    let dot_text = concat!("\u{25cf} v", env!("CARGO_PKG_VERSION"));
+                    let resp = ui
+                        .add(
+                            egui::Label::new(
+                                RichText::new(dot_text)
+                                    .family(theme.font_data.egui())
+                                    .size(10.0)
+                                    .color(theme.ok),
+                            )
+                            .sense(Sense::click()),
                         )
-                        .sense(Sense::click()),
-                    )
-                    .on_hover_cursor(egui::CursorIcon::PointingHand)
-                    .on_hover_text("Show changelog");
-                if resp.clicked() {
-                    app.show_changelog = true;
+                        .on_hover_cursor(egui::CursorIcon::PointingHand)
+                        .on_hover_text("Show changelog");
+                    if resp.clicked() {
+                        app.show_changelog = true;
+                    }
                 }
-            } else {
-                ui.label(
-                    RichText::new("\u{25cf} NO SIGNAL")
-                        .family(theme.font_data.egui())
-                        .size(10.0)
-                        .color(theme.hot),
-                );
+                Status::Connecting(_) => {
+                    ui.label(
+                        RichText::new("\u{25cf} BOOTING")
+                            .family(theme.font_data.egui())
+                            .size(10.0)
+                            .color(theme.dim),
+                    );
+                }
+                Status::SensordDown => {
+                    ui.label(
+                        RichText::new("\u{25cf} NO SIGNAL")
+                            .family(theme.font_data.egui())
+                            .size(10.0)
+                            .color(theme.hot),
+                    );
+                }
             }
 
             // Refresh rate.
@@ -325,6 +335,21 @@ fn foot_item(ui: &mut egui::Ui, theme: &Theme, text: &str) {
 /// When the sensor feed has died ([`Status::SensordDown`]) the grid is replaced
 /// wholesale by [`error_overlay`] — the stale panels are not drawn behind it.
 pub fn card_grid(ui: &mut egui::Ui, app: &mut PerfApp) {
+    // Connecting: show the loading screen so the 5-15 s startup window reads
+    // as deliberate progress rather than a "sensor feed stopped" failure.
+    // `Status::Connecting(_)` is held by `poll_connect_events`; the guard in
+    // `ingest()` prevents it from being flipped to SensordDown frame-by-frame.
+    if let Status::Connecting(phase) = app.status.clone() {
+        let theme = app.theme.clone();
+        let ctx = ui.ctx().clone();
+        match loading_screen::loading_screen(ui, &theme, &phase) {
+            loading_screen::LoadingAction::Retry => app.restart_connect(&ctx),
+            loading_screen::LoadingAction::Exit => app.want_quit = true,
+            loading_screen::LoadingAction::None => {}
+        }
+        return;
+    }
+
     // Feed down: replace the whole grid with the error overlay. Handled before
     // the immutable reborrow below, since `error_overlay` needs `&mut app` to
     // wire up its respawn button. `card_grid` takes no `Context`, so clone the

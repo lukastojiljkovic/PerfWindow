@@ -9,12 +9,10 @@ namespace Sensord.Sensors;
 /// returned entry is the primary display (matches <c>MONITORINFOEX.dwFlags
 /// MONITORINFOF_PRIMARY</c>).
 ///
-/// On a host process that is not DPI-aware, Win32 virtualises the display
-/// modes (you get the scaled desktop size, not the panel's native mode). The
-/// sensord service runs DPI-unaware by design — it's a background process
-/// with no UI — and routes the raw EnumDisplaySettings values up to the
-/// dashboard. The dashboard is the one that needs the PerMonitorV2 manifest
-/// (T9) to render those values correctly.
+/// Requires the host process to be Per-Monitor-Aware; otherwise Win32 returns
+/// virtualised modes (e.g. 1024x768@60Hz for a 1920x1080@75Hz panel) and the
+/// dashboard footer renders those bogus values. Sensord opts in at startup via
+/// <c>SetProcessDpiAwarenessContext</c> in <c>Program.MakeProcessDpiAware</c>.
 /// </summary>
 public static class DisplayReader
 {
