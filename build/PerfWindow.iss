@@ -42,9 +42,7 @@ ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 PrivilegesRequired=admin
 MinVersion=10.0
-CloseApplications=yes
-CloseApplicationsFilter=*.exe
-ForceCloseApplications=yes
+CloseApplications=force
 RestartApplications=no
 
 [Languages]
