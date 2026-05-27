@@ -42,9 +42,17 @@ pub fn loading_screen(ui: &mut egui::Ui, theme: &Theme, phase: &ConnectPhase) ->
         ui.add_space(PHRASE_GAP);
 
         match phase {
-            ConnectPhase::OpeningPipe => phrase_with_spinner(ui, theme, "Connecting to sensor service..."),
-            ConnectPhase::RequestingElevation => phrase(ui, theme, "Windows will ask for permission to start the sensor service."),
-            ConnectPhase::StartingService => phrase_with_spinner(ui, theme, "Starting sensor service..."),
+            ConnectPhase::OpeningPipe => {
+                phrase_with_spinner(ui, theme, "Connecting to sensor service...")
+            }
+            ConnectPhase::RequestingElevation => phrase(
+                ui,
+                theme,
+                "Windows will ask for permission to start the sensor service.",
+            ),
+            ConnectPhase::StartingService => {
+                phrase_with_spinner(ui, theme, "Starting sensor service...")
+            }
             ConnectPhase::LoadingSensors => phrase_with_spinner(ui, theme, "Loading sensors..."),
             ConnectPhase::Failed(reason) => {
                 action = failed(ui, theme, reason);
@@ -75,7 +83,8 @@ fn phrase_with_spinner(ui: &mut egui::Ui, theme: &Theme, text: &str) {
 
 fn spinner(ui: &mut egui::Ui, theme: &Theme) {
     let t = ui.input(|i| i.time);
-    let idx = ((t / SPINNER_PERIOD_S * SPINNER_GLYPHS.len() as f64) as usize) % SPINNER_GLYPHS.len();
+    let idx =
+        ((t / SPINNER_PERIOD_S * SPINNER_GLYPHS.len() as f64) as usize) % SPINNER_GLYPHS.len();
     ui.label(
         RichText::new(SPINNER_GLYPHS[idx])
             .family(theme.font_display.egui())
@@ -92,12 +101,10 @@ fn failed(ui: &mut egui::Ui, theme: &Theme, reason: &FailedReason) -> LoadingAct
         ),
         FailedReason::StartTimeout => (
             "SERVICE DID NOT START IN TIME",
-            "The sensor service was launched but did not become ready within 15 seconds.".to_string(),
+            "The sensor service was launched but did not become ready within 15 seconds."
+                .to_string(),
         ),
-        FailedReason::PipeError(e) => (
-            "SENSOR SERVICE COULD NOT CONNECT",
-            e.clone(),
-        ),
+        FailedReason::PipeError(e) => ("SENSOR SERVICE COULD NOT CONNECT", e.clone()),
     };
     ui.label(
         RichText::new(letter_spaced(line1))
@@ -131,9 +138,9 @@ fn failed(ui: &mut egui::Ui, theme: &Theme, reason: &FailedReason) -> LoadingAct
 
 fn action_button(ui: &mut egui::Ui, theme: &Theme, label: &str) -> egui::Response {
     let font = FontId::new(11.0, theme.font_data.egui());
-    let galley = ui
-        .painter()
-        .layout_no_wrap(letter_spaced(label), font, egui::Color32::PLACEHOLDER);
+    let galley =
+        ui.painter()
+            .layout_no_wrap(letter_spaced(label), font, egui::Color32::PLACEHOLDER);
     let size = galley.size() + BUTTON_PAD * 2.0;
     let (rect, response) = ui.allocate_exact_size(size, Sense::click());
     if ui.is_rect_visible(rect) {

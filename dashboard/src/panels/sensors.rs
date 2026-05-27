@@ -19,6 +19,7 @@ use egui::Color32;
 /// shown. When the machine exposes nothing at all — the common case on
 /// laptops with no readable Super-I/O chip — a single dimmed line is drawn
 /// instead. Nothing here fabricates values or panics.
+#[allow(clippy::too_many_arguments)]
 pub fn sensors_panel(
     ui: &mut egui::Ui,
     theme: &Theme,
@@ -62,11 +63,7 @@ pub fn sensors_panel(
         }
         for v in voltages {
             if let Some(volts) = finite(v.volts) {
-                items.push((
-                    v.name.to_uppercase(),
-                    format!("{:.2} V", volts),
-                    None,
-                ));
+                items.push((v.name.to_uppercase(), format!("{:.2} V", volts), None));
             }
         }
 

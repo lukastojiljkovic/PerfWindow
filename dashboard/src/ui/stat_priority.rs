@@ -33,7 +33,7 @@ pub struct StatCandidate {
 /// priority ascending (lowest number = highest priority = kept first).
 ///
 /// Pure function; does not touch egui. Exposed for unit testing.
-pub fn select<'a>(candidates: &'a [StatCandidate], capacity: Capacity) -> Vec<&'a StatCandidate> {
+pub fn select(candidates: &[StatCandidate], capacity: Capacity) -> Vec<&StatCandidate> {
     let mut sorted: Vec<&StatCandidate> = candidates.iter().collect();
     sorted.sort_by_key(|c| c.priority);
     sorted.truncate(capacity.rows);
@@ -54,7 +54,10 @@ pub fn render(
     match capacity.columns {
         1 => {
             for c in selected {
-                tip(stat_row(ui, theme, c.label, &c.value, c.color), c.tooltip_key);
+                tip(
+                    stat_row(ui, theme, c.label, &c.value, c.color),
+                    c.tooltip_key,
+                );
             }
         }
         _ => {
@@ -64,11 +67,17 @@ pub fn render(
             ui.columns(2, |cols| {
                 let left = &mut cols[0];
                 for c in &selected[..split] {
-                    tip(stat_row(left, theme, c.label, &c.value, c.color), c.tooltip_key);
+                    tip(
+                        stat_row(left, theme, c.label, &c.value, c.color),
+                        c.tooltip_key,
+                    );
                 }
                 let right = &mut cols[1];
                 for c in &selected[split..] {
-                    tip(stat_row(right, theme, c.label, &c.value, c.color), c.tooltip_key);
+                    tip(
+                        stat_row(right, theme, c.label, &c.value, c.color),
+                        c.tooltip_key,
+                    );
                 }
             });
         }
@@ -92,7 +101,13 @@ mod tests {
     #[test]
     fn select_returns_top_n_by_priority() {
         let cands = vec![cand(2, "B"), cand(0, "A"), cand(3, "D"), cand(1, "C")];
-        let out = select(&cands, Capacity { rows: 2, columns: 2 });
+        let out = select(
+            &cands,
+            Capacity {
+                rows: 2,
+                columns: 2,
+            },
+        );
         assert_eq!(out.len(), 2);
         assert_eq!(out[0].label, "A");
         assert_eq!(out[1].label, "C");
@@ -101,14 +116,26 @@ mod tests {
     #[test]
     fn select_caps_at_candidate_count() {
         let cands = vec![cand(0, "A")];
-        let out = select(&cands, Capacity { rows: 6, columns: 2 });
+        let out = select(
+            &cands,
+            Capacity {
+                rows: 6,
+                columns: 2,
+            },
+        );
         assert_eq!(out.len(), 1);
     }
 
     #[test]
     fn select_stable_among_equal_priorities() {
         let cands = vec![cand(0, "A"), cand(0, "B"), cand(0, "C")];
-        let out = select(&cands, Capacity { rows: 3, columns: 2 });
+        let out = select(
+            &cands,
+            Capacity {
+                rows: 3,
+                columns: 2,
+            },
+        );
         assert_eq!(
             out.iter().map(|c| c.label).collect::<Vec<_>>(),
             vec!["A", "B", "C"]
@@ -118,7 +145,13 @@ mod tests {
     #[test]
     fn select_returns_empty_when_capacity_zero() {
         let cands = vec![cand(0, "A"), cand(1, "B")];
-        let out = select(&cands, Capacity { rows: 0, columns: 1 });
+        let out = select(
+            &cands,
+            Capacity {
+                rows: 0,
+                columns: 1,
+            },
+        );
         assert!(out.is_empty());
     }
 }

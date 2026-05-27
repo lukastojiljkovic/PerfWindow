@@ -101,9 +101,7 @@ impl PipeSensord {
     /// Open the pipe at the default location without trying to elevate.
     /// The connect state machine uses this in every phase that polls.
     #[allow(dead_code)]
-    pub fn connect_no_elevation(
-        repaint: impl Fn() + Send + 'static,
-    ) -> Result<Self, ConnectError> {
+    pub fn connect_no_elevation(repaint: impl Fn() + Send + 'static) -> Result<Self, ConnectError> {
         let read = Self::open_pipe_at(PIPE_PATH)?;
         Ok(Self::start_reader(read, repaint))
     }

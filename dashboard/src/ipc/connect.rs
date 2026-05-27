@@ -63,11 +63,7 @@ pub fn spawn_connect(
     (phase, rx)
 }
 
-fn run(
-    phase: SharedPhase,
-    tx: Sender<ConnectEvent>,
-    repaint: Arc<dyn Fn() + Send + Sync>,
-) {
+fn run(phase: SharedPhase, tx: Sender<ConnectEvent>, repaint: Arc<dyn Fn() + Send + Sync>) {
     // Phase 1: try opening the pipe directly. Covers the case where the
     // service is already running from a previous session.
     set_phase(&phase, &tx, &repaint, ConnectPhase::OpeningPipe);
@@ -80,7 +76,12 @@ fn run(
     // is on screen.
     set_phase(&phase, &tx, &repaint, ConnectPhase::RequestingElevation);
     if elevate_and_start_service().is_err() {
-        set_phase(&phase, &tx, &repaint, ConnectPhase::Failed(FailedReason::UacCancelled));
+        set_phase(
+            &phase,
+            &tx,
+            &repaint,
+            ConnectPhase::Failed(FailedReason::UacCancelled),
+        );
         return;
     }
 
@@ -96,24 +97,44 @@ fn run(
             }
             Err(ConnectError::NotFound) if std::time::Instant::now() < deadline => continue,
             Err(ConnectError::NotFound) => {
-                set_phase(&phase, &tx, &repaint, ConnectPhase::Failed(FailedReason::StartTimeout));
+                set_phase(
+                    &phase,
+                    &tx,
+                    &repaint,
+                    ConnectPhase::Failed(FailedReason::StartTimeout),
+                );
                 return;
             }
             Err(e) => {
-                set_phase(&phase, &tx, &repaint, ConnectPhase::Failed(FailedReason::PipeError(e.to_string())));
+                set_phase(
+                    &phase,
+                    &tx,
+                    &repaint,
+                    ConnectPhase::Failed(FailedReason::PipeError(e.to_string())),
+                );
                 return;
             }
         }
     }
 }
 
-fn set_phase(phase: &SharedPhase, tx: &Sender<ConnectEvent>, repaint: &Arc<dyn Fn() + Send + Sync>, p: ConnectPhase) {
+fn set_phase(
+    phase: &SharedPhase,
+    tx: &Sender<ConnectEvent>,
+    repaint: &Arc<dyn Fn() + Send + Sync>,
+    p: ConnectPhase,
+) {
     *phase.lock().unwrap() = p.clone();
     let _ = tx.send(ConnectEvent::Phase(p));
     repaint();
 }
 
-fn emit_ready(phase: &SharedPhase, tx: &Sender<ConnectEvent>, repaint: &Arc<dyn Fn() + Send + Sync>, p: PipeSensord) {
+fn emit_ready(
+    phase: &SharedPhase,
+    tx: &Sender<ConnectEvent>,
+    repaint: &Arc<dyn Fn() + Send + Sync>,
+    p: PipeSensord,
+) {
     set_phase(phase, tx, repaint, ConnectPhase::LoadingSensors);
     let _ = tx.send(ConnectEvent::Ready(Box::new(p)));
     repaint();

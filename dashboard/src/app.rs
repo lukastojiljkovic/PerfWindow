@@ -87,21 +87,27 @@ impl PerfApp {
         theme.apply(&cc.egui_ctx);
 
         let ctx_clone = cc.egui_ctx.clone();
-        let (status, sensord, connect_rx): (Status, Option<crate::ipc::SensordKind>, _) = if dev_mode {
-            let s = crate::ipc::process::Sensord::spawn(move || ctx_clone.request_repaint())
-                .inspect_err(|e| eprintln!("PerfWindow: failed to spawn sensord child: {e}"))
-                .ok()
-                .map(crate::ipc::SensordKind::Child);
-            let st = if s.is_some() { Status::Running } else { Status::SensordDown };
-            (st, s, None)
-        } else {
-            let (_phase, rx) = crate::ipc::connect::spawn_connect(move || ctx_clone.request_repaint());
-            (
-                Status::Connecting(crate::ipc::connect::ConnectPhase::OpeningPipe),
-                None,
-                Some(rx),
-            )
-        };
+        let (status, sensord, connect_rx): (Status, Option<crate::ipc::SensordKind>, _) =
+            if dev_mode {
+                let s = crate::ipc::process::Sensord::spawn(move || ctx_clone.request_repaint())
+                    .inspect_err(|e| eprintln!("PerfWindow: failed to spawn sensord child: {e}"))
+                    .ok()
+                    .map(crate::ipc::SensordKind::Child);
+                let st = if s.is_some() {
+                    Status::Running
+                } else {
+                    Status::SensordDown
+                };
+                (st, s, None)
+            } else {
+                let (_phase, rx) =
+                    crate::ipc::connect::spawn_connect(move || ctx_clone.request_repaint());
+                (
+                    Status::Connecting(crate::ipc::connect::ConnectPhase::OpeningPipe),
+                    None,
+                    Some(rx),
+                )
+            };
 
         let update_state = new_shared();
         let update_source = Arc::new(GitHubReleaseSource::new(OWNER, REPO));
@@ -298,7 +304,9 @@ impl PerfApp {
     /// no events.
     pub fn poll_connect_events(&mut self) {
         use crate::ipc::connect::ConnectEvent;
-        let Some(rx) = self.connect_rx.as_mut() else { return };
+        let Some(rx) = self.connect_rx.as_mut() else {
+            return;
+        };
         loop {
             match rx.try_recv() {
                 Ok(ConnectEvent::Phase(p)) => {

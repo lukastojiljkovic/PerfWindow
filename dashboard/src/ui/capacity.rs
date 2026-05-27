@@ -24,11 +24,20 @@ impl Capacity {
     ///   top 3 priorities only.
     pub fn from_card_width(width: f32) -> Self {
         if width >= 260.0 {
-            Capacity { rows: 6, columns: 2 }
+            Capacity {
+                rows: 6,
+                columns: 2,
+            }
         } else if width >= 180.0 {
-            Capacity { rows: 4, columns: 2 }
+            Capacity {
+                rows: 4,
+                columns: 2,
+            }
         } else {
-            Capacity { rows: 3, columns: 1 }
+            Capacity {
+                rows: 3,
+                columns: 1,
+            }
         }
     }
 }
@@ -39,21 +48,69 @@ mod tests {
 
     #[test]
     fn at_or_above_260_is_full_two_cols() {
-        assert_eq!(Capacity::from_card_width(260.0), Capacity { rows: 6, columns: 2 });
-        assert_eq!(Capacity::from_card_width(287.0), Capacity { rows: 6, columns: 2 });
-        assert_eq!(Capacity::from_card_width(800.0), Capacity { rows: 6, columns: 2 });
+        assert_eq!(
+            Capacity::from_card_width(260.0),
+            Capacity {
+                rows: 6,
+                columns: 2
+            }
+        );
+        assert_eq!(
+            Capacity::from_card_width(287.0),
+            Capacity {
+                rows: 6,
+                columns: 2
+            }
+        );
+        assert_eq!(
+            Capacity::from_card_width(800.0),
+            Capacity {
+                rows: 6,
+                columns: 2
+            }
+        );
     }
 
     #[test]
     fn between_180_and_260_is_compact_two_cols() {
-        assert_eq!(Capacity::from_card_width(180.0), Capacity { rows: 4, columns: 2 });
-        assert_eq!(Capacity::from_card_width(220.0), Capacity { rows: 4, columns: 2 });
-        assert_eq!(Capacity::from_card_width(259.999), Capacity { rows: 4, columns: 2 });
+        assert_eq!(
+            Capacity::from_card_width(180.0),
+            Capacity {
+                rows: 4,
+                columns: 2
+            }
+        );
+        assert_eq!(
+            Capacity::from_card_width(220.0),
+            Capacity {
+                rows: 4,
+                columns: 2
+            }
+        );
+        assert_eq!(
+            Capacity::from_card_width(259.999),
+            Capacity {
+                rows: 4,
+                columns: 2
+            }
+        );
     }
 
     #[test]
     fn below_180_is_tiny_one_col() {
-        assert_eq!(Capacity::from_card_width(0.0), Capacity { rows: 3, columns: 1 });
-        assert_eq!(Capacity::from_card_width(179.999), Capacity { rows: 3, columns: 1 });
+        assert_eq!(
+            Capacity::from_card_width(0.0),
+            Capacity {
+                rows: 3,
+                columns: 1
+            }
+        );
+        assert_eq!(
+            Capacity::from_card_width(179.999),
+            Capacity {
+                rows: 3,
+                columns: 1
+            }
+        );
     }
 }

@@ -210,8 +210,10 @@ fn disk_row(ui: &mut egui::Ui, theme: &Theme, disk: &StorageInfo, unit: TempUnit
     {
         // `bar_meter` spans the Ui's available width, so confine it to a child
         // Ui sized to exactly the ACTIVITY column and vertically centred.
-        let bar_rect =
-            egui::Rect::from_min_size(Pos2::new(col_x, center_y - 3.0), Vec2::new(widths[idx], 6.0));
+        let bar_rect = egui::Rect::from_min_size(
+            Pos2::new(col_x, center_y - 3.0),
+            Vec2::new(widths[idx], 6.0),
+        );
         let mut bar_ui = ui.new_child(
             egui::UiBuilder::new()
                 .max_rect(bar_rect)
