@@ -145,30 +145,36 @@ impl PipeSensord {
     pub fn is_alive(&self) -> bool {
         self.state.lock().map(|s| s.alive).unwrap_or(false)
     }
+
+    /// Tell the worker to exit cleanly: write `{"shutdown":true}` on the
+    /// upstream half, then drop our writer to send EOF as a belt-and-braces
+    /// signal. Idempotent — calling more than once is a no-op.
+    ///
+    /// This is the canonical close path. The `Drop` impl below also calls
+    /// `shutdown` as a safety net, but the dashboard prefers to invoke this
+    /// explicitly from `eframe::App::on_exit` while the frame is still alive
+    /// (more reliable than relying on `Drop` during process tear-down).
+    pub fn shutdown(&mut self) {
+        if let Some(mut w) = self.writer.take() {
+            let _ = writeln!(w, "{{\"shutdown\":true}}");
+            // `w` drops here, closing our writer half of the pipe.
+        }
+        // The reader thread is detached (see Drop history); drop the JoinHandle
+        // without joining, exactly as Drop has done since v0.8.1.
+        let _ = self.reader.take();
+    }
 }
 
 impl Drop for PipeSensord {
     fn drop(&mut self) {
-        // Drop the writer handle so the server's reader-side sees EOF.
-        // We deliberately do NOT join the reader thread: it is blocked in
-        // BufReader::lines() and the only way to unblock it would be to
-        // close the pipe, but the reader's own File handle (moved into
-        // the closure) keeps the client side open after we drop the
-        // writer above. Joining would deadlock; we'd need
-        // CancelSynchronousIo against the reader thread to truly interrupt
-        // the read, which is more complexity than the win is worth.
-        //
-        // Instead: drop the JoinHandle, which detaches the thread. The OS
-        // reaps it on process exit, the reader's pipe handle closes, the
-        // server-side I/O returns IOException, and the server cleans up.
-        self.writer.take();
-        let _ = self.reader.take();
+        self.shutdown();
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ipc::SensorState;
     use std::io::{Error, ErrorKind};
 
     #[test]
@@ -187,5 +193,19 @@ mod tests {
     fn pipe_busy_os_error_231_maps_to_busy() {
         let err = ConnectError::from(Error::from_raw_os_error(231));
         assert!(matches!(err, ConnectError::Busy));
+    }
+
+    #[test]
+    fn shutdown_twice_is_safe() {
+        let mut s = PipeSensord {
+            writer: None,
+            reader: None,
+            state: Arc::new(Mutex::new(SensorState {
+                latest: None,
+                alive: false,
+            })),
+        };
+        s.shutdown();
+        s.shutdown(); // must not panic, must not deadlock
     }
 }

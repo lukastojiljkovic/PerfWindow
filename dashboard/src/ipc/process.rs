@@ -89,6 +89,13 @@ impl Sensord {
     pub fn is_alive(&self) -> bool {
         self.state.lock().map(|s| s.alive).unwrap_or(false)
     }
+
+    /// Close `stdin` so the console-child sees EOF on its control loop and
+    /// exits cleanly. Idempotent. This is the canonical close path; `Drop`
+    /// below calls it as a safety net.
+    pub fn shutdown(&mut self) {
+        self.stdin.take();
+    }
 }
 
 /// Locate the bundled `sensord.exe`. The installer ships it next to
@@ -117,10 +124,8 @@ fn sensord_path() -> std::io::Result<std::path::PathBuf> {
 
 impl Drop for Sensord {
     fn drop(&mut self) {
-        // Closing stdin makes sensord's stdin reach EOF; it then exits its poll
-        // loop cleanly (see sensord Program.cs).
-        self.stdin.take();
-        // Give it a moment, then force-kill if still running.
+        self.shutdown();
+        // Give the child a moment, then force-kill if still running.
         for _ in 0..20 {
             match self.child.try_wait() {
                 Ok(Some(_)) => break,

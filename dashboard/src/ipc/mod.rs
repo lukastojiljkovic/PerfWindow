@@ -37,4 +37,10 @@ impl SensordKind {
             Self::Child(c) => c.is_alive(),
         }
     }
+    pub fn shutdown(&mut self) {
+        match self {
+            Self::Pipe(p) => p.shutdown(),
+            Self::Child(c) => c.shutdown(),
+        }
+    }
 }
