@@ -20,4 +20,20 @@ public class ControlReaderTests
     {
         Assert.Null(ControlReader.Parse(line)?.IntervalMs);
     }
+
+    [Fact]
+    public void Parse_ShutdownTrue_ReturnsMessageWithShutdownTrue()
+    {
+        var msg = ControlReader.Parse("{\"shutdown\":true}");
+        Assert.NotNull(msg);
+        Assert.True(msg!.Shutdown);
+    }
+
+    [Fact]
+    public void Parse_NoShutdownField_DefaultsToFalse()
+    {
+        var msg = ControlReader.Parse("{\"interval_ms\":500}");
+        Assert.NotNull(msg);
+        Assert.False(msg!.Shutdown);
+    }
 }

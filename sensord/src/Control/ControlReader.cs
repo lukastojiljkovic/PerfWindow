@@ -4,7 +4,8 @@ using System.Text.Json.Serialization;
 namespace Sensord.Control;
 
 public record ControlMessage(
-    [property: JsonPropertyName("interval_ms")] int? IntervalMs);
+    [property: JsonPropertyName("interval_ms")] int? IntervalMs,
+    [property: JsonPropertyName("shutdown")] bool Shutdown = false);
 
 public static class ControlReader
 {

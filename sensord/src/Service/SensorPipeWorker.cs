@@ -22,7 +22,6 @@ internal sealed class SensorPipeWorker : BackgroundService
     private readonly string _pipeName;
     private int _intervalMs = 1000;
     private HealthInfo? _health;
-    private bool _everConnected;
 
     public SensorPipeWorker(ILogger<SensorPipeWorker> log, string pipeName)
     {
@@ -35,51 +34,37 @@ internal sealed class SensorPipeWorker : BackgroundService
         _log.LogInformation("SensorPipeWorker started, pipe={Pipe}", _pipeName);
 
         var diskInfo = DiskInfoReader.Read();
-        using var monitor = new HardwareMonitor();
+        var monitor = new HardwareMonitor();
         _health = RunProbe(monitor);
         _log.LogInformation("PawnIO probe: {Pawnio} (degraded={Degraded})",
             _health.Pawnio, _health.Degraded);
 
-        while (!stoppingToken.IsCancellationRequested)
+        try
         {
+            await using var pipe = PipeServer.Create(_pipeName);
+            _log.LogInformation("Waiting for client on {Pipe}", _pipeName);
+
+            // 30-second startup deadline. If no dashboard ever connects, exit so
+            // the service does not stay resident forever.
+            using var acceptCts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
+            acceptCts.CancelAfter(TimeSpan.FromSeconds(30));
             try
             {
-                await using var pipe = PipeServer.Create(_pipeName);
-                _log.LogInformation("Waiting for client on {Pipe}", _pipeName);
-
-                using var acceptCts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
-                if (_everConnected)
-                {
-                    // After the first client, exit cleanly if no new client arrives within 60s.
-                    // Dashboard re-starts the service on next launch.
-                    acceptCts.CancelAfter(TimeSpan.FromSeconds(60));
-                }
-
-                try
-                {
-                    await pipe.WaitForConnectionAsync(acceptCts.Token);
-                }
-                catch (OperationCanceledException) when (!stoppingToken.IsCancellationRequested)
-                {
-                    _log.LogInformation("Idle 60s after last client, stopping service");
-                    return;
-                }
-
-                _log.LogInformation("Client connected");
-                _everConnected = true;
-                await ServeOne(pipe, monitor, diskInfo, stoppingToken);
-                _log.LogInformation("Client disconnected, reopening pipe");
+                await pipe.WaitForConnectionAsync(acceptCts.Token);
             }
-            catch (OperationCanceledException)
+            catch (OperationCanceledException) when (!stoppingToken.IsCancellationRequested)
             {
-                break;
+                _log.LogInformation("No client connected within 30s, stopping service");
+                return;
             }
-            catch (Exception ex)
-            {
-                _log.LogError(ex, "pipe loop error");
-                try { await Task.Delay(1000, stoppingToken); }
-                catch (OperationCanceledException) { break; }
-            }
+
+            _log.LogInformation("Client connected");
+            await ServeOne(pipe, monitor, diskInfo, stoppingToken);
+            _log.LogInformation("Client disconnected, stopping service");
+        }
+        finally
+        {
+            monitor.Dispose();
         }
     }
 
@@ -89,19 +74,19 @@ internal sealed class SensorPipeWorker : BackgroundService
         IReadOnlyDictionary<int, PhysicalDiskInfo> diskInfo,
         CancellationToken token)
     {
+        using var clientCts = CancellationTokenSource.CreateLinkedTokenSource(token);
         using var writer = new StreamWriter(
             pipe, new UTF8Encoding(false), bufferSize: 8192, leaveOpen: true)
         {
             AutoFlush = true,
             NewLine = "\n"
         };
-        // Reader runs in parallel for upstream control messages.
         var reader = new StreamReader(
             pipe, Encoding.UTF8, detectEncodingFromByteOrderMarks: false,
             bufferSize: 1024, leaveOpen: true);
-        _ = Task.Run(() => ReadControlLoop(reader, token), token);
+        _ = Task.Run(() => ReadControlLoop(reader, clientCts), clientCts.Token);
 
-        while (!token.IsCancellationRequested)
+        while (!clientCts.Token.IsCancellationRequested)
         {
             try
             {
@@ -112,34 +97,36 @@ internal sealed class SensorPipeWorker : BackgroundService
                 { Health = _health };
                 string json = JsonSerializer.Serialize(snap, SensordJsonContext.Default.Snapshot);
                 await writer.WriteLineAsync(json);
-                await Task.Delay(_intervalMs, token);
+                await Task.Delay(_intervalMs, clientCts.Token);
             }
-            catch (IOException)
-            {
-                return; // client gone
-            }
-            catch (OperationCanceledException)
-            {
-                return;
-            }
+            catch (IOException) { return; }
+            catch (OperationCanceledException) { return; }
             catch (Exception ex)
             {
                 _log.LogError(ex, "snapshot emit error");
-                try { await Task.Delay(1000, token); }
+                try { await Task.Delay(1000, clientCts.Token); }
                 catch (OperationCanceledException) { return; }
             }
         }
     }
 
-    private void ReadControlLoop(StreamReader reader, CancellationToken token)
+    private void ReadControlLoop(StreamReader reader, CancellationTokenSource clientCts)
     {
         try
         {
             string? line;
-            while (!token.IsCancellationRequested && (line = reader.ReadLine()) is not null)
+            while (!clientCts.Token.IsCancellationRequested && (line = reader.ReadLine()) is not null)
             {
                 ControlMessage? msg = ControlReader.Parse(line);
-                if (msg?.IntervalMs is int ms && ms is >= 250 and <= 60_000)
+                if (msg is null) continue;
+
+                if (msg.Shutdown)
+                {
+                    _log.LogInformation("Shutdown requested by client");
+                    clientCts.Cancel();
+                    return;
+                }
+                if (msg.IntervalMs is int ms && ms is >= 250 and <= 60_000)
                 {
                     Interlocked.Exchange(ref _intervalMs, ms);
                     _log.LogInformation("Interval changed to {Ms} ms", ms);
