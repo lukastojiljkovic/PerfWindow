@@ -5,8 +5,8 @@ use crate::format::{format_gb_from_mb, format_gb_pair, format_temp, TempUnit};
 use crate::history::RingBuffer;
 use crate::ipc::RamInfo;
 use crate::theme::Theme;
+use crate::ui::capacity::Capacity;
 use crate::ui::tooltips::tip;
-use crate::ui::LayoutDensity;
 use crate::widgets::bars::bar_meter;
 use crate::widgets::gauge::donut;
 use crate::widgets::sparkline::sparkline;
@@ -29,9 +29,12 @@ pub fn ram_panel(
     ram: &RamInfo,
     history: Option<&RingBuffer>,
     unit: TempUnit,
-    density: LayoutDensity,
+    capacity: Capacity,
     min_h: f32,
 ) {
+    // Temporary T17 compat: existing body uses a binary "full vs compact"
+    // check. T18-T23 will rewrite this block to use StatCandidate + render.
+    let full = capacity.rows >= 6;
     card(ui, theme, min_h, |ui| {
         panel_title(ui, theme, "RAM", None);
 
@@ -49,7 +52,7 @@ pub fn ram_panel(
                 );
                 // CACHED is informative but redundant with USED+FREE.
                 // Skipped in Compact mode.
-                if density == LayoutDensity::Full {
+                if full {
                     tip(
                         stat_row(ui, theme, "CACHED", &gb(ram.cached_mb), None),
                         "CACHED",
@@ -60,7 +63,7 @@ pub fn ram_panel(
                 // full per-module breakdown on hover. Only present when the
                 // SPD hub exposes a thermal sensor (DDR5; most DDR4 desktop
                 // kits). Older sensord builds and older hardware skip it.
-                if density == LayoutDensity::Full {
+                if full {
                     if let Some(dimms) = ram.dimm_temps.as_ref().filter(|d| !d.is_empty()) {
                         let hottest = dimms.iter().map(|d| d.temp_c).fold(f64::MIN, f64::max);
                         let value = format_temp(Some(hottest), unit);

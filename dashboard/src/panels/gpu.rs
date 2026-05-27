@@ -5,8 +5,8 @@ use crate::format::{finite, format_bytes_per_sec, format_gb_pair, format_temp, T
 use crate::history::GpuHistory;
 use crate::ipc::GpuInfo;
 use crate::theme::Theme;
+use crate::ui::capacity::Capacity;
 use crate::ui::tooltips::tip;
-use crate::ui::LayoutDensity;
 use crate::widgets::gauge::donut;
 use crate::widgets::stat::stat_row;
 use crate::widgets::{temp_color, TempKind};
@@ -27,9 +27,12 @@ pub fn gpu_panel(
     gpu: &GpuInfo,
     history: Option<&GpuHistory>,
     unit: TempUnit,
-    density: LayoutDensity,
+    capacity: Capacity,
     min_h: f32,
 ) {
+    // Temporary T17 compat: existing body uses a binary "full vs compact"
+    // check. T18-T23 will rewrite this block to use StatCandidate + render.
+    let full = capacity.rows >= 6;
     let integrated = gpu.kind == "integrated";
     let title = if integrated { "iGPU" } else { "GPU" };
 
@@ -56,7 +59,6 @@ pub fn gpu_panel(
             // always show TEMP/CLOCK/POWER (the headline trio) even when the
             // current snapshot is missing one; iGPUs hide them when the
             // hardware does not expose the reading.
-            let full = density == LayoutDensity::Full;
             let show_temp = !integrated || gpu.temp.is_some();
             let show_clock = finite(gpu.clock_mhz).is_some();
             // HOTSPOT, JUNCTION, PCIE, V are detail readings — kept in Full

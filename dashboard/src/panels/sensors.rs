@@ -4,6 +4,7 @@ use super::{card, empty_note, panel_title};
 use crate::format::{finite, format_temp, TempUnit};
 use crate::ipc::{BoardInfo, FanInfo, VoltageInfo};
 use crate::theme::{FontFamily, Theme};
+use crate::ui::capacity::Capacity;
 use crate::widgets::{temp_color, TempKind};
 use egui::{Color32, FontId, Pos2, Sense, Stroke, Vec2};
 
@@ -36,6 +37,7 @@ pub fn sensors_panel(
     fans: &[FanInfo],
     voltages: &[VoltageInfo],
     unit: TempUnit,
+    _capacity: Capacity,
     min_h: f32,
 ) {
     card(ui, theme, min_h, |ui| {

@@ -4,6 +4,7 @@ use super::{card, panel_title};
 use crate::format::{finite, format_bytes_per_sec, format_temp, TempUnit};
 use crate::ipc::StorageInfo;
 use crate::theme::Theme;
+use crate::ui::capacity::Capacity;
 use crate::widgets::bars::bar_meter;
 use crate::widgets::{health_color, temp_color, TempKind};
 use egui::{FontId, Pos2, Sense, Stroke, Vec2};
@@ -36,6 +37,7 @@ pub fn storage_panel(
     theme: &Theme,
     disks: &[StorageInfo],
     unit: TempUnit,
+    _capacity: Capacity,
     min_h: f32,
 ) {
     card(ui, theme, min_h, |ui| {

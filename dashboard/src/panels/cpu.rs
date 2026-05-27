@@ -5,8 +5,8 @@ use crate::format::{finite, format_temp, TempUnit};
 use crate::history::RingBuffer;
 use crate::ipc::CpuInfo;
 use crate::theme::Theme;
+use crate::ui::capacity::Capacity;
 use crate::ui::tooltips::tip;
-use crate::ui::LayoutDensity;
 use crate::widgets::bars::{core_grid, core_strip};
 use crate::widgets::gauge::donut;
 use crate::widgets::sparkline::sparkline;
@@ -29,9 +29,12 @@ pub fn cpu_panel(
     history: Option<&RingBuffer>,
     unit: TempUnit,
     show_heat_map: bool,
-    density: LayoutDensity,
+    capacity: Capacity,
     min_h: f32,
 ) {
+    // Temporary T17 compat: existing body uses a binary "full vs compact"
+    // check. T18-T23 will rewrite this block to use StatCandidate + render.
+    let full = capacity.rows >= 6;
     card(ui, theme, min_h, |ui| {
         panel_title(ui, theme, "CPU", Some(&cpu.name));
 
@@ -49,7 +52,7 @@ pub fn cpu_panel(
                 // TJMAX (Distance to TjMax). Only renders when sensord reports
                 // the per-core MSR — laptops on PawnIO; many AMD desktops too.
                 // Suppressed in Compact mode (essentials only).
-                if density == LayoutDensity::Full {
+                if full {
                     if let Some(d) = finite(cpu.distance_to_tjmax_c) {
                         let val = format!("{d:.0} \u{00B0}C");
                         // Lower headroom = closer to throttling. Re-use the
@@ -78,7 +81,7 @@ pub fn cpu_panel(
 
                 // VCORE is a "detail" reading — useful but not essential.
                 // Skipped in Compact mode so the panel fits without scroll.
-                if density == LayoutDensity::Full {
+                if full {
                     if let Some(v) = finite(cpu.voltage_v) {
                         tip(
                             stat_row(ui, theme, "VCORE", &format!("{v:.3} V"), None),

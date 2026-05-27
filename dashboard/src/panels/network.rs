@@ -9,6 +9,7 @@ use crate::format::{finite, format_bytes_per_sec, format_link};
 use crate::history::NetThroughputHistory;
 use crate::ipc::NetInfo;
 use crate::theme::Theme;
+use crate::ui::capacity::Capacity;
 use crate::ui::tooltips::tip;
 use crate::widgets::gauge::donut;
 use crate::widgets::sparkline::dual_sparkline;
@@ -24,6 +25,7 @@ pub fn network_panel(
     theme: &Theme,
     net: Option<&NetInfo>,
     history: Option<&NetThroughputHistory>,
+    _capacity: Capacity,
     min_h: f32,
 ) {
     card(ui, theme, min_h, |ui| {

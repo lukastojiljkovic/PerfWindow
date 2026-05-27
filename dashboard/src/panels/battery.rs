@@ -4,6 +4,7 @@ use super::{card, panel_title};
 use crate::format::{finite, format_uptime};
 use crate::ipc::BatteryInfo;
 use crate::theme::Theme;
+use crate::ui::capacity::Capacity;
 use crate::ui::tooltips::tip;
 use crate::widgets::gauge::donut;
 use crate::widgets::health_color;
@@ -15,7 +16,13 @@ use crate::widgets::stat::stat_row;
 ///
 /// The caller is expected to gate the card on `snap.battery.is_some()` — if
 /// no battery hardware is present, the card should not be added to the grid.
-pub fn battery_panel(ui: &mut egui::Ui, theme: &Theme, batt: &BatteryInfo, min_h: f32) {
+pub fn battery_panel(
+    ui: &mut egui::Ui,
+    theme: &Theme,
+    batt: &BatteryInfo,
+    _capacity: Capacity,
+    min_h: f32,
+) {
     card(ui, theme, min_h, |ui| {
         panel_title(ui, theme, "BATTERY", None);
 
