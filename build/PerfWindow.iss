@@ -43,6 +43,9 @@ ArchitecturesInstallIn64BitMode=x64compatible
 PrivilegesRequired=admin
 MinVersion=10.0
 CloseApplications=yes
+CloseApplicationsFilter=*.exe
+ForceCloseApplications=yes
+RestartApplications=no
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
@@ -257,11 +260,10 @@ begin
 end;
 
 { Install the PerfWindow sensor service as a LocalSystem demand-start
-  service. The installer starts it once so the first dashboard launch
-  finds it up. Subsequent lifecycle: dashboard launches sc start
-  silently (the ACL grant lets a non-admin user do that without UAC);
-  the worker auto-stops 60 s after the last client disconnects.
-  Net effect: the service runs only while PerfWindow is open. }
+  service. The installer does NOT start it: the dashboard elevates via
+  ShellExecuteEx("runas", "sc.exe", "start ...") on each launch and is
+  responsible for the entire service lifecycle. The service uses the
+  Windows default ACL (admin-only start/stop) — no SDDL grant needed. }
 procedure InstallSensorService;
 var
   Cmd: String;
@@ -274,18 +276,8 @@ begin
        + ' obj= LocalSystem';
   Exec('sc.exe', Cmd, '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
   Exec('sc.exe',
-       'description PerfWindowSensor "Provides hardware sensor readings to PerfWindow. Auto-starts when PerfWindow launches; auto-stops 60s after PerfWindow closes."',
+       'description PerfWindowSensor "Provides hardware sensor readings to PerfWindow. Started when PerfWindow launches; exits when PerfWindow closes."',
        '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-  { Grant Authenticated Users SERVICE_START (RP) and SERVICE_STOP (WP)
-    so the dashboard can manage the service lifecycle without UAC.
-    The rest of the SDDL is the Windows default for new services
-    (LocalSystem full control, Administrators full control, Interactive
-    Users + Service Logon read+query). }
-  Exec('sc.exe',
-       'sdset PerfWindowSensor "D:(A;;CCLCSWRPWPDTLOCRRC;;;SY)(A;;CCDCLCSWRPWPDTLOCRSDRCWDWO;;;BA)(A;;CCLCSWLOCRRC;;;IU)(A;;CCLCSWLOCRRC;;;SU)(A;;RPWP;;;AU)"',
-       '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-  Exec('sc.exe', 'start PerfWindowSensor', '',
-       SW_HIDE, ewWaitUntilTerminated, ResultCode);
 end;
 
 { Strip the legacy WinRing0 Defender entries written by PerfWindow 0.4.1 and
@@ -327,6 +319,9 @@ var
 begin
   Exec('sc.exe', 'stop PerfWindowSensor',   '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
   Exec('sc.exe', 'delete PerfWindowSensor', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  // Best-effort: terminate any sensord process the SCM did not reap (e.g. a
+  // stuck worker that did not respond to 'sc stop'). Failures are ignored.
+  Exec('taskkill.exe', '/F /IM sensord.exe', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
 end;
 
 { Ask the user whether to remove the PawnIO driver too, and if Yes run
