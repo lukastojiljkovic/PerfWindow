@@ -3,33 +3,22 @@
 use super::{card, empty_note, panel_title};
 use crate::format::{finite, format_temp, TempUnit};
 use crate::ipc::{BoardInfo, FanInfo, VoltageInfo};
-use crate::theme::{FontFamily, Theme};
+use crate::theme::Theme;
 use crate::ui::capacity::Capacity;
+use crate::ui::tooltips::tip;
+use crate::widgets::stat::stat_row;
 use crate::widgets::{temp_color, TempKind};
-use egui::{Color32, FontId, Pos2, Sense, Stroke, Vec2};
+use egui::Color32;
 
-/// Height of one readout row (mockup `.pw-ro` line over a 5 px rule margin).
-const READOUT_ROW_H: f32 = 20.0;
-/// Horizontal gap between the two readout columns (mockup `.pw-readout { gap: 14px }`).
-const COL_GAP: f32 = 14.0;
-/// Vertical gap between readout rows (mockup `.pw-readout { gap: 8px }`).
-const ROW_GAP: f32 = 8.0;
-
-/// One `label : value` readout row, with the value optionally tinted.
-struct Readout {
-    label: String,
-    value: String,
-    /// `None` falls back to `theme.ink`; `Some` is used for temperature tints.
-    color: Option<Color32>,
-}
-
-/// Render the BOARD & SENSORS card: a two-column grid of motherboard
-/// temperatures, fan speeds and voltage readouts.
+/// Render the BOARD & SENSORS card: a flat list of motherboard temperatures,
+/// fan speeds and voltage readouts, ranked by raw magnitude (hottest /
+/// loudest / highest first) and trimmed to the per-card `Capacity` budget.
 ///
-/// Only readings that are actually present are shown. When the machine exposes
-/// nothing at all — the common case on laptops with no readable Super-I/O chip
-/// — a single dimmed line is drawn instead. Nothing here fabricates values or
-/// panics.
+/// In wide capacity tiers the list is split into two columns; in the
+/// narrowest tier it stacks. Only readings that are actually present are
+/// shown. When the machine exposes nothing at all — the common case on
+/// laptops with no readable Super-I/O chip — a single dimmed line is drawn
+/// instead. Nothing here fabricates values or panics.
 pub fn sensors_panel(
     ui: &mut egui::Ui,
     theme: &Theme,
@@ -37,25 +26,91 @@ pub fn sensors_panel(
     fans: &[FanInfo],
     voltages: &[VoltageInfo],
     unit: TempUnit,
-    _capacity: Capacity,
+    capacity: Capacity,
     min_h: f32,
 ) {
     card(ui, theme, min_h, |ui| {
         panel_title(ui, theme, "BOARD & SENSORS", None);
 
-        let rows = collect_readouts(theme, board, fans, voltages, unit);
+        // Build a flat candidate list of (label, value, optional value tint).
+        let mut items: Vec<(String, String, Option<Color32>)> = Vec::new();
 
-        if rows.is_empty() {
+        if let Some(b) = board {
+            if let Some(t) = finite(b.temp) {
+                items.push((
+                    "BOARD".to_string(),
+                    format_temp(Some(t), unit),
+                    Some(temp_color(t, TempKind::Board, theme)),
+                ));
+            }
+            if let Some(t) = finite(b.vrm_temp) {
+                items.push((
+                    "VRM".to_string(),
+                    format_temp(Some(t), unit),
+                    Some(temp_color(t, TempKind::Board, theme)),
+                ));
+            }
+        }
+        for f in fans {
+            if let Some(rpm) = finite(f.rpm) {
+                items.push((
+                    f.name.to_uppercase(),
+                    format!("{} RPM", rpm.round() as i64),
+                    None,
+                ));
+            }
+        }
+        for v in voltages {
+            if let Some(volts) = finite(v.volts) {
+                items.push((
+                    v.name.to_uppercase(),
+                    format!("{:.2} V", volts),
+                    None,
+                ));
+            }
+        }
+
+        if items.is_empty() {
             empty_note(ui, theme, "No motherboard or fan sensors on this machine");
+            return;
+        }
+
+        // Sort by the leading numeric value descending so the hottest temp,
+        // the loudest fan and the highest voltage bubble to the top of their
+        // category; once truncated to the row budget the most informative
+        // readings survive at every capacity tier.
+        items.sort_by(|a, b| {
+            let av = parse_leading_number(&a.1);
+            let bv = parse_leading_number(&b.1);
+            bv.partial_cmp(&av).unwrap_or(std::cmp::Ordering::Equal)
+        });
+        items.truncate(capacity.rows);
+
+        if capacity.columns >= 2 {
+            // First half goes in the left column, second half in the right —
+            // mirrors the v0.8.x two-up layout but with a ranked-and-trimmed
+            // candidate set instead of every reading.
+            let split = items.len().div_ceil(2);
+            ui.columns(2, |cols| {
+                for (label, val, col) in &items[..split] {
+                    tip(stat_row(&mut cols[0], theme, label, val, *col), label);
+                }
+                for (label, val, col) in &items[split..] {
+                    tip(stat_row(&mut cols[1], theme, label, val, *col), label);
+                }
+            });
         } else {
-            readout_grid(ui, theme, &rows);
+            for (label, val, col) in &items {
+                tip(stat_row(ui, theme, label, val, *col), label);
+            }
         }
     });
 }
 
-/// Returns `true` iff at least one displayable readout would be produced by
-/// [`collect_readouts`]. Used by the card grid to decide whether to include
-/// the Sensors card at all on machines whose Super-I/O chip is unreadable.
+/// Returns `true` iff at least one displayable readout would survive the
+/// candidate-collection step in [`sensors_panel`]. Used by the card grid to
+/// decide whether to include the Sensors card at all on machines whose
+/// Super-I/O chip is unreadable.
 pub fn has_content(board: Option<&BoardInfo>, fans: &[FanInfo], voltages: &[VoltageInfo]) -> bool {
     if let Some(board) = board {
         if finite(board.temp).is_some() || finite(board.vrm_temp).is_some() {
@@ -71,122 +126,15 @@ pub fn has_content(board: Option<&BoardInfo>, fans: &[FanInfo], voltages: &[Volt
     false
 }
 
-/// Gather every present sensor reading into an ordered list of readout rows:
-/// board temperature, VRM temperature, fans, then voltages.
-fn collect_readouts(
-    theme: &Theme,
-    board: Option<&BoardInfo>,
-    fans: &[FanInfo],
-    voltages: &[VoltageInfo],
-    unit: TempUnit,
-) -> Vec<Readout> {
-    let mut rows: Vec<Readout> = Vec::new();
-
-    if let Some(board) = board {
-        if let Some(temp) = finite(board.temp) {
-            rows.push(Readout {
-                label: "TEMP".to_string(),
-                value: format_temp(Some(temp), unit),
-                color: Some(temp_color(temp, TempKind::Board, theme)),
-            });
-        }
-        if let Some(vrm) = finite(board.vrm_temp) {
-            rows.push(Readout {
-                label: "VRM".to_string(),
-                value: format_temp(Some(vrm), unit),
-                color: Some(temp_color(vrm, TempKind::Board, theme)),
-            });
-        }
-    }
-
-    for fan in fans {
-        if let Some(rpm) = finite(fan.rpm) {
-            rows.push(Readout {
-                label: fan.name.clone(),
-                value: format!("{}", rpm.round() as i64),
-                color: None,
-            });
-        }
-    }
-
-    for voltage in voltages {
-        if let Some(volts) = finite(voltage.volts) {
-            rows.push(Readout {
-                label: voltage.name.clone(),
-                value: format!("{:.2}", volts),
-                color: None,
-            });
-        }
-    }
-
-    rows
-}
-
-/// Draw the two-column readout grid: dim label left, bold value right, with a
-/// 1 px rule under each row (mockup `.pw-readout` / `.pw-ro`).
-fn readout_grid(ui: &mut egui::Ui, theme: &Theme, rows: &[Readout]) {
-    let total_w = ui.available_width();
-    let col_w = ((total_w - COL_GAP) / 2.0).max(0.0);
-
-    let row_count = rows.len().div_ceil(2);
-    let grid_h = row_count as f32 * READOUT_ROW_H + (row_count.saturating_sub(1)) as f32 * ROW_GAP;
-
-    let (rect, _) = ui.allocate_exact_size(Vec2::new(total_w, grid_h), Sense::hover());
-    if !ui.is_rect_visible(rect) {
-        return;
-    }
-    let painter = ui.painter_at(rect);
-
-    let label_font = FontId::new(11.0, theme.font_data.egui());
-    // The value is the data font's bold sibling where one exists (mockup
-    // `.pw-ro b { font-weight: 600 }`).
-    let value_family = match theme.font_data {
-        FontFamily::PlexMono => FontFamily::PlexMonoBold,
-        other => other,
-    };
-    let value_font = FontId::new(11.0, value_family.egui());
-
-    for (i, row) in rows.iter().enumerate() {
-        let col = i % 2;
-        let line = i / 2;
-
-        let cell_x0 = rect.min.x + col as f32 * (col_w + COL_GAP);
-        let cell_y0 = rect.min.y + line as f32 * (READOUT_ROW_H + ROW_GAP);
-        // Text baseline area sits above the 5 px rule margin.
-        let text_h = READOUT_ROW_H - 5.0;
-        let center_y = cell_y0 + text_h / 2.0;
-
-        // Label, left-aligned, dim.
-        let label_galley = painter.layout_no_wrap(row.label.clone(), label_font.clone(), theme.dim);
-        painter.galley(
-            Pos2::new(cell_x0, center_y - label_galley.size().y / 2.0),
-            label_galley,
-            theme.dim,
-        );
-
-        // Value, right-aligned within the cell.
-        let value_color = row.color.unwrap_or(theme.ink);
-        let value_galley =
-            painter.layout_no_wrap(row.value.clone(), value_font.clone(), value_color);
-        painter.galley(
-            Pos2::new(
-                cell_x0 + col_w - value_galley.size().x,
-                center_y - value_galley.size().y / 2.0,
-            ),
-            value_galley,
-            value_color,
-        );
-
-        // 1 px bottom rule across the cell.
-        let rule_y = cell_y0 + READOUT_ROW_H - 1.0;
-        painter.add(egui::Shape::line_segment(
-            [
-                Pos2::new(cell_x0, rule_y),
-                Pos2::new(cell_x0 + col_w, rule_y),
-            ],
-            Stroke::new(1.0, theme.border),
-        ));
-    }
+/// Parse the leading whitespace-separated token of `s` as `f64`, falling back
+/// to `0.0` when no number is present. Used to rank readouts that carry
+/// trailing unit strings (`"55 °C"`, `"1200 RPM"`, `"12.00 V"`) by their raw
+/// magnitude.
+fn parse_leading_number(s: &str) -> f64 {
+    s.split_whitespace()
+        .next()
+        .and_then(|t| t.parse::<f64>().ok())
+        .unwrap_or(0.0)
 }
 
 #[cfg(test)]
