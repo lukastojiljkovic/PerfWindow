@@ -7,6 +7,63 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ## [Unreleased]
 
+## [0.9.0] — 2026-05-27
+
+### Fixed
+
+- **Dashboard crash on close.** `eframe::App::on_exit` now sends a
+  `{"shutdown":true}` control message over the pipe before the dashboard
+  process tears down. `Drop` alone was unreliable during shutdown; the
+  explicit close path runs while the egui frame is still alive.
+- **Service won't restart after closing.** The worker now exits on client
+  disconnect and the dashboard re-launches it on the next start. Every
+  launch follows the same path regardless of session history; the silent
+  failure observed in 0.8.1 (where the sc-grant ACL was inconsistently
+  applied) is gone.
+- **Installer cannot be blocked by a running PerfWindow instance.**
+  `ForceCloseApplications=yes` terminates stubborn processes during
+  upgrade. The uninstaller also taskkills any orphaned `sensord.exe`.
+- **Display resolution and refresh rate match the Windows Display panel.**
+  The dashboard manifest is now PerMonitorV2 DPI-aware, so Win32 no
+  longer DPI-virtualises the display modes it reports to the process.
+- **Hardware topology changes mid-session** (e.g. a dGPU power-gating
+  on/off battery, a USB drive being unplugged) are detected every five
+  poll ticks. The sensor monitor is recreated transparently; the
+  dashboard sees the new device on the next snapshot.
+- **Per-sensor and per-hardware exceptions in the snapshot builder are
+  isolated.** A single failing reading drops only that section to `null`
+  instead of aborting the whole snapshot.
+
+### Changed
+
+- **Service lifecycle: per-launch elevated start.** The custom SDDL grant
+  added in 0.8.1 is removed; the service reverts to default Windows
+  permissions (admin-only start). Each dashboard launch issues one UAC
+  prompt to start the service, surfaced via a phase-aware loading
+  screen ("Connecting to sensor service" / "Windows will ask for
+  permission" / "Starting sensor service" / "Loading sensors"). The
+  installer no longer starts the service post-install.
+- **No background sensord.** The 60-second post-disconnect idle window
+  is removed; the worker exits immediately when the dashboard
+  disconnects. `sensord.exe` is never resident while the app is closed.
+- **Window minimum size lowered to 720x500** (was 960x600).
+- **Panel rendering: priority-ranked progressive disclosure.** The
+  binary "Compact" mode is replaced by a numeric capacity model. Each
+  panel publishes a ranked list of stat candidates; the layout selects
+  as many as the card's allocated width affords. Smaller windows drop
+  low-priority readings (HOTSPOT, JUNCTION, V, PCIE, etc.) first;
+  primary readings (TEMP, VRAM used/total, USED/FREE) are preserved
+  at every tier.
+- **Multi-monitor display info.** Sensord now enumerates all attached
+  monitors via `EnumDisplayMonitors`; the snapshot carries the full
+  list (primary first) in addition to the existing single-display
+  field for backward compatibility.
+
+### Removed
+
+- The "Sensor service is not running" modal. Replaced by the loading
+  screen.
+
 ## [0.8.1] — 2026-05-27
 
 A **hotfix** release.
