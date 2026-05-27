@@ -201,7 +201,7 @@ impl Drop for PipeSensord {
 /// Returns `Ok(())` once the OS launches the process (UAC accepted); the
 /// success of the *service start* itself is observed by polling the pipe.
 pub fn elevate_and_start_service() -> Result<(), String> {
-    crate::ui::service_dialog::shell_exec_runas("sc.exe", "start PerfWindowSensor")
+    crate::ui::shell::shell_exec_runas("sc.exe", "start PerfWindowSensor")
 }
 
 #[cfg(test)]

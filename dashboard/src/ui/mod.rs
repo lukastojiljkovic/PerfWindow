@@ -14,8 +14,9 @@
 pub mod changelog_modal;
 pub mod effects;
 pub mod health_banner;
-pub mod service_dialog;
+pub mod loading_screen;
 pub mod settings;
+pub mod shell;
 pub mod tooltips;
 pub mod update_banner;
 pub mod update_modal;
