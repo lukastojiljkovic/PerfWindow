@@ -474,31 +474,99 @@ public static class SnapshotBuilder
                                  IReadOnlyDictionary<string, long> linkSpeeds,
                                  IReadOnlyDictionary<int, PhysicalDiskInfo> diskInfo)
     {
-        var cpuHw = hardware.FirstOrDefault(h => h.HardwareType == HardwareType.Cpu);
-        var memHw = hardware.FirstOrDefault(h => h.HardwareType == HardwareType.Memory);
-        var boardHw = hardware.FirstOrDefault(h => h.HardwareType == HardwareType.Motherboard);
-        var (fans, voltages) = BuildBoardSensors(boardHw);
-        var allGpus = BuildAllGpus(hardware);
-        var discreteGpus = PreferDiscreteGpus(new List<GpuInfo>(allGpus));
-        var integratedGpu = PickIntegratedGpu(allGpus);
-        var storage = BuildStorage(hardware, diskInfo);
+        // Resolve the headline hardware nodes up front so each per-section
+        // build call below is self-contained: a thrown exception inside any
+        // one TryBuild closure leaves every other section unaffected. The
+        // lookups themselves are exception-isolated too — a misbehaving
+        // IHardware.HardwareType getter must not abort the snapshot.
+        var cpuHw = TryBuild(() => hardware.FirstOrDefault(h => h.HardwareType == HardwareType.Cpu));
+        var memHw = TryBuild(() => hardware.FirstOrDefault(h => h.HardwareType == HardwareType.Memory));
+        var boardHw = TryBuild(() => hardware.FirstOrDefault(h => h.HardwareType == HardwareType.Motherboard));
+
+        // BuildBoardSensors returns a tuple; isolate it once and split into
+        // the two snapshot fields. On failure both default to empty lists so
+        // the Count > 0 gate below maps them to null in the snapshot.
+        var (fans, voltages) = TryBuildBoardSensors(boardHw);
+
+        // Enumerate GPUs once so the happy path does not double-walk LHM. A
+        // throw inside BuildAllGpus collapses both Gpu and Igpu sections to
+        // null (semantically correct: if we can't enumerate GPU hardware, we
+        // can't report either flavour) without disturbing the other sections.
+        var allGpus = TryBuild(() => BuildAllGpus(hardware));
 
         return new Snapshot(
             Version: 1,
             Timestamp: DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
-            Cpu: cpuHw is null ? null : BuildCpu(cpuHw),
-            Gpu: discreteGpus.Count > 0 ? discreteGpus : null,
-            Igpu: integratedGpu,
-            Ram: BuildRam(memHw, pf, hardware),
-            Storage: storage.Count > 0 ? storage : null,
-            Board: BuildBoard(boardHw),
+            Cpu: TryBuild(() => cpuHw is null ? null : BuildCpu(cpuHw)),
+            Gpu: TryBuild(() =>
+            {
+                if (allGpus is null) return null;
+                var discreteGpus = PreferDiscreteGpus(new List<GpuInfo>(allGpus));
+                return discreteGpus.Count > 0 ? (IReadOnlyList<GpuInfo>)discreteGpus : null;
+            }),
+            Igpu: TryBuild(() => allGpus is null ? null : PickIntegratedGpu(allGpus)),
+            Ram: TryBuild(() => BuildRam(memHw, pf, hardware)),
+            Storage: TryBuild(() =>
+            {
+                var storage = BuildStorage(hardware, diskInfo);
+                return storage.Count > 0 ? (IReadOnlyList<StorageInfo>)storage : null;
+            }),
+            Board: TryBuild(() => BuildBoard(boardHw)),
             Fans: fans.Count > 0 ? fans : null,
             Voltages: voltages.Count > 0 ? voltages : null,
-            Net: BuildNet(hardware, linkSpeeds),
-            Battery: BuildBattery(hardware),
-            UptimeSec: Environment.TickCount64 / 1000,
-            AtkFans: AtkReader.Read(),
-            Display: DisplayReader.Read(),
+            Net: TryBuild(() => BuildNet(hardware, linkSpeeds)),
+            Battery: TryBuild(() => BuildBattery(hardware)),
+            UptimeSec: TryBuildValue(() => Environment.TickCount64 / 1000),
+            AtkFans: TryBuild(() => (IReadOnlyList<FanInfo>?)AtkReader.Read()),
+            Display: TryBuild(() => DisplayReader.Read()),
             Health: null);
+    }
+
+    /// <summary>
+    /// Reference-type section builder isolator. If <paramref name="fn"/> throws,
+    /// logs a one-liner to stderr (matching the existing sensord error format)
+    /// and returns <c>null</c> so the surrounding snapshot still emits. Callers
+    /// rely on a null section meaning "unavailable this tick" — the dashboard
+    /// already tolerates absent fields, so a silent per-section drop is far
+    /// preferable to aborting the whole snapshot and stalling the poll loop.
+    /// </summary>
+    private static T? TryBuild<T>(Func<T?> fn) where T : class
+    {
+        try { return fn(); }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"sensord: section build failed: {ex.GetType().Name}: {ex.Message}");
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Value-type variant of <see cref="TryBuild{T}"/> — used for the
+    /// nullable-long uptime field whose underlying call (TickCount64) cannot
+    /// realistically throw but is wrapped for symmetry and future-proofing.
+    /// </summary>
+    private static long? TryBuildValue(Func<long?> fn)
+    {
+        try { return fn(); }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"sensord: section build failed: {ex.GetType().Name}: {ex.Message}");
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Tuple-returning isolator for <see cref="BuildBoardSensors"/>. On
+    /// failure both lists come back empty so the calling Snapshot constructor
+    /// can apply its existing "Count &gt; 0 ? list : null" gate uniformly.
+    /// </summary>
+    private static (List<FanInfo> fans, List<VoltageInfo> voltages) TryBuildBoardSensors(IHardware? motherboard)
+    {
+        try { return BuildBoardSensors(motherboard); }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"sensord: section build failed: {ex.GetType().Name}: {ex.Message}");
+            return (new List<FanInfo>(), new List<VoltageInfo>());
+        }
     }
 }
