@@ -37,9 +37,14 @@ pub fn storage_panel(
     theme: &Theme,
     disks: &[StorageInfo],
     unit: TempUnit,
-    _capacity: Capacity,
+    capacity: Capacity,
     min_h: f32,
 ) {
+    // In the narrowest capacity tier (single-column cards) the TEMP cell would
+    // crowd out the activity bar — drop it entirely. Tooltip/lifetime details
+    // still surface the figure when the user hovers a row.
+    let show_temp = capacity.columns >= 2;
+
     card(ui, theme, min_h, |ui| {
         panel_title(
             ui,
@@ -48,33 +53,42 @@ pub fn storage_panel(
             Some(&format!("{} DISKS", disks.len())),
         );
 
-        header_row(ui, theme);
+        header_row(ui, theme, show_temp);
 
         for disk in disks {
-            disk_row(ui, theme, disk, unit);
+            disk_row(ui, theme, disk, unit, show_temp);
         }
     });
 }
 
-/// Split the available row width into the five column widths
-/// (`DISK`, `TEMP`, `ACTIVITY`, `HEALTH`, `CAPACITY`) honouring the
-/// `1.7fr / 42 / 1fr / 50 / 80` grid and the 11 px inter-column gaps.
+/// Split the available row width into the column widths honouring the
+/// `1.7fr / 42 / 1fr / 50 / 80` grid (DISK, TEMP, ACTIVITY, HEALTH, CAPACITY)
+/// and the 11 px inter-column gaps. When `show_temp` is `false` the TEMP
+/// column is omitted entirely and its budget folded back into the flexible
+/// pool — DISK and ACTIVITY grow to fill the space.
 ///
 /// The flexible pool is floored at zero, so every returned width is
 /// non-negative. If `total_w` is narrower than the fixed columns the cells
 /// simply sum to more than `total_w`; the per-row `painter_at` clip in
 /// `disk_row` trims that overflow harmlessly.
-fn column_widths(total_w: f32) -> [f32; 5] {
-    let flexible = (total_w - TEMP_COL_W - HEALTH_COL_W - CAP_COL_W - 4.0 * COL_GAP).max(0.0);
+fn column_widths(total_w: f32, show_temp: bool) -> Vec<f32> {
+    let temp_budget = if show_temp { TEMP_COL_W } else { 0.0 };
+    let gap_count = if show_temp { 4.0 } else { 3.0 };
+    let flexible =
+        (total_w - temp_budget - HEALTH_COL_W - CAP_COL_W - gap_count * COL_GAP).max(0.0);
     let disk_w = flexible * (DISK_FR / (DISK_FR + 1.0));
     let activity_w = flexible - disk_w;
-    [disk_w, TEMP_COL_W, activity_w, HEALTH_COL_W, CAP_COL_W]
+    if show_temp {
+        vec![disk_w, TEMP_COL_W, activity_w, HEALTH_COL_W, CAP_COL_W]
+    } else {
+        vec![disk_w, activity_w, HEALTH_COL_W, CAP_COL_W]
+    }
 }
 
 /// Draw the faint, upper-cased column-header row (mockup `.pw-disk-h`).
-fn header_row(ui: &mut egui::Ui, theme: &Theme) {
+fn header_row(ui: &mut egui::Ui, theme: &Theme, show_temp: bool) {
     let total_w = ui.available_width();
-    let widths = column_widths(total_w);
+    let widths = column_widths(total_w, show_temp);
     let (rect, _) = ui.allocate_exact_size(Vec2::new(total_w, 12.0), Sense::hover());
     if !ui.is_rect_visible(rect) {
         return;
@@ -82,15 +96,24 @@ fn header_row(ui: &mut egui::Ui, theme: &Theme) {
 
     let painter = ui.painter_at(rect);
     let font = FontId::new(8.0, theme.font_data.egui());
-    let labels = ["DISK", "TEMP", "ACTIVITY", "HEALTH", "CAPACITY"];
     // TEMP and HEALTH are centred; CAPACITY is right-aligned, mirroring their data cells.
-    let aligns = [
-        Align::Left,
-        Align::Center,
-        Align::Left,
-        Align::Center,
-        Align::Right,
-    ];
+    let (labels, aligns): (&[&str], &[Align]) = if show_temp {
+        (
+            &["DISK", "TEMP", "ACTIVITY", "HEALTH", "CAPACITY"],
+            &[
+                Align::Left,
+                Align::Center,
+                Align::Left,
+                Align::Center,
+                Align::Right,
+            ],
+        )
+    } else {
+        (
+            &["DISK", "ACTIVITY", "HEALTH", "CAPACITY"],
+            &[Align::Left, Align::Left, Align::Center, Align::Right],
+        )
+    };
 
     let mut x = rect.min.x;
     for ((label, &w), align) in labels.iter().zip(widths.iter()).zip(aligns.iter()) {
@@ -106,9 +129,9 @@ fn header_row(ui: &mut egui::Ui, theme: &Theme) {
 /// is a single hover target — hovering reveals SMART lifetime details
 /// (power-on hours, cycle count, NVMe Available Spare) that do not fit on
 /// the row itself.
-fn disk_row(ui: &mut egui::Ui, theme: &Theme, disk: &StorageInfo, unit: TempUnit) {
+fn disk_row(ui: &mut egui::Ui, theme: &Theme, disk: &StorageInfo, unit: TempUnit, show_temp: bool) {
     let total_w = ui.available_width();
-    let widths = column_widths(total_w);
+    let widths = column_widths(total_w, show_temp);
     let (rect, response) = ui.allocate_exact_size(Vec2::new(total_w, DISK_ROW_H), Sense::hover());
     if !ui.is_rect_visible(rect) {
         return;
@@ -157,24 +180,30 @@ fn disk_row(ui: &mut egui::Ui, theme: &Theme, disk: &StorageInfo, unit: TempUnit
         );
     }
 
-    // --- TEMP: centred, temperature-coloured when present. ---
-    let temp_x0 = rect.min.x + widths[0] + COL_GAP;
-    let temp = finite(disk.temp);
-    let temp_str = format_temp(temp, unit);
-    let temp_color = temp
-        .map(|t| temp_color(t, TempKind::Disk, theme))
-        .unwrap_or(theme.dim);
-    let temp_font = FontId::new(11.0, theme.font_data.egui());
-    let temp_galley = painter.layout_no_wrap(temp_str, temp_font, temp_color);
-    let temp_x = temp_x0 + (widths[1] - temp_galley.size().x) / 2.0;
-    painter.galley(
-        Pos2::new(temp_x, center_y - temp_galley.size().y / 2.0),
-        temp_galley,
-        temp_color,
-    );
+    // --- TEMP: centred, temperature-coloured when present. Skipped entirely
+    // in single-column capacity (`show_temp == false`); the hover tooltip
+    // still surfaces the figure when one is wanted. ---
+    let mut col_x = rect.min.x + widths[0] + COL_GAP;
+    let mut idx = 1;
+    if show_temp {
+        let temp = finite(disk.temp);
+        let temp_str = format_temp(temp, unit);
+        let temp_color = temp
+            .map(|t| temp_color(t, TempKind::Disk, theme))
+            .unwrap_or(theme.dim);
+        let temp_font = FontId::new(11.0, theme.font_data.egui());
+        let temp_galley = painter.layout_no_wrap(temp_str, temp_font, temp_color);
+        let temp_x = col_x + (widths[idx] - temp_galley.size().x) / 2.0;
+        painter.galley(
+            Pos2::new(temp_x, center_y - temp_galley.size().y / 2.0),
+            temp_galley,
+            temp_color,
+        );
+        col_x += widths[idx] + COL_GAP;
+        idx += 1;
+    }
 
     // --- ACTIVITY: a bar_meter filled to activity/100, warn when high. ---
-    let act_x0 = temp_x0 + widths[1] + COL_GAP;
     let activity = finite(disk.activity).unwrap_or(0.0);
     let fraction = (activity / 100.0).clamp(0.0, 1.0) as f32;
     let warn = activity >= ACTIVITY_WARN;
@@ -182,7 +211,7 @@ fn disk_row(ui: &mut egui::Ui, theme: &Theme, disk: &StorageInfo, unit: TempUnit
         // `bar_meter` spans the Ui's available width, so confine it to a child
         // Ui sized to exactly the ACTIVITY column and vertically centred.
         let bar_rect =
-            egui::Rect::from_min_size(Pos2::new(act_x0, center_y - 3.0), Vec2::new(widths[2], 6.0));
+            egui::Rect::from_min_size(Pos2::new(col_x, center_y - 3.0), Vec2::new(widths[idx], 6.0));
         let mut bar_ui = ui.new_child(
             egui::UiBuilder::new()
                 .max_rect(bar_rect)
@@ -190,9 +219,10 @@ fn disk_row(ui: &mut egui::Ui, theme: &Theme, disk: &StorageInfo, unit: TempUnit
         );
         bar_meter(&mut bar_ui, theme, fraction, warn);
     }
+    col_x += widths[idx] + COL_GAP;
+    idx += 1;
 
     // --- HEALTH: centred, coloured by remaining-life severity. ---
-    let health_x0 = act_x0 + widths[2] + COL_GAP;
     let health = finite(disk.health);
     let (health_str, health_col) = match health {
         Some(pct) => (format!("{:.0}%", pct), health_color(pct, theme)),
@@ -200,19 +230,20 @@ fn disk_row(ui: &mut egui::Ui, theme: &Theme, disk: &StorageInfo, unit: TempUnit
     };
     let health_font = FontId::new(11.0, theme.font_data.egui());
     let health_galley = painter.layout_no_wrap(health_str, health_font, health_col);
-    let health_x = health_x0 + (widths[3] - health_galley.size().x) / 2.0;
+    let health_x = col_x + (widths[idx] - health_galley.size().x) / 2.0;
     painter.galley(
         Pos2::new(health_x, center_y - health_galley.size().y / 2.0),
         health_galley,
         health_col,
     );
+    col_x += widths[idx] + COL_GAP;
+    idx += 1;
 
     // --- CAPACITY: right-aligned, dim. ---
-    let cap_x0 = health_x0 + widths[3] + COL_GAP;
     let cap_str = format_capacity(finite(disk.used_gb), finite(disk.total_gb));
     let cap_font = FontId::new(11.0, theme.font_data.egui());
     let cap_galley = painter.layout_no_wrap(cap_str, cap_font, theme.dim);
-    let cap_x = cap_x0 + widths[4] - cap_galley.size().x;
+    let cap_x = col_x + widths[idx] - cap_galley.size().x;
     painter.galley(
         Pos2::new(cap_x, center_y - cap_galley.size().y / 2.0),
         cap_galley,
