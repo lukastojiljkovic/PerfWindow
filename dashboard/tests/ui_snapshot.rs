@@ -5,9 +5,19 @@
 //!
 //! ```powershell
 //! $env:UPDATE_SNAPSHOTS = "1"
-//! cargo test --release --test ui_snapshot
+//! cargo test --release --test ui_snapshot -- --test-threads=1
 //! Remove-Item Env:UPDATE_SNAPSHOTS
 //! ```
+//!
+//! `--test-threads=1` is recommended: every scenario spins up its own wgpu
+//! surface, and parallel surface creation has been observed to crash with
+//! STATUS_ACCESS_VIOLATION on Windows under load (the v0.9.0 PerMonitorV2
+//! manifest change made this more sensitive). Single-threaded runs are
+//! deterministic; the parallel form is only marginally faster and not worth
+//! the flakiness when capturing baselines.
+//!
+//! Current suite size: 10 scenarios (5 modal + 5 loading screen) x 6 themes
+//! = 60 PNGs under `tests/snapshots/<theme>/`.
 
 use egui_kittest::{Harness, SnapshotResults};
 use perfwindow::app::PerfApp;
@@ -72,7 +82,10 @@ fn snapshot_scenario(
     });
 
     // Two explicit frames so the queued font swap settles before snapshot.
-    harness.run();
+    // `run_ok` tolerates scenarios that keep requesting repaints (e.g. the
+    // loading_screen spinner via `request_repaint_after`); the two trailing
+    // `step()` calls still guarantee the font swap has settled.
+    harness.run_ok();
     harness.step();
     harness.step();
 
@@ -237,4 +250,67 @@ fn update_modal_failed_matches_baseline() {
             },
         );
     }
+}
+
+// ---- Loading screen scenarios (v0.9.0) -------------------------------
+
+use perfwindow::ipc::connect::{ConnectPhase, FailedReason};
+use perfwindow::ui::loading_screen::loading_screen;
+
+/// Render the loading screen for `phase` inside the standard 1180x600
+/// viewport for each theme.
+fn snapshot_loading_phase(scenario: &str, phase: ConnectPhase) {
+    let mut results = SnapshotResults::new();
+    for &id in ALL_THEMES {
+        let theme = Theme::for_id(id);
+        let phase_clone = phase.clone();
+        snapshot_scenario(
+            &mut results,
+            egui::vec2(1180.0, 600.0),
+            id,
+            scenario,
+            move |ctx| {
+                // Loading screen needs a `Ui`; the modal scenarios above use
+                // `Window`/`Area` so they paint directly into `ctx`. Wrapping
+                // in a CentralPanel matches how `card_grid` hosts it in prod.
+                #[allow(deprecated)]
+                egui::CentralPanel::default()
+                    .frame(egui::Frame::NONE.fill(theme.bg))
+                    .show(ctx, |ui| {
+                        let _ = loading_screen(ui, &theme, &phase_clone);
+                    });
+            },
+        );
+    }
+}
+
+#[test]
+fn loading_opening_pipe_matches_baseline() {
+    snapshot_loading_phase("loading_opening_pipe", ConnectPhase::OpeningPipe);
+}
+
+#[test]
+fn loading_requesting_elevation_matches_baseline() {
+    snapshot_loading_phase(
+        "loading_requesting_elevation",
+        ConnectPhase::RequestingElevation,
+    );
+}
+
+#[test]
+fn loading_starting_service_matches_baseline() {
+    snapshot_loading_phase("loading_starting_service", ConnectPhase::StartingService);
+}
+
+#[test]
+fn loading_loading_sensors_matches_baseline() {
+    snapshot_loading_phase("loading_loading_sensors", ConnectPhase::LoadingSensors);
+}
+
+#[test]
+fn loading_failed_uac_cancelled_matches_baseline() {
+    snapshot_loading_phase(
+        "loading_failed_uac_cancelled",
+        ConnectPhase::Failed(FailedReason::UacCancelled),
+    );
 }
