@@ -18,6 +18,7 @@ pub mod health_banner;
 pub mod loading_screen;
 pub mod settings;
 pub mod shell;
+pub mod stat_priority;
 pub mod tooltips;
 pub mod update_banner;
 pub mod update_modal;
