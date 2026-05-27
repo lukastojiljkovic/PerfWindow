@@ -69,8 +69,12 @@ fn try_start_service() {
 }
 
 impl PipeSensord {
+    /// Existing legacy path: open the pipe at the default location, attempt
+    /// elevation if needed, retry. Used by the `--dev` child path's
+    /// fallback test infrastructure. Production callers use the
+    /// `connect_no_elevation` + state-machine combo.
     pub fn connect(repaint: impl Fn() + Send + 'static) -> Result<Self, ConnectError> {
-        let read = match Self::open_pipe() {
+        let read = match Self::open_pipe_at(PIPE_PATH) {
             Ok(f) => f,
             Err(ConnectError::NotFound) => {
                 // Service is not running — start it and wait briefly for the
@@ -79,7 +83,7 @@ impl PipeSensord {
                 let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
                 loop {
                     std::thread::sleep(std::time::Duration::from_millis(200));
-                    match Self::open_pipe() {
+                    match Self::open_pipe_at(PIPE_PATH) {
                         Ok(f) => break f,
                         Err(_) if std::time::Instant::now() >= deadline => {
                             return Err(ConnectError::NotFound);
@@ -91,13 +95,45 @@ impl PipeSensord {
             Err(e) => return Err(e),
         };
 
-        let writer = read.try_clone()?;
+        Ok(Self::start_reader(read, repaint))
+    }
 
+    /// Open the pipe at the default location without trying to elevate.
+    /// The connect state machine uses this in every phase that polls.
+    #[allow(dead_code)]
+    pub fn connect_no_elevation(
+        repaint: impl Fn() + Send + 'static,
+    ) -> Result<Self, ConnectError> {
+        let read = Self::open_pipe_at(PIPE_PATH)?;
+        Ok(Self::start_reader(read, repaint))
+    }
+
+    /// Open the pipe at an explicit path (used by integration tests that
+    /// run sensord with `--pipe-name <Custom>`).
+    #[allow(dead_code)]
+    pub fn connect_to(
+        path: &str,
+        repaint: impl Fn() + Send + 'static,
+    ) -> Result<Self, ConnectError> {
+        let read = Self::open_pipe_at(path)?;
+        Ok(Self::start_reader(read, repaint))
+    }
+
+    fn open_pipe_at(path: &str) -> Result<File, ConnectError> {
+        OpenOptions::new()
+            .read(true)
+            .write(true)
+            .custom_flags(FILE_FLAG_OVERLAPPED)
+            .open(path)
+            .map_err(ConnectError::from)
+    }
+
+    fn start_reader(read: File, repaint: impl Fn() + Send + 'static) -> Self {
+        let writer = read.try_clone().expect("clone pipe handle");
         let state: SharedState = Arc::new(Mutex::new(SensorState {
             latest: None,
             alive: true,
         }));
-
         let reader_state = Arc::clone(&state);
         let reader = std::thread::spawn(move || {
             let lines = BufReader::new(read).lines();
@@ -119,21 +155,11 @@ impl PipeSensord {
             }
             repaint();
         });
-
-        Ok(PipeSensord {
+        PipeSensord {
             writer: Some(writer),
             reader: Some(reader),
             state,
-        })
-    }
-
-    fn open_pipe() -> Result<File, ConnectError> {
-        OpenOptions::new()
-            .read(true)
-            .write(true)
-            .custom_flags(FILE_FLAG_OVERLAPPED)
-            .open(PIPE_PATH)
-            .map_err(ConnectError::from)
+        }
     }
 
     pub fn set_interval(&mut self, ms: u32) {
@@ -169,6 +195,13 @@ impl Drop for PipeSensord {
     fn drop(&mut self) {
         self.shutdown();
     }
+}
+
+/// Show the OS UAC prompt for elevating just `sc.exe start PerfWindowSensor`.
+/// Returns `Ok(())` once the OS launches the process (UAC accepted); the
+/// success of the *service start* itself is observed by polling the pipe.
+pub fn elevate_and_start_service() -> Result<(), String> {
+    crate::ui::service_dialog::shell_exec_runas("sc.exe", "start PerfWindowSensor")
 }
 
 #[cfg(test)]

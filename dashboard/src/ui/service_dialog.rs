@@ -59,7 +59,7 @@ pub fn service_dialog(ctx: &egui::Context, app: &mut PerfApp) {
 /// elevation for just this one `sc.exe start ...` call. Returns `Ok(())`
 /// when the process was launched (whether or not it ultimately succeeded —
 /// success of the *service* start is observed via the pipe reconnect).
-fn shell_exec_runas(exe: &str, args: &str) -> Result<(), String> {
+pub fn shell_exec_runas(exe: &str, args: &str) -> Result<(), String> {
     use std::ffi::OsStr;
     use std::os::windows::ffi::OsStrExt;
     let to_wide = |s: &str| -> Vec<u16> {

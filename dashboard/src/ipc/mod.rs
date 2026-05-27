@@ -8,6 +8,7 @@ pub use snapshot::{
     RamInfo, Snapshot, StorageInfo, VoltageInfo,
 };
 
+pub mod connect;
 pub mod pipe;
 pub mod process;
 pub mod snapshot;
