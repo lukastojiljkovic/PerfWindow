@@ -450,6 +450,16 @@ impl eframe::App for PerfApp {
             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
         }
     }
+
+    fn on_exit(&mut self) {
+        // Tell the worker to exit (over the pipe) before the dashboard
+        // process tears down. Drop alone is unreliable during shutdown —
+        // explicit shutdown() while the egui frame is still alive is
+        // the canonical close path.
+        if let Some(mut s) = self.sensord.take() {
+            s.shutdown();
+        }
+    }
 }
 
 #[cfg(test)]
