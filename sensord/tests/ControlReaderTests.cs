@@ -4,7 +4,7 @@ using Xunit;
 public class ControlReaderTests
 {
     [Fact]
-    public void Parses_interval()
+    public void Parse_IntervalMs_ReturnsMessageWithInterval()
     {
         ControlMessage? msg = ControlReader.Parse("{\"interval_ms\":2000}");
         Assert.NotNull(msg);
@@ -16,7 +16,7 @@ public class ControlReaderTests
     [InlineData("not json")]
     [InlineData("{}")]
     [InlineData("{\"interval_ms\":\"x\"}")]
-    public void Returns_null_for_unusable_input(string line)
+    public void Parse_UnusableInput_ReturnsNullInterval(string line)
     {
         Assert.Null(ControlReader.Parse(line)?.IntervalMs);
     }

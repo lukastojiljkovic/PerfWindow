@@ -11,10 +11,11 @@ using Sensord.Sensors;
 namespace Sensord.Service;
 
 /// <summary>
-/// Long-running service loop. Accepts one client at a time, emits NDJSON
-/// snapshots once per tick on the downstream half, and parses control
-/// messages off the upstream half. Tears the pipe down + reopens on client
-/// disconnect. The poll loop is suspended while no client is connected.
+/// Per-session worker. Accepts at most one client per service start, emits
+/// NDJSON snapshots on the downstream half while the client is connected,
+/// parses control messages off the upstream half, and exits when the
+/// client disconnects, sends <c>{"shutdown":true}</c>, or 30 s pass
+/// without a client.
 /// </summary>
 internal sealed class SensorPipeWorker : BackgroundService
 {
@@ -34,6 +35,9 @@ internal sealed class SensorPipeWorker : BackgroundService
         _log.LogInformation("SensorPipeWorker started, pipe={Pipe}", _pipeName);
 
         var diskInfo = DiskInfoReader.Read();
+        // Plain `var` + try/finally below: Task 2 of the v0.9.0 plan reassigns
+        // `monitor` on topology change, which `using` would forbid. Keeping the
+        // `try/finally` shape now to avoid churn when that lands.
         var monitor = new HardwareMonitor();
         _health = RunProbe(monitor);
         _log.LogInformation("PawnIO probe: {Pawnio} (degraded={Degraded})",
@@ -44,8 +48,6 @@ internal sealed class SensorPipeWorker : BackgroundService
             await using var pipe = PipeServer.Create(_pipeName);
             _log.LogInformation("Waiting for client on {Pipe}", _pipeName);
 
-            // 30-second startup deadline. If no dashboard ever connects, exit so
-            // the service does not stay resident forever.
             using var acceptCts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
             acceptCts.CancelAfter(TimeSpan.FromSeconds(30));
             try
@@ -55,6 +57,11 @@ internal sealed class SensorPipeWorker : BackgroundService
             catch (OperationCanceledException) when (!stoppingToken.IsCancellationRequested)
             {
                 _log.LogInformation("No client connected within 30s, stopping service");
+                return;
+            }
+            catch (IOException ex)
+            {
+                _log.LogError(ex, "pipe accept failed, stopping service");
                 return;
             }
 
@@ -84,7 +91,14 @@ internal sealed class SensorPipeWorker : BackgroundService
         var reader = new StreamReader(
             pipe, Encoding.UTF8, detectEncodingFromByteOrderMarks: false,
             bufferSize: 1024, leaveOpen: true);
-        _ = Task.Run(() => ReadControlLoop(reader, clientCts), clientCts.Token);
+        // Fire-and-forget: the reader blocks in ReadLine() on the pipe handle.
+        // We don't await it. When ServeOne returns, `await using var pipe` in
+        // ExecuteAsync disposes the pipe and ReadLine() returns null, ending the
+        // loop. The thread-pool thread is then released. One-shot session
+        // lifetime means no cross-session leak.
+        _ = Task.Run(
+            () => ReadControlLoop(reader, clientCts.Token, () => clientCts.Cancel()),
+            clientCts.Token);
 
         while (!clientCts.Token.IsCancellationRequested)
         {
@@ -100,7 +114,11 @@ internal sealed class SensorPipeWorker : BackgroundService
                 await Task.Delay(_intervalMs, clientCts.Token);
             }
             catch (IOException) { return; }
-            catch (OperationCanceledException) { return; }
+            catch (OperationCanceledException)
+            {
+                // Task.Delay observed clientCts.Cancel(); shutdown requested.
+                return;
+            }
             catch (Exception ex)
             {
                 _log.LogError(ex, "snapshot emit error");
@@ -110,12 +128,12 @@ internal sealed class SensorPipeWorker : BackgroundService
         }
     }
 
-    private void ReadControlLoop(StreamReader reader, CancellationTokenSource clientCts)
+    private void ReadControlLoop(StreamReader reader, CancellationToken token, Action onShutdownRequested)
     {
         try
         {
             string? line;
-            while (!clientCts.Token.IsCancellationRequested && (line = reader.ReadLine()) is not null)
+            while (!token.IsCancellationRequested && (line = reader.ReadLine()) is not null)
             {
                 ControlMessage? msg = ControlReader.Parse(line);
                 if (msg is null) continue;
@@ -123,7 +141,7 @@ internal sealed class SensorPipeWorker : BackgroundService
                 if (msg.Shutdown)
                 {
                     _log.LogInformation("Shutdown requested by client");
-                    clientCts.Cancel();
+                    onShutdownRequested();
                     return;
                 }
                 if (msg.IntervalMs is int ms && ms is >= 250 and <= 60_000)
