@@ -47,7 +47,10 @@ pub fn update_modal(ctx: &egui::Context, app: &mut PerfApp) {
     }
 
     let release = {
-        let guard = app.update_state.lock().unwrap();
+        let guard = match app.update_state.lock() {
+            Ok(g) => g,
+            Err(poisoned) => poisoned.into_inner(),
+        };
         match &*guard {
             UpdateState::Available { release, .. } => release.clone(),
             _ => {

@@ -33,12 +33,17 @@ pub fn sensors_panel(
     card(ui, theme, min_h, |ui| {
         panel_title(ui, theme, "BOARD & SENSORS", None);
 
-        // Build a flat candidate list of (label, value, optional value tint).
-        let mut items: Vec<(String, String, Option<Color32>)> = Vec::new();
+        // Build a flat candidate list. The leading u8 is a category tag —
+        // 0 = temperature, 1 = fan, 2 = voltage — so the rank-and-truncate
+        // step below preserves at least one of each kind before falling back
+        // to magnitude order within a category. Without it, fans (500–3000)
+        // and voltages (1–12) compete on raw value and voltages drop out.
+        let mut items: Vec<(u8, String, String, Option<Color32>)> = Vec::new();
 
         if let Some(b) = board {
             if let Some(t) = finite(b.temp) {
                 items.push((
+                    0,
                     "BOARD".to_string(),
                     format_temp(Some(t), unit),
                     Some(temp_color(t, TempKind::Board, theme)),
@@ -46,6 +51,7 @@ pub fn sensors_panel(
             }
             if let Some(t) = finite(b.vrm_temp) {
                 items.push((
+                    0,
                     "VRM".to_string(),
                     format_temp(Some(t), unit),
                     Some(temp_color(t, TempKind::Board, theme)),
@@ -55,6 +61,7 @@ pub fn sensors_panel(
         for f in fans {
             if let Some(rpm) = finite(f.rpm) {
                 items.push((
+                    1,
                     f.name.to_uppercase(),
                     format!("{} RPM", rpm.round() as i64),
                     None,
@@ -63,7 +70,7 @@ pub fn sensors_panel(
         }
         for v in voltages {
             if let Some(volts) = finite(v.volts) {
-                items.push((v.name.to_uppercase(), format!("{:.2} V", volts), None));
+                items.push((2, v.name.to_uppercase(), format!("{:.2} V", volts), None));
             }
         }
 
@@ -72,14 +79,16 @@ pub fn sensors_panel(
             return;
         }
 
-        // Sort by the leading numeric value descending so the hottest temp,
-        // the loudest fan and the highest voltage bubble to the top of their
-        // category; once truncated to the row budget the most informative
-        // readings survive at every capacity tier.
+        // Sort by category ascending then by leading numeric value descending
+        // within each category. Truncation drops the smallest voltages last,
+        // not all of them — the hottest temp, loudest fan and highest
+        // voltage all survive at any capacity tier that holds three rows.
         items.sort_by(|a, b| {
-            let av = parse_leading_number(&a.1);
-            let bv = parse_leading_number(&b.1);
-            bv.partial_cmp(&av).unwrap_or(std::cmp::Ordering::Equal)
+            a.0.cmp(&b.0).then_with(|| {
+                let av = parse_leading_number(&a.2);
+                let bv = parse_leading_number(&b.2);
+                bv.partial_cmp(&av).unwrap_or(std::cmp::Ordering::Equal)
+            })
         });
         items.truncate(capacity.rows);
 
@@ -89,15 +98,15 @@ pub fn sensors_panel(
             // candidate set instead of every reading.
             let split = items.len().div_ceil(2);
             ui.columns(2, |cols| {
-                for (label, val, col) in &items[..split] {
+                for (_, label, val, col) in &items[..split] {
                     tip(stat_row(&mut cols[0], theme, label, val, *col), label);
                 }
-                for (label, val, col) in &items[split..] {
+                for (_, label, val, col) in &items[split..] {
                     tip(stat_row(&mut cols[1], theme, label, val, *col), label);
                 }
             });
         } else {
-            for (label, val, col) in &items {
+            for (_, label, val, col) in &items {
                 tip(stat_row(ui, theme, label, val, *col), label);
             }
         }

@@ -46,6 +46,7 @@ const DESCRIPTIONS: &[(&str, &str)] = &[
     ("HOTSPOT",  "GPU die hot spot — the warmest single point on the GPU silicon. Usually 10–15 °C above the averaged core temperature."),
     ("JUNCTION", "GDDR / VRAM memory die hot spot, in °C. The VRAM chips can exceed the GPU core in memory-heavy workloads (large textures, on-GPU inference)."),
     ("VRAM",     "GPU on-card video memory used out of the card's total. Split between dedicated and DXGI-shared system RAM where the driver reports it."),
+    ("MEM USE",  "VRAM memory-controller load, 0–100 %. Independent of GPU core load: a saturated bus can throttle even an idle-looking GPU."),
     ("PCIE",     "GPU PCIe link throughput (receive + transmit), bytes per second. Sustained saturation can bottleneck game streaming or model loading."),
     ("V",        "GPU core voltage rail, in volts."),
 
@@ -54,6 +55,8 @@ const DESCRIPTIONS: &[(&str, &str)] = &[
     ("FREE",     "Memory immediately available for new allocations. Does not count reclaimable cache pages — Windows can release the cache on demand."),
     ("CACHED",   "OS file-system cache. The kernel treats this as free memory and reclaims it transparently when applications need RAM."),
     ("PAGEFILE", "Windows swap file usage. Sustained high usage means physical RAM is under pressure and access latency suffers."),
+    ("DIMM",     "Hottest DIMM temperature on the board, in °C. Some platforms expose per-module thermal sensors; sustained values above ~85 °C usually indicate weak case airflow."),
+    ("DIMM MAX", "Hottest of multiple DIMM temperature sensors, in °C. Reported when the platform exposes more than one DIMM thermal sensor."),
 
     // ---- Storage panel ----
     ("HEALTH",   "Remaining drive life, 0–100 % (100 = new). Prefers vendor 'Remaining Life'; falls back to the NVMe-spec 'Available Spare' when only the latter is exposed."),
@@ -67,11 +70,17 @@ const DESCRIPTIONS: &[(&str, &str)] = &[
     ("DOWN",     "Inbound throughput on the active network adapter, bytes per second."),
     ("UP",       "Outbound throughput on the active network adapter, bytes per second."),
     ("LINK",     "Adapter's negotiated link speed (for example 1 Gbit/s or 2.4 Gbit/s). Empty when the OS does not report it."),
+    ("IFACE",    "Active network interface (Wi-Fi adapter name or Ethernet device). Selected as the interface currently passing traffic."),
 
     // ---- Battery panel ----
-    ("STATE",    "Battery charge / discharge state. Charging while plugged in; Discharging on battery; AC when fully charged."),
-    ("RATE",     "Instantaneous power flow. Positive while charging, negative while discharging. A heavier load makes the discharge rate more negative."),
-    ("TIME",     "OS estimate of remaining battery life at the current discharge rate. Updates lazily; treat short-term changes as noisy."),
+    ("STATE",     "Battery charge / discharge state. Charging while plugged in; Discharging on battery; AC when fully charged."),
+    ("RATE",      "Instantaneous power flow. Positive while charging, negative while discharging. A heavier load makes the discharge rate more negative."),
+    ("TIME",      "OS estimate of remaining battery life at the current discharge rate. Updates lazily; treat short-term changes as noisy."),
+    ("REMAINING", "Current charge level, 0–100 %. Mirrors the donut on the left of the card."),
+
+    // ---- Sensors panel ----
+    ("BOARD",    "Motherboard temperature sensor, in °C. Tracks chipset / chassis warm-up; sustained values above 50 °C indicate poor case airflow."),
+    ("VRM",      "Voltage Regulator Module temperature, in °C. Hot VRMs throttle CPU power delivery; values above 90 °C suggest a heatsink or airflow problem."),
 
     // ---- Footer ----
     ("UP",       "Time since the OS last booted. Resets after a full shutdown or restart, not after sleep."),
