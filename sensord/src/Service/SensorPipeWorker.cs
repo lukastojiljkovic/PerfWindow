@@ -20,13 +20,15 @@ namespace Sensord.Service;
 internal sealed class SensorPipeWorker : BackgroundService
 {
     private readonly ILogger<SensorPipeWorker> _log;
+    private readonly IHostApplicationLifetime _lifetime;
     private readonly string _pipeName;
     private int _intervalMs = 1000;
     private HealthInfo? _health;
 
-    public SensorPipeWorker(ILogger<SensorPipeWorker> log, string pipeName)
+    public SensorPipeWorker(ILogger<SensorPipeWorker> log, IHostApplicationLifetime lifetime, string pipeName)
     {
         _log = log;
+        _lifetime = lifetime;
         _pipeName = pipeName;
     }
 
@@ -85,6 +87,12 @@ internal sealed class SensorPipeWorker : BackgroundService
         finally
         {
             monitorRef.Monitor.Dispose();
+            // BackgroundService.ExecuteAsync completing normally does NOT stop
+            // the host in .NET 8 — the process would idle forever with no
+            // hosted work. Explicitly request shutdown so the service exits
+            // as soon as the worker returns (client disconnect, shutdown
+            // message, or 30s startup timeout).
+            _lifetime.StopApplication();
         }
     }
 
