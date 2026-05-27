@@ -34,15 +34,23 @@ pub struct Snapshot {
     /// Win32 `EnumDisplaySettings`. Absent only on headless systems.
     #[serde(default)]
     pub display: Option<DisplayInfo>,
+    /// Every attached monitor's current mode, primary first. Added in 0.9.0;
+    /// older sensord builds omit this field (serde-default keeps them parsable).
+    #[serde(default)]
+    pub displays: Option<Vec<DisplayInfo>>,
     /// Sensord self-health summary. Absent on older sensord builds that
     /// predate the health probe (pre-0.8.0).
     #[serde(default)]
     pub health: Option<HealthInfo>,
 }
 
-/// Active display info — primary monitor resolution and refresh rate.
+/// Active display info — one monitor's resolution and refresh rate. The
+/// `name` field carries the Win32 device name (e.g. `\\.\DISPLAY1`) when
+/// sensord >= 0.9.0; older builds default it to the empty string.
 #[derive(Debug, Clone, Deserialize)]
 pub struct DisplayInfo {
+    #[serde(default)]
+    pub name: String,
     pub width: i32,
     pub height: i32,
     pub refresh_hz: i32,

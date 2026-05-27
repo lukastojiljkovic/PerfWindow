@@ -48,7 +48,10 @@ internal static class Program
             settings.SourceName = "PerfWindowSensor";
         });
         builder.Services.AddSingleton<SensorPipeWorker>(sp =>
-            new SensorPipeWorker(sp.GetRequiredService<ILogger<SensorPipeWorker>>(), pipeName));
+            new SensorPipeWorker(
+                sp.GetRequiredService<ILogger<SensorPipeWorker>>(),
+                sp.GetRequiredService<IHostApplicationLifetime>(),
+                pipeName));
         builder.Services.AddHostedService(sp => sp.GetRequiredService<SensorPipeWorker>());
         builder.Build().Run();
         return 0;

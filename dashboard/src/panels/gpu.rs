@@ -5,10 +5,9 @@ use crate::format::{finite, format_bytes_per_sec, format_gb_pair, format_temp, T
 use crate::history::GpuHistory;
 use crate::ipc::GpuInfo;
 use crate::theme::Theme;
-use crate::ui::tooltips::tip;
-use crate::ui::LayoutDensity;
+use crate::ui::capacity::Capacity;
+use crate::ui::stat_priority::{render, StatCandidate};
 use crate::widgets::gauge::donut;
-use crate::widgets::stat::stat_row;
 use crate::widgets::{temp_color, TempKind};
 
 /// Render a GPU card: title, a load donut beside two columns of stat rows,
@@ -27,7 +26,7 @@ pub fn gpu_panel(
     gpu: &GpuInfo,
     history: Option<&GpuHistory>,
     unit: TempUnit,
-    density: LayoutDensity,
+    capacity: Capacity,
     min_h: f32,
 ) {
     let integrated = gpu.kind == "integrated";
@@ -36,7 +35,7 @@ pub fn gpu_panel(
     card(ui, theme, min_h, |ui| {
         panel_title(ui, theme, title, Some(&gpu.name));
 
-        // Load donut on the left, two columns of stat rows on the right.
+        // Load donut on the left, priority-ranked stat rows on the right.
         ui.horizontal(|ui| {
             let load_resp = donut(ui, theme, gpu.load.unwrap_or(0.0) as f32, "%", "LOAD");
             // Default tooltip — overridden below when D3D engine breakdown is
@@ -51,98 +50,110 @@ pub fn gpu_panel(
                 );
             }
 
-            // Decide once which rows have data — kept stable across the two
-            // columns so the visual layout is predictable. Discrete GPUs
-            // always show TEMP/CLOCK/POWER (the headline trio) even when the
-            // current snapshot is missing one; iGPUs hide them when the
-            // hardware does not expose the reading.
-            let full = density == LayoutDensity::Full;
-            let show_temp = !integrated || gpu.temp.is_some();
-            let show_clock = finite(gpu.clock_mhz).is_some();
-            // HOTSPOT, JUNCTION, PCIE, V are detail readings — kept in Full
-            // mode, dropped in Compact so the card fits a narrow window.
-            let show_hot_spot = full && finite(gpu.hot_spot_temp).is_some();
-            let show_junction = full && finite(gpu.memory_junction_temp_c).is_some();
-            let show_mem_use = !integrated || finite(gpu.memory_load).is_some();
-            let show_vram = true; // dedicated for discrete, shared for iGPU
-            let show_pcie = full && sum_optional(gpu.pcie_rx_bps, gpu.pcie_tx_bps).is_some();
-            let show_power = !integrated || finite(gpu.power_w).map(|p| p > 0.05).unwrap_or(false);
-            let show_voltage = full && finite(gpu.voltage_v).is_some();
+            ui.vertical(|ui| {
+                let mut cands: Vec<StatCandidate> = Vec::new();
 
-            ui.columns(2, |cols| {
-                // -------- Left column: TEMP, HOTSPOT, JUNCTION, CLOCK, V --------
-                let left = &mut cols[0];
-                if show_temp {
+                // Discrete GPUs always show TEMP (headline reading) even when
+                // momentarily absent; iGPUs hide it when the hardware does not
+                // expose a reading at all.
+                if !integrated || gpu.temp.is_some() {
                     let temp_value = format_temp(gpu.temp, unit);
                     let temp_col = gpu.temp.map(|t| temp_color(t, TempKind::Processor, theme));
-                    tip(stat_row(left, theme, "TEMP", &temp_value, temp_col), "TEMP");
-                }
-                if show_hot_spot {
-                    let hot = gpu.hot_spot_temp.unwrap();
-                    let hot_value = format_temp(Some(hot), unit);
-                    let hot_col = Some(temp_color(hot, TempKind::Processor, theme));
-                    tip(
-                        stat_row(left, theme, "HOTSPOT", &hot_value, hot_col),
-                        "HOTSPOT",
-                    );
-                }
-                if show_junction {
-                    let junction = gpu.memory_junction_temp_c.unwrap();
-                    let val = format_temp(Some(junction), unit);
-                    let col = Some(temp_color(junction, TempKind::Processor, theme));
-                    tip(stat_row(left, theme, "JUNCTION", &val, col), "JUNCTION");
-                }
-                if show_clock {
-                    tip(
-                        stat_row(left, theme, "CLOCK", &format_clock(gpu.clock_mhz), None),
-                        "CLOCK",
-                    );
-                }
-                if show_voltage {
-                    let v = gpu.voltage_v.unwrap();
-                    tip(stat_row(left, theme, "V", &format!("{v:.3} V"), None), "V");
+                    cands.push(StatCandidate {
+                        priority: 0,
+                        label: "TEMP",
+                        value: temp_value,
+                        color: temp_col,
+                        tooltip_key: "TEMP",
+                    });
                 }
 
-                // -------- Right column: MEM USE, VRAM, PCIE, POWER --------
-                let right = &mut cols[1];
-                if show_mem_use {
-                    tip(
-                        stat_row(
-                            right,
-                            theme,
-                            "MEM USE",
-                            &format_percent_unit(gpu.memory_load),
-                            None,
-                        ),
-                        "MEM USE",
-                    );
+                // VRAM is the second headline — dedicated for discrete,
+                // shared for iGPU. Always pushed.
+                let vram_value = if integrated {
+                    format_shared_vram(gpu.shared_vram_used_mb)
+                } else {
+                    format_gb_pair(gpu.vram_used_mb, gpu.vram_total_mb)
+                };
+                cands.push(StatCandidate {
+                    priority: 1,
+                    label: "VRAM",
+                    value: vram_value,
+                    color: None,
+                    tooltip_key: "VRAM",
+                });
+
+                if !integrated || finite(gpu.power_w).map(|p| p > 0.05).unwrap_or(false) {
+                    cands.push(StatCandidate {
+                        priority: 2,
+                        label: "POWER",
+                        value: format_power(gpu.power_w),
+                        color: None,
+                        tooltip_key: "POWER",
+                    });
                 }
-                if show_vram {
-                    let vram_value = if integrated {
-                        format_shared_vram(gpu.shared_vram_used_mb)
-                    } else {
-                        format_gb_pair(gpu.vram_used_mb, gpu.vram_total_mb)
-                    };
-                    let vram_resp = stat_row(right, theme, "VRAM", &vram_value, None);
-                    let vram_resp = tip(vram_resp, "VRAM");
-                    if let Some(text) = vram_breakdown_tooltip(gpu, integrated) {
-                        vram_resp.on_hover_text(text);
-                    }
+
+                if finite(gpu.clock_mhz).is_some() {
+                    cands.push(StatCandidate {
+                        priority: 3,
+                        label: "CLOCK",
+                        value: format_clock(gpu.clock_mhz),
+                        color: None,
+                        tooltip_key: "CLOCK",
+                    });
                 }
-                if show_pcie {
-                    let total = sum_optional(gpu.pcie_rx_bps, gpu.pcie_tx_bps).unwrap();
-                    let val = format_bytes_per_sec(total);
-                    let pcie_resp = stat_row(right, theme, "PCIE", &val, None);
-                    let pcie_resp = tip(pcie_resp, "PCIE");
-                    if let Some(detail) = pcie_breakdown_tooltip(gpu) {
-                        pcie_resp.on_hover_text(detail);
-                    }
+
+                if !integrated || finite(gpu.memory_load).is_some() {
+                    cands.push(StatCandidate {
+                        priority: 4,
+                        label: "MEM USE",
+                        value: format_percent_unit(gpu.memory_load),
+                        color: None,
+                        tooltip_key: "MEM USE",
+                    });
                 }
-                if show_power {
-                    let power_resp =
-                        stat_row(right, theme, "POWER", &format_power(gpu.power_w), None);
-                    tip(power_resp, "POWER");
+
+                if let Some(hot) = finite(gpu.hot_spot_temp) {
+                    cands.push(StatCandidate {
+                        priority: 5,
+                        label: "HOTSPOT",
+                        value: format_temp(Some(hot), unit),
+                        color: Some(temp_color(hot, TempKind::Processor, theme)),
+                        tooltip_key: "HOTSPOT",
+                    });
                 }
+
+                if let Some(junction) = finite(gpu.memory_junction_temp_c) {
+                    cands.push(StatCandidate {
+                        priority: 6,
+                        label: "JUNCTION",
+                        value: format_temp(Some(junction), unit),
+                        color: Some(temp_color(junction, TempKind::Processor, theme)),
+                        tooltip_key: "JUNCTION",
+                    });
+                }
+
+                if let Some(total) = sum_optional(gpu.pcie_rx_bps, gpu.pcie_tx_bps) {
+                    cands.push(StatCandidate {
+                        priority: 7,
+                        label: "PCIE",
+                        value: format_bytes_per_sec(total),
+                        color: None,
+                        tooltip_key: "PCIE",
+                    });
+                }
+
+                if let Some(v) = finite(gpu.voltage_v) {
+                    cands.push(StatCandidate {
+                        priority: 8,
+                        label: "V",
+                        value: format!("{v:.3} V"),
+                        color: None,
+                        tooltip_key: "V",
+                    });
+                }
+
+                render(ui, theme, cands, capacity);
             });
         });
 
@@ -202,6 +213,11 @@ fn d3d_breakdown_tooltip(gpu: &GpuInfo) -> Option<String> {
 }
 
 /// Hover text for the PCIe row when at least one direction has data.
+///
+/// Currently unused: the v0.9.0 priority-ranked renderer does not expose
+/// per-row responses, so panels cannot attach extra hover text beyond the
+/// stat_priority::render base tooltip. Kept for later wiring.
+#[allow(dead_code)]
 fn pcie_breakdown_tooltip(gpu: &GpuInfo) -> Option<String> {
     let rx = finite(gpu.pcie_rx_bps);
     let tx = finite(gpu.pcie_tx_bps);
@@ -221,6 +237,11 @@ fn pcie_breakdown_tooltip(gpu: &GpuInfo) -> Option<String> {
 /// Hover text for the VRAM row when the driver exposes dedicated / shared
 /// breakdown values. `integrated` shifts the language for iGPUs that have no
 /// dedicated VRAM at all.
+///
+/// Currently unused: the v0.9.0 priority-ranked renderer does not expose
+/// per-row responses, so panels cannot attach extra hover text beyond the
+/// stat_priority::render base tooltip. Kept for later wiring.
+#[allow(dead_code)]
 fn vram_breakdown_tooltip(gpu: &GpuInfo, integrated: bool) -> Option<String> {
     let dedicated = finite(gpu.dedicated_vram_used_mb);
     let shared = finite(gpu.shared_vram_used_mb);

@@ -196,6 +196,7 @@ mod tests {
             uptime_sec: None,
             atk_fans: None,
             display: None,
+            displays: None,
             health: None,
         };
         h.record(&snap);
@@ -245,6 +246,7 @@ mod tests {
             uptime_sec: None,
             atk_fans: None,
             display: None,
+            displays: None,
             health: None,
         };
         h.record(&snap);

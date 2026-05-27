@@ -23,10 +23,12 @@ public record Snapshot(
     [property: JsonPropertyName("uptime_sec")] long? UptimeSec,
     [property: JsonPropertyName("atk_fans")] IReadOnlyList<FanInfo>? AtkFans,
     [property: JsonPropertyName("display")] DisplayInfo? Display,
+    [property: JsonPropertyName("displays")] IReadOnlyList<DisplayInfo>? Displays,
     [property: JsonPropertyName("health")] HealthInfo? Health);
 
-/// <summary>Active display info — resolution and refresh rate of the primary monitor.</summary>
+/// <summary>Active display info — resolution and refresh rate of a monitor.</summary>
 public record DisplayInfo(
+    [property: JsonPropertyName("name")] string Name,
     [property: JsonPropertyName("width")] int Width,
     [property: JsonPropertyName("height")] int Height,
     [property: JsonPropertyName("refresh_hz")] int RefreshHz);

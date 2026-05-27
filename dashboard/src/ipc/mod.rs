@@ -8,6 +8,7 @@ pub use snapshot::{
     RamInfo, Snapshot, StorageInfo, VoltageInfo,
 };
 
+pub mod connect;
 pub mod pipe;
 pub mod process;
 pub mod snapshot;
@@ -35,6 +36,12 @@ impl SensordKind {
         match self {
             Self::Pipe(p) => p.is_alive(),
             Self::Child(c) => c.is_alive(),
+        }
+    }
+    pub fn shutdown(&mut self) {
+        match self {
+            Self::Pipe(p) => p.shutdown(),
+            Self::Child(c) => c.shutdown(),
         }
     }
 }

@@ -9,10 +9,10 @@ use crate::format::{finite, format_bytes_per_sec, format_link};
 use crate::history::NetThroughputHistory;
 use crate::ipc::NetInfo;
 use crate::theme::Theme;
-use crate::ui::tooltips::tip;
+use crate::ui::capacity::Capacity;
+use crate::ui::stat_priority::{render, StatCandidate};
 use crate::widgets::gauge::donut;
 use crate::widgets::sparkline::dual_sparkline;
-use crate::widgets::stat::stat_row;
 
 /// Render the NETWORK card.
 ///
@@ -24,6 +24,7 @@ pub fn network_panel(
     theme: &Theme,
     net: Option<&NetInfo>,
     history: Option<&NetThroughputHistory>,
+    capacity: Capacity,
     min_h: f32,
 ) {
     card(ui, theme, min_h, |ui| {
@@ -34,7 +35,7 @@ pub fn network_panel(
             return;
         };
 
-        // Donut on the left, three stat rows on the right.
+        // Donut on the left, priority-ranked stat rows on the right.
         let donut_pct = finite(net.down_pct)
             .zip(finite(net.up_pct))
             .map(|(d, u)| d.max(u))
@@ -48,30 +49,45 @@ pub fn network_panel(
                  fraction of the adapter's negotiated link speed.",
             );
             ui.vertical(|ui| {
-                tip(
-                    stat_row(
-                        ui,
-                        theme,
-                        "DOWN",
-                        &format_bytes_per_sec(finite(net.down_bps).unwrap_or(0.0)),
-                        None,
-                    ),
-                    "DOWN",
-                );
-                tip(
-                    stat_row(
-                        ui,
-                        theme,
-                        "UP",
-                        &format_bytes_per_sec(finite(net.up_bps).unwrap_or(0.0)),
-                        None,
-                    ),
-                    "UP",
-                );
-                tip(
-                    stat_row(ui, theme, "LINK", &format_link(net.link_bps), None),
-                    "LINK",
-                );
+                let mut cands: Vec<StatCandidate> = Vec::new();
+
+                // DOWN and UP share priority 0 — they should never split.
+                cands.push(StatCandidate {
+                    priority: 0,
+                    label: "DOWN",
+                    value: format_bytes_per_sec(finite(net.down_bps).unwrap_or(0.0)),
+                    color: None,
+                    tooltip_key: "DOWN",
+                });
+                cands.push(StatCandidate {
+                    priority: 0,
+                    label: "UP",
+                    value: format_bytes_per_sec(finite(net.up_bps).unwrap_or(0.0)),
+                    color: None,
+                    tooltip_key: "UP",
+                });
+
+                if net.link_bps.is_some() {
+                    cands.push(StatCandidate {
+                        priority: 1,
+                        label: "LINK",
+                        value: format_link(net.link_bps),
+                        color: None,
+                        tooltip_key: "LINK",
+                    });
+                }
+
+                if !net.adapter.is_empty() {
+                    cands.push(StatCandidate {
+                        priority: 2,
+                        label: "IFACE",
+                        value: net.adapter.clone(),
+                        color: None,
+                        tooltip_key: "IFACE",
+                    });
+                }
+
+                render(ui, theme, cands, capacity);
             });
         });
 

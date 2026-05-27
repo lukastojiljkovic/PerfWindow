@@ -69,8 +69,12 @@ fn try_start_service() {
 }
 
 impl PipeSensord {
+    /// Existing legacy path: open the pipe at the default location, attempt
+    /// elevation if needed, retry. Used by the `--dev` child path's
+    /// fallback test infrastructure. Production callers use the
+    /// `connect_no_elevation` + state-machine combo.
     pub fn connect(repaint: impl Fn() + Send + 'static) -> Result<Self, ConnectError> {
-        let read = match Self::open_pipe() {
+        let read = match Self::open_pipe_at(PIPE_PATH) {
             Ok(f) => f,
             Err(ConnectError::NotFound) => {
                 // Service is not running — start it and wait briefly for the
@@ -79,7 +83,7 @@ impl PipeSensord {
                 let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
                 loop {
                     std::thread::sleep(std::time::Duration::from_millis(200));
-                    match Self::open_pipe() {
+                    match Self::open_pipe_at(PIPE_PATH) {
                         Ok(f) => break f,
                         Err(_) if std::time::Instant::now() >= deadline => {
                             return Err(ConnectError::NotFound);
@@ -91,13 +95,43 @@ impl PipeSensord {
             Err(e) => return Err(e),
         };
 
-        let writer = read.try_clone()?;
+        Ok(Self::start_reader(read, repaint))
+    }
 
+    /// Open the pipe at the default location without trying to elevate.
+    /// The connect state machine uses this in every phase that polls.
+    #[allow(dead_code)]
+    pub fn connect_no_elevation(repaint: impl Fn() + Send + 'static) -> Result<Self, ConnectError> {
+        let read = Self::open_pipe_at(PIPE_PATH)?;
+        Ok(Self::start_reader(read, repaint))
+    }
+
+    /// Open the pipe at an explicit path (used by integration tests that
+    /// run sensord with `--pipe-name <Custom>`).
+    #[allow(dead_code)]
+    pub fn connect_to(
+        path: &str,
+        repaint: impl Fn() + Send + 'static,
+    ) -> Result<Self, ConnectError> {
+        let read = Self::open_pipe_at(path)?;
+        Ok(Self::start_reader(read, repaint))
+    }
+
+    fn open_pipe_at(path: &str) -> Result<File, ConnectError> {
+        OpenOptions::new()
+            .read(true)
+            .write(true)
+            .custom_flags(FILE_FLAG_OVERLAPPED)
+            .open(path)
+            .map_err(ConnectError::from)
+    }
+
+    fn start_reader(read: File, repaint: impl Fn() + Send + 'static) -> Self {
+        let writer = read.try_clone().expect("clone pipe handle");
         let state: SharedState = Arc::new(Mutex::new(SensorState {
             latest: None,
             alive: true,
         }));
-
         let reader_state = Arc::clone(&state);
         let reader = std::thread::spawn(move || {
             let lines = BufReader::new(read).lines();
@@ -119,21 +153,11 @@ impl PipeSensord {
             }
             repaint();
         });
-
-        Ok(PipeSensord {
+        PipeSensord {
             writer: Some(writer),
             reader: Some(reader),
             state,
-        })
-    }
-
-    fn open_pipe() -> Result<File, ConnectError> {
-        OpenOptions::new()
-            .read(true)
-            .write(true)
-            .custom_flags(FILE_FLAG_OVERLAPPED)
-            .open(PIPE_PATH)
-            .map_err(ConnectError::from)
+        }
     }
 
     pub fn set_interval(&mut self, ms: u32) {
@@ -145,30 +169,43 @@ impl PipeSensord {
     pub fn is_alive(&self) -> bool {
         self.state.lock().map(|s| s.alive).unwrap_or(false)
     }
+
+    /// Tell the worker to exit cleanly: write `{"shutdown":true}` on the
+    /// upstream half, then drop our writer to send EOF as a belt-and-braces
+    /// signal. Idempotent — calling more than once is a no-op.
+    ///
+    /// This is the canonical close path. The `Drop` impl below also calls
+    /// `shutdown` as a safety net, but the dashboard prefers to invoke this
+    /// explicitly from `eframe::App::on_exit` while the frame is still alive
+    /// (more reliable than relying on `Drop` during process tear-down).
+    pub fn shutdown(&mut self) {
+        if let Some(mut w) = self.writer.take() {
+            let _ = writeln!(w, "{{\"shutdown\":true}}");
+            // `w` drops here, closing our writer half of the pipe.
+        }
+        // The reader thread is detached (see Drop history); drop the JoinHandle
+        // without joining, exactly as Drop has done since v0.8.1.
+        let _ = self.reader.take();
+    }
 }
 
 impl Drop for PipeSensord {
     fn drop(&mut self) {
-        // Drop the writer handle so the server's reader-side sees EOF.
-        // We deliberately do NOT join the reader thread: it is blocked in
-        // BufReader::lines() and the only way to unblock it would be to
-        // close the pipe, but the reader's own File handle (moved into
-        // the closure) keeps the client side open after we drop the
-        // writer above. Joining would deadlock; we'd need
-        // CancelSynchronousIo against the reader thread to truly interrupt
-        // the read, which is more complexity than the win is worth.
-        //
-        // Instead: drop the JoinHandle, which detaches the thread. The OS
-        // reaps it on process exit, the reader's pipe handle closes, the
-        // server-side I/O returns IOException, and the server cleans up.
-        self.writer.take();
-        let _ = self.reader.take();
+        self.shutdown();
     }
+}
+
+/// Show the OS UAC prompt for elevating just `sc.exe start PerfWindowSensor`.
+/// Returns `Ok(())` once the OS launches the process (UAC accepted); the
+/// success of the *service start* itself is observed by polling the pipe.
+pub fn elevate_and_start_service() -> Result<(), String> {
+    crate::ui::shell::shell_exec_runas("sc.exe", "start PerfWindowSensor")
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ipc::SensorState;
     use std::io::{Error, ErrorKind};
 
     #[test]
@@ -187,5 +224,19 @@ mod tests {
     fn pipe_busy_os_error_231_maps_to_busy() {
         let err = ConnectError::from(Error::from_raw_os_error(231));
         assert!(matches!(err, ConnectError::Busy));
+    }
+
+    #[test]
+    fn shutdown_twice_is_safe() {
+        let mut s = PipeSensord {
+            writer: None,
+            reader: None,
+            state: Arc::new(Mutex::new(SensorState {
+                latest: None,
+                alive: false,
+            })),
+        };
+        s.shutdown();
+        s.shutdown(); // must not panic, must not deadlock
     }
 }

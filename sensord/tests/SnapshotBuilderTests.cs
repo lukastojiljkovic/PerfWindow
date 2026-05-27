@@ -278,6 +278,25 @@ public class SnapshotBuilderTests
     }
 
     [Fact]
+    public void Build_HardwareWithThrowingSensor_OmitsSectionNotAborts()
+    {
+        // A CPU-typed hardware whose Sensors access throws. The whole snapshot
+        // must still build; the CPU section becomes null. This protects the
+        // worker loop from losing a whole tick when one vendor driver / LHM
+        // probe glitches mid-poll.
+        var throwingHw = new ThrowingFakeHardware(HardwareType.Cpu);
+
+        var snap = SnapshotBuilder.Build(
+            new IHardware[] { throwingHw },
+            default,
+            new Dictionary<string, long>(),
+            new Dictionary<int, PhysicalDiskInfo>());
+
+        Assert.NotNull(snap);
+        Assert.Null(snap.Cpu);
+    }
+
+    [Fact]
     public void Build_uses_link_speed_lookup_by_network_adapter_name()
     {
         // One NIC named "Wi-Fi" with a positive throughput so it wins the
@@ -370,5 +389,21 @@ public class SnapshotBuilderTests
         {
             HardwareTypeValue = HardwareType.Storage;
         }
+    }
+
+    /// <summary>
+    /// IHardware whose <see cref="IHardware.Sensors"/> getter always throws.
+    /// Used to verify <see cref="SnapshotBuilder.Build"/> isolates per-section
+    /// exceptions so the snapshot still emits with that section null.
+    /// </summary>
+    private sealed class ThrowingFakeHardware : FakeHardware
+    {
+        public ThrowingFakeHardware(HardwareType type)
+        {
+            HardwareTypeValue = type;
+        }
+
+        public override ISensor[] Sensors
+            => throw new InvalidOperationException("sensor read failed");
     }
 }

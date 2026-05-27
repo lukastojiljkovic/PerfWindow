@@ -5,12 +5,11 @@ use crate::format::{finite, format_temp, TempUnit};
 use crate::history::RingBuffer;
 use crate::ipc::CpuInfo;
 use crate::theme::Theme;
-use crate::ui::tooltips::tip;
-use crate::ui::LayoutDensity;
+use crate::ui::capacity::Capacity;
+use crate::ui::stat_priority::{render, StatCandidate};
 use crate::widgets::bars::{core_grid, core_strip};
 use crate::widgets::gauge::donut;
 use crate::widgets::sparkline::sparkline;
-use crate::widgets::stat::stat_row;
 use crate::widgets::{temp_color, TempKind};
 
 /// Render the CPU card: title, a load donut beside temp/clock/power stats,
@@ -29,63 +28,74 @@ pub fn cpu_panel(
     history: Option<&RingBuffer>,
     unit: TempUnit,
     show_heat_map: bool,
-    density: LayoutDensity,
+    capacity: Capacity,
     min_h: f32,
 ) {
     card(ui, theme, min_h, |ui| {
         panel_title(ui, theme, "CPU", Some(&cpu.name));
 
-        // Load donut on the left, four to five stat rows on the right.
+        // Load donut on the left, priority-ranked stat rows on the right.
         ui.horizontal(|ui| {
             donut(ui, theme, cpu.load.unwrap_or(0.0) as f32, "%", "LOAD").on_hover_text(
                 "CPU utilisation across every logical core, 0–100 %. \
                      100 % means every core is executing instructions every cycle.",
             );
             ui.vertical(|ui| {
+                let mut cands: Vec<StatCandidate> = Vec::new();
+
                 let temp_value = format_temp(cpu.temp, unit);
                 let temp_col = cpu.temp.map(|t| temp_color(t, TempKind::Processor, theme));
-                tip(stat_row(ui, theme, "TEMP", &temp_value, temp_col), "TEMP");
+                cands.push(StatCandidate {
+                    priority: 0,
+                    label: "TEMP",
+                    value: temp_value,
+                    color: temp_col,
+                    tooltip_key: "TEMP",
+                });
 
-                // TJMAX (Distance to TjMax). Only renders when sensord reports
-                // the per-core MSR — laptops on PawnIO; many AMD desktops too.
-                // Suppressed in Compact mode (essentials only).
-                if density == LayoutDensity::Full {
-                    if let Some(d) = finite(cpu.distance_to_tjmax_c) {
-                        let val = format!("{d:.0} \u{00B0}C");
-                        // Lower headroom = closer to throttling. Re-use the
-                        // temp-colour ramp by treating "headroom remaining" as
-                        // its inverse: 5 °C of headroom ≈ ~90 °C silicon.
-                        let pseudo_temp = (95.0_f64 - d).clamp(0.0, 105.0);
-                        let col = temp_color(pseudo_temp, TempKind::Processor, theme);
-                        tip(stat_row(ui, theme, "TJMAX", &val, Some(col)), "TJMAX");
-                    }
+                cands.push(StatCandidate {
+                    priority: 1,
+                    label: "CLOCK",
+                    value: format_clock(cpu.clock_mhz),
+                    color: None,
+                    tooltip_key: "CLOCK",
+                });
+
+                cands.push(StatCandidate {
+                    priority: 2,
+                    label: "POWER",
+                    value: format_power(cpu.power_w),
+                    color: None,
+                    tooltip_key: "POWER",
+                });
+
+                // TJMAX (Distance to TjMax). Only present when sensord reports
+                // the per-core MSR. Lower headroom = closer to throttling, so
+                // re-use the temp ramp by treating "headroom remaining" as its
+                // inverse: 5 °C of headroom ≈ ~90 °C silicon.
+                if let Some(d) = finite(cpu.distance_to_tjmax_c) {
+                    let pseudo_temp = (95.0_f64 - d).clamp(0.0, 105.0);
+                    let col = temp_color(pseudo_temp, TempKind::Processor, theme);
+                    cands.push(StatCandidate {
+                        priority: 3,
+                        label: "TJMAX",
+                        value: format!("{d:.0} \u{00B0}C"),
+                        color: Some(col),
+                        tooltip_key: "TJMAX",
+                    });
                 }
 
-                tip(
-                    stat_row(ui, theme, "CLOCK", &format_clock(cpu.clock_mhz), None),
-                    "CLOCK",
-                );
-
-                // Package power as the primary "POWER" reading. When the
-                // RAPL sub-domains are also exposed, hover reveals the
-                // breakdown (Cores / DRAM / Platform).
-                let breakdown = power_breakdown_tooltip(cpu);
-                let power_resp = stat_row(ui, theme, "POWER", &format_power(cpu.power_w), None);
-                let power_resp = tip(power_resp, "POWER");
-                if let Some(text) = breakdown {
-                    power_resp.on_hover_text(text);
+                if let Some(v) = finite(cpu.voltage_v) {
+                    cands.push(StatCandidate {
+                        priority: 4,
+                        label: "VCORE",
+                        value: format!("{v:.3} V"),
+                        color: None,
+                        tooltip_key: "VCORE",
+                    });
                 }
 
-                // VCORE is a "detail" reading — useful but not essential.
-                // Skipped in Compact mode so the panel fits without scroll.
-                if density == LayoutDensity::Full {
-                    if let Some(v) = finite(cpu.voltage_v) {
-                        tip(
-                            stat_row(ui, theme, "VCORE", &format!("{v:.3} V"), None),
-                            "VCORE",
-                        );
-                    }
-                }
+                render(ui, theme, cands, capacity);
             });
         });
 
@@ -124,6 +134,11 @@ pub fn cpu_panel(
 /// Build the multi-line hover-text shown over the POWER row when at least one
 /// RAPL sub-domain reading is present. Returns `None` when only the package
 /// figure is available — the row keeps its standard tooltip in that case.
+///
+/// Currently unused: the v0.9.0 priority-ranked renderer does not expose
+/// per-row responses, so panels cannot attach extra hover text beyond the
+/// stat_priority::render base tooltip. Kept for later wiring.
+#[allow(dead_code)]
 fn power_breakdown_tooltip(cpu: &CpuInfo) -> Option<String> {
     let cores = finite(cpu.power_cores_w);
     let mem = finite(cpu.power_memory_w);

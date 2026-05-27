@@ -3,14 +3,14 @@
 use super::{card, panel_title};
 use crate::format::{format_gb_from_mb, format_gb_pair, format_temp, TempUnit};
 use crate::history::RingBuffer;
+use crate::ipc::snapshot::DimmTemp;
 use crate::ipc::RamInfo;
 use crate::theme::Theme;
-use crate::ui::tooltips::tip;
-use crate::ui::LayoutDensity;
+use crate::ui::capacity::Capacity;
+use crate::ui::stat_priority::{render, StatCandidate};
 use crate::widgets::bars::bar_meter;
 use crate::widgets::gauge::donut;
 use crate::widgets::sparkline::sparkline;
-use crate::widgets::stat::stat_row;
 use crate::widgets::{temp_color, TempKind};
 use egui::{FontId, Sense, Vec2};
 
@@ -29,51 +29,62 @@ pub fn ram_panel(
     ram: &RamInfo,
     history: Option<&RingBuffer>,
     unit: TempUnit,
-    density: LayoutDensity,
+    capacity: Capacity,
     min_h: f32,
 ) {
     card(ui, theme, min_h, |ui| {
         panel_title(ui, theme, "RAM", None);
 
-        // Usage donut on the left, three stat rows on the right.
+        // Usage donut on the left, priority-ranked stat rows on the right.
         ui.horizontal(|ui| {
             donut(ui, theme, ram.load.unwrap_or(0.0) as f32, "%", "USED").on_hover_text(
                 "Physical RAM in use, 0–100 %. Cache is counted as free — Windows \
                  reclaims it on demand.",
             );
             ui.vertical(|ui| {
-                tip(stat_row(ui, theme, "USED", &gb(ram.used_mb), None), "USED");
-                tip(
-                    stat_row(ui, theme, "FREE", &gb(ram.available_mb), None),
-                    "FREE",
-                );
-                // CACHED is informative but redundant with USED+FREE.
-                // Skipped in Compact mode.
-                if density == LayoutDensity::Full {
-                    tip(
-                        stat_row(ui, theme, "CACHED", &gb(ram.cached_mb), None),
-                        "CACHED",
-                    );
+                let mut cands: Vec<StatCandidate> = Vec::new();
+
+                cands.push(StatCandidate {
+                    priority: 0,
+                    label: "USED",
+                    value: gb(ram.used_mb),
+                    color: None,
+                    tooltip_key: "USED",
+                });
+
+                cands.push(StatCandidate {
+                    priority: 1,
+                    label: "FREE",
+                    value: gb(ram.available_mb),
+                    color: None,
+                    tooltip_key: "FREE",
+                });
+
+                cands.push(StatCandidate {
+                    priority: 2,
+                    label: "CACHED",
+                    value: gb(ram.cached_mb),
+                    color: None,
+                    tooltip_key: "CACHED",
+                });
+
+                // DIMM temperature — surface the hottest module. Only
+                // present when the SPD hub exposes a thermal sensor (DDR5;
+                // most DDR4 desktop kits). Older sensord builds and older
+                // hardware skip it.
+                if let Some(dimms) = ram.dimm_temps.as_ref().filter(|d| !d.is_empty()) {
+                    let hottest = dimms.iter().map(|d| d.temp_c).fold(f64::MIN, f64::max);
+                    let label = if dimms.len() > 1 { "DIMM MAX" } else { "DIMM" };
+                    cands.push(StatCandidate {
+                        priority: 3,
+                        label,
+                        value: format_temp(Some(hottest), unit),
+                        color: Some(temp_color(hottest, TempKind::Processor, theme)),
+                        tooltip_key: "DIMM",
+                    });
                 }
 
-                // DIMM temperature — surface the hottest module on the row,
-                // full per-module breakdown on hover. Only present when the
-                // SPD hub exposes a thermal sensor (DDR5; most DDR4 desktop
-                // kits). Older sensord builds and older hardware skip it.
-                if density == LayoutDensity::Full {
-                    if let Some(dimms) = ram.dimm_temps.as_ref().filter(|d| !d.is_empty()) {
-                        let hottest = dimms.iter().map(|d| d.temp_c).fold(f64::MIN, f64::max);
-                        let value = format_temp(Some(hottest), unit);
-                        let col = Some(temp_color(hottest, TempKind::Processor, theme));
-                        let label = if dimms.len() > 1 { "DIMM MAX" } else { "DIMM" };
-                        let resp = stat_row(ui, theme, label, &value, col);
-                        let mut hover = String::from("Per-module DIMM temperatures (°C):\n");
-                        for d in dimms {
-                            hover.push_str(&format!("  {:<10} {:.1}\n", d.label, d.temp_c));
-                        }
-                        resp.on_hover_text(hover.trim_end().to_string());
-                    }
-                }
+                render(ui, theme, cands, capacity);
             });
         });
 
@@ -95,6 +106,24 @@ fn gb(mb: Option<f64>) -> String {
         Some(_) => format!("{} GB", format_gb_from_mb(mb)),
         None => "—".to_string(),
     }
+}
+
+/// Build the multi-line hover text listing each module's temperature for the
+/// DIMM stat row. Returns `None` when no modules are present.
+///
+/// Currently unused: the v0.9.0 priority-ranked renderer does not expose
+/// per-row responses, so panels cannot attach extra hover text beyond the
+/// stat_priority::render base tooltip. Kept for later wiring.
+#[allow(dead_code)]
+fn dimm_breakdown_tooltip(dimms: &[DimmTemp]) -> Option<String> {
+    if dimms.is_empty() {
+        return None;
+    }
+    let mut hover = String::from("Per-module DIMM temperatures (°C):\n");
+    for d in dimms {
+        hover.push_str(&format!("  {:<10} {:.1}\n", d.label, d.temp_c));
+    }
+    Some(hover.trim_end().to_string())
 }
 
 /// Draw the SWAP row: a `SWAP` label, a pagefile fill bar taking the middle and

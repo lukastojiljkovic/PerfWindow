@@ -22,7 +22,7 @@ fn main() -> eframe::Result {
         // sits just below the 4-col breakpoint so the grid can collapse
         // to 3 cols when the user shrinks the window deliberately.
         .with_inner_size([1180.0, 600.0])
-        .with_min_inner_size([960.0, 600.0]);
+        .with_min_inner_size([720.0, 500.0]);
     if initially_on_top {
         viewport = viewport.with_always_on_top();
     }

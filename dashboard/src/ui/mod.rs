@@ -11,11 +11,14 @@
 //! submodule paints the retro CRT overlay — grid, scanlines, vignette — last of
 //! all each frame.
 
+pub mod capacity;
 pub mod changelog_modal;
 pub mod effects;
 pub mod health_banner;
-pub mod service_dialog;
+pub mod loading_screen;
 pub mod settings;
+pub mod shell;
+pub mod stat_priority;
 pub mod tooltips;
 pub mod update_banner;
 pub mod update_modal;
@@ -382,39 +385,10 @@ pub fn card_grid(ui: &mut egui::Ui, app: &mut PerfApp) {
         let avail_w = ui.available_width();
         let cols = column_count(avail_w);
         let col_width = ((avail_w - GRID_GAP * (cols as f32 - 1.0)) / cols as f32).max(1.0);
-        // Compact mode: hide non-essential rows when the window is at or
-        // near its minimum size, so the panels fit without scrolling.
-        // Threshold sits just below the 4-col breakpoint, so the default
-        // launch size (1180 px wide → 4 cols) shows everything and only a
-        // user who deliberately shrinks the window gets the trim-down.
-        let density = if avail_w >= COMPACT_THRESHOLD {
-            LayoutDensity::Full
-        } else {
-            LayoutDensity::Compact
-        };
 
         let spans = layout_spans(&cards, cols);
-        layout_cards(ui, app, &snap, &cards, &spans, cols, col_width, density);
+        layout_cards(ui, app, &snap, &cards, &spans, cols, col_width);
     });
-}
-
-/// Width threshold below which panels switch to compact (essentials-only)
-/// rendering. Tuned to sit just below the 4-col breakpoint so the default
-/// 1180×600 launch size stays in `Full` mode and only a deliberate shrink
-/// drops to `Compact`.
-const COMPACT_THRESHOLD: f32 = 1100.0;
-
-/// Per-frame density signal handed to every panel function so it can drop
-/// non-essential stat rows when the window is narrow.
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub enum LayoutDensity {
-    /// Window has room for everything — render every stat row, breakdown,
-    /// and tooltip-source row.
-    Full,
-    /// Window is at or near its minimum size — drop secondary readings
-    /// (HOTSPOT, JUNCTION, PCIE, V, VCORE, TJMAX, CACHED, DIMM, LINK,
-    /// HEALTH on Battery) so the panel fits without scrolling.
-    Compact,
 }
 
 /// Fixed outer height of the "summary" cards in the top row (CPU, GPU, RAM,
@@ -523,7 +497,6 @@ fn column_count(avail: f32) -> usize {
 /// Each row is one `ui.horizontal`; a single-width card is allocated
 /// `col_width`, the double-width Storage card `2*col_width + GRID_GAP`. A card
 /// that would not fit in the columns left on the current row starts a new row.
-#[allow(clippy::too_many_arguments)]
 fn layout_cards(
     ui: &mut egui::Ui,
     app: &PerfApp,
@@ -532,7 +505,6 @@ fn layout_cards(
     spans: &[usize],
     cols: usize,
     col_width: f32,
-    density: LayoutDensity,
 ) {
     ui.spacing_mut().item_spacing = Vec2::splat(GRID_GAP);
 
@@ -563,17 +535,18 @@ fn layout_cards(
             ui.spacing_mut().item_spacing.x = GRID_GAP;
             for &i in &row_indices {
                 let span = spans[i];
-                let width = col_width * span as f32 + GRID_GAP * (span as f32 - 1.0);
+                let card_w = col_width * span as f32 + GRID_GAP * (span as f32 - 1.0);
+                let capacity = crate::ui::capacity::Capacity::from_card_width(card_w);
                 // Allocate sub-UI at the full row height so widgets inside
                 // (sparkline) see the true available_height and can grow to
                 // fill the card without leaving a chin at the bottom.
                 ui.allocate_ui_with_layout(
-                    Vec2::new(width, row_h),
+                    Vec2::new(card_w, row_h),
                     Layout::top_down(Align::Min),
                     |ui| {
-                        ui.set_width(width);
+                        ui.set_width(card_w);
                         ui.set_height(row_h);
-                        paint_card(ui, app, snap, cards[i], row_h, density);
+                        paint_card(ui, app, snap, cards[i], row_h, capacity);
                     },
                 );
             }
@@ -591,7 +564,7 @@ fn paint_card(
     snap: &crate::ipc::Snapshot,
     card: Card,
     min_h: f32,
-    density: LayoutDensity,
+    capacity: crate::ui::capacity::Capacity,
 ) {
     let theme = &app.theme;
     let unit = app.config.unit;
@@ -605,7 +578,7 @@ fn paint_card(
                     app.history.cpu.as_ref(),
                     unit,
                     app.config.cpu_heat_map,
-                    density,
+                    capacity,
                     min_h,
                 );
             }
@@ -618,7 +591,7 @@ fn paint_card(
                     gpu,
                     app.history.gpus.get(i),
                     unit,
-                    density,
+                    capacity,
                     min_h,
                 );
             }
@@ -627,7 +600,7 @@ fn paint_card(
             if let Some(igpu) = &snap.igpu {
                 // No history tracked for the iGPU yet — the panel renders
                 // without the trailing sparkline when `None`.
-                panels::gpu::gpu_panel(ui, theme, igpu, None, unit, density, min_h);
+                panels::gpu::gpu_panel(ui, theme, igpu, None, unit, capacity, min_h);
             }
         }
         Card::Ram => {
@@ -638,14 +611,14 @@ fn paint_card(
                     ram,
                     app.history.ram.as_ref(),
                     unit,
-                    density,
+                    capacity,
                     min_h,
                 );
             }
         }
         Card::Storage => {
             if let Some(disks) = &snap.storage {
-                panels::storage::storage_panel(ui, theme, disks, unit, min_h);
+                panels::storage::storage_panel(ui, theme, disks, unit, capacity, min_h);
             }
         }
         Card::Sensors => {
@@ -656,6 +629,7 @@ fn paint_card(
                 snap.fans.as_deref().unwrap_or(&[]),
                 snap.voltages.as_deref().unwrap_or(&[]),
                 unit,
+                capacity,
                 min_h,
             );
         }
@@ -665,12 +639,13 @@ fn paint_card(
                 theme,
                 snap.net.as_ref(),
                 app.history.network.as_ref(),
+                capacity,
                 min_h,
             );
         }
         Card::Battery => {
             if let Some(batt) = &snap.battery {
-                panels::battery::battery_panel(ui, theme, batt, min_h);
+                panels::battery::battery_panel(ui, theme, batt, capacity, min_h);
             }
         }
     }
