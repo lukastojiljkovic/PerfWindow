@@ -524,18 +524,23 @@ public static class SnapshotBuilder
 
     /// <summary>
     /// Reference-type section builder isolator. If <paramref name="fn"/> throws,
-    /// logs a one-liner to stderr (matching the existing sensord error format)
-    /// and returns <c>null</c> so the surrounding snapshot still emits. Callers
+    /// returns <c>null</c> so the surrounding snapshot still emits. Callers
     /// rely on a null section meaning "unavailable this tick" — the dashboard
     /// already tolerates absent fields, so a silent per-section drop is far
     /// preferable to aborting the whole snapshot and stalling the poll loop.
+    /// Under SCM the process has no stderr sink anyway, so logging here would
+    /// vanish into <c>NUL</c>; the visible signal is the absent section.
     /// </summary>
     private static T? TryBuild<T>(Func<T?> fn) where T : class
     {
         try { return fn(); }
-        catch (Exception ex)
+        catch (Exception)
         {
-            Console.Error.WriteLine($"sensord: section build failed: {ex.GetType().Name}: {ex.Message}");
+            // Catch-all: a per-section failure must not abort the whole snapshot.
+            // OOM/SOE remain effectively fatal in .NET regardless; everything else
+            // degrades that section to null while the rest of the snapshot still
+            // emits. The dashboard's "section absent" rendering is the user-visible
+            // signal.
             return null;
         }
     }
@@ -548,9 +553,13 @@ public static class SnapshotBuilder
     private static long? TryBuildValue(Func<long?> fn)
     {
         try { return fn(); }
-        catch (Exception ex)
+        catch (Exception)
         {
-            Console.Error.WriteLine($"sensord: section build failed: {ex.GetType().Name}: {ex.Message}");
+            // Catch-all: a per-section failure must not abort the whole snapshot.
+            // OOM/SOE remain effectively fatal in .NET regardless; everything else
+            // degrades that section to null while the rest of the snapshot still
+            // emits. The dashboard's "section absent" rendering is the user-visible
+            // signal.
             return null;
         }
     }
@@ -563,9 +572,13 @@ public static class SnapshotBuilder
     private static (List<FanInfo> fans, List<VoltageInfo> voltages) TryBuildBoardSensors(IHardware? motherboard)
     {
         try { return BuildBoardSensors(motherboard); }
-        catch (Exception ex)
+        catch (Exception)
         {
-            Console.Error.WriteLine($"sensord: section build failed: {ex.GetType().Name}: {ex.Message}");
+            // Catch-all: a per-section failure must not abort the whole snapshot.
+            // OOM/SOE remain effectively fatal in .NET regardless; everything else
+            // degrades that section to null while the rest of the snapshot still
+            // emits. The dashboard's "section absent" rendering is the user-visible
+            // signal.
             return (new List<FanInfo>(), new List<VoltageInfo>());
         }
     }
