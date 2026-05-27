@@ -5,10 +5,9 @@ use crate::format::{finite, format_uptime};
 use crate::ipc::BatteryInfo;
 use crate::theme::Theme;
 use crate::ui::capacity::Capacity;
-use crate::ui::tooltips::tip;
+use crate::ui::stat_priority::{render, StatCandidate};
 use crate::widgets::gauge::donut;
 use crate::widgets::health_color;
-use crate::widgets::stat::stat_row;
 
 /// Render the BATTERY card: charge donut on the left, four stat rows on the
 /// right (STATE, RATE, TIME, HEALTH). Missing readings render as `"—"`;
@@ -20,7 +19,7 @@ pub fn battery_panel(
     ui: &mut egui::Ui,
     theme: &Theme,
     batt: &BatteryInfo,
-    _capacity: Capacity,
+    capacity: Capacity,
     min_h: f32,
 ) {
     card(ui, theme, min_h, |ui| {
@@ -33,25 +32,64 @@ pub fn battery_panel(
                  controller via the Windows power API.",
             );
             ui.vertical(|ui| {
-                let (state_str, state_col) = format_state(batt.rate_w, theme);
-                tip(stat_row(ui, theme, "STATE", &state_str, state_col), "STATE");
-                tip(
-                    stat_row(ui, theme, "RATE", &format_rate(batt.rate_w), None),
-                    "RATE",
-                );
-                tip(
-                    stat_row(
-                        ui,
-                        theme,
-                        "TIME",
-                        &format_time_remaining(batt.time_remaining_sec, batt.rate_w),
-                        None,
-                    ),
-                    "TIME",
-                );
-                let (h_str, h_col) =
-                    format_health(batt.full_capacity_mwh, batt.design_capacity_mwh, theme);
-                tip(stat_row(ui, theme, "HEALTH", &h_str, h_col), "HEALTH");
+                let mut cands: Vec<StatCandidate> = Vec::new();
+
+                if let Some(pct) = batt.charge_pct {
+                    cands.push(StatCandidate {
+                        priority: 0,
+                        label: "REMAINING",
+                        value: format!("{} %", pct.round() as i64),
+                        color: None,
+                        tooltip_key: "REMAINING",
+                    });
+                }
+
+                if let Some(secs) = batt.time_remaining_sec.filter(|s| *s > 0) {
+                    cands.push(StatCandidate {
+                        priority: 1,
+                        label: "TIME",
+                        value: format_uptime(secs),
+                        color: None,
+                        tooltip_key: "TIME",
+                    });
+                }
+
+                if let Some(rate) = batt.rate_w {
+                    let (state, col) = if rate > 0.05 {
+                        ("CHARGING", Some(theme.ok))
+                    } else if rate < -0.05 {
+                        ("DISCHARGING", Some(theme.warn))
+                    } else {
+                        ("IDLE", Some(theme.ok))
+                    };
+                    cands.push(StatCandidate {
+                        priority: 2,
+                        label: "STATE",
+                        value: format!("{state}  {:.0} W", rate.abs()),
+                        color: col,
+                        tooltip_key: "STATE",
+                    });
+                }
+
+                if let (Some(design), Some(full)) =
+                    (batt.design_capacity_mwh, batt.full_capacity_mwh)
+                {
+                    if design > 0.0 {
+                        let wear = ((1.0 - full / design) * 100.0).max(0.0);
+                        // health_color expects "remaining life %" (higher = better),
+                        // so feed the inverse of wear.
+                        let col = health_color((100.0 - wear).max(0.0), theme);
+                        cands.push(StatCandidate {
+                            priority: 3,
+                            label: "WEAR",
+                            value: format!("{wear:.1} %"),
+                            color: Some(col),
+                            tooltip_key: "WEAR",
+                        });
+                    }
+                }
+
+                render(ui, theme, cands, capacity);
             });
         });
     });
@@ -60,6 +98,10 @@ pub fn battery_panel(
 /// Power-flow state shown in the STATE stat row, with a colour cue that
 /// matches the situation: green-ish ok while charging or on AC, warn while
 /// running on battery, dim when no reading is available.
+///
+/// Currently unused: the v0.9.0 priority-ranked renderer inlines the
+/// state+rate composition in the panel body. Kept for potential reuse.
+#[allow(dead_code)]
 fn format_state(rate_w: Option<f64>, theme: &Theme) -> (String, Option<egui::Color32>) {
     match finite(rate_w) {
         Some(w) if w > 0.05 => ("CHARGING".to_string(), Some(theme.ok)),
@@ -71,6 +113,10 @@ fn format_state(rate_w: Option<f64>, theme: &Theme) -> (String, Option<egui::Col
 
 /// Positive rate → `"\u{2191}12.4 W"`, negative → `"\u{2193}12.4 W"`,
 /// idle (on AC, no charge/discharge) → `"0 W"`, absent → `"—"`.
+///
+/// Currently unused: the v0.9.0 priority-ranked renderer folds rate into
+/// the STATE row. Kept for potential reuse.
+#[allow(dead_code)]
 fn format_rate(rate_w: Option<f64>) -> String {
     match finite(rate_w) {
         Some(w) if w > 0.05 => format!("\u{2191}{:.1} W", w),
@@ -83,6 +129,11 @@ fn format_rate(rate_w: Option<f64>) -> String {
 /// Show `"3h 14m"` while discharging; suppress (`"—"`) while charging,
 /// stopped, or with no reading — Windows' charging-side estimate is
 /// notoriously unreliable.
+///
+/// Currently unused: the v0.9.0 priority-ranked renderer surfaces TIME
+/// whenever the OS reports a positive estimate, regardless of direction.
+/// Kept for potential reuse.
+#[allow(dead_code)]
 fn format_time_remaining(secs: Option<i64>, rate_w: Option<f64>) -> String {
     let discharging = matches!(finite(rate_w), Some(w) if w < -0.05);
     match (discharging, secs) {
@@ -93,6 +144,10 @@ fn format_time_remaining(secs: Option<i64>, rate_w: Option<f64>) -> String {
 
 /// `"<full / design × 100>%"` with health-banded colour, or `"—"` when
 /// either capacity reading is missing.
+///
+/// Currently unused: the v0.9.0 priority-ranked renderer exposes WEAR
+/// (1 − full/design) instead of remaining HEALTH. Kept for potential reuse.
+#[allow(dead_code)]
 fn format_health(
     full_mwh: Option<f64>,
     design_mwh: Option<f64>,
