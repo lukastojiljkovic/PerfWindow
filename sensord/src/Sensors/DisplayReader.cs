@@ -4,53 +4,93 @@ using Sensord.Model;
 namespace Sensord.Sensors;
 
 /// <summary>
-/// Reads the primary monitor's current resolution and refresh rate via the
-/// Win32 <c>EnumDisplaySettings</c> API. Cheap (no driver, no kernel call),
-/// safe to invoke on every snapshot.
+/// Enumerates every attached monitor via <c>EnumDisplayMonitors</c> and reads
+/// each one's current mode through <c>EnumDisplaySettings</c>. The first
+/// returned entry is the primary display (matches <c>MONITORINFOEX.dwFlags
+/// MONITORINFOF_PRIMARY</c>).
 ///
-/// Returns <c>null</c> only when the Win32 call fails, which on Windows 10+
-/// only happens when no display is attached (headless / RDP without a virtual
-/// display) — in which case there is no display info to surface anyway.
+/// On a host process that is not DPI-aware, Win32 virtualises the display
+/// modes (you get the scaled desktop size, not the panel's native mode). The
+/// sensord service runs DPI-unaware by design — it's a background process
+/// with no UI — and routes the raw EnumDisplaySettings values up to the
+/// dashboard. The dashboard is the one that needs the PerMonitorV2 manifest
+/// (T9) to render those values correctly.
 /// </summary>
 public static class DisplayReader
 {
-    public static DisplayInfo? Read()
+    private const int ENUM_CURRENT_SETTINGS = -1;
+    private const uint MONITORINFOF_PRIMARY = 0x00000001;
+
+    public static IReadOnlyList<DisplayInfo> ReadAll()
     {
+        var results = new List<DisplayInfo>();
         try
         {
-            var devMode = new DEVMODE
-            {
-                dmSize = (ushort)Marshal.SizeOf<DEVMODE>(),
-            };
-            // device_name = null = primary display, ENUM_CURRENT_SETTINGS = -1
-            if (!EnumDisplaySettings(null, ENUM_CURRENT_SETTINGS, ref devMode))
-                return null;
-            return new DisplayInfo(
-                Width: devMode.dmPelsWidth,
-                Height: devMode.dmPelsHeight,
-                RefreshHz: devMode.dmDisplayFrequency);
+            EnumDisplayMonitors(IntPtr.Zero, IntPtr.Zero,
+                (IntPtr hMon, IntPtr _, ref RECT _, IntPtr _) =>
+                {
+                    var mi = new MONITORINFOEX { cbSize = Marshal.SizeOf<MONITORINFOEX>() };
+                    if (!GetMonitorInfo(hMon, ref mi)) return true;
+
+                    var dev = new DEVMODE { dmSize = (ushort)Marshal.SizeOf<DEVMODE>() };
+                    if (!EnumDisplaySettings(mi.szDevice, ENUM_CURRENT_SETTINGS, ref dev))
+                        return true;
+
+                    var info = new DisplayInfo(
+                        Name: mi.szDevice,
+                        Width: dev.dmPelsWidth,
+                        Height: dev.dmPelsHeight,
+                        RefreshHz: dev.dmDisplayFrequency);
+
+                    if ((mi.dwFlags & MONITORINFOF_PRIMARY) != 0)
+                        results.Insert(0, info);
+                    else
+                        results.Add(info);
+                    return true;
+                }, IntPtr.Zero);
         }
         catch
         {
-            return null;
+            // Fall through; return whatever we collected before the failure.
         }
+        return results;
     }
 
-    private const int ENUM_CURRENT_SETTINGS = -1;
+    /// <summary>Primary display only. Preserved for backward-compat with v0.8.x dashboards.</summary>
+    public static DisplayInfo? Read()
+    {
+        var all = ReadAll();
+        return all.Count > 0 ? all[0] : null;
+    }
+
+    private delegate bool MonitorEnumProc(IntPtr hMonitor, IntPtr hdc, ref RECT rect, IntPtr data);
+
+    [DllImport("user32.dll")]
+    private static extern bool EnumDisplayMonitors(IntPtr hdc, IntPtr lprcClip, MonitorEnumProc lpfn, IntPtr dwData);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, EntryPoint = "GetMonitorInfoW")]
+    private static extern bool GetMonitorInfo(IntPtr hMonitor, ref MONITORINFOEX lpmi);
 
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
     private static extern bool EnumDisplaySettings(string? deviceName, int modeNum, ref DEVMODE devMode);
 
-    /// <summary>
-    /// Subset of the Win32 <c>DEVMODEW</c> struct — only the fields we read.
-    /// Padding/order must match the full struct; the unused fields stay as
-    /// zero/empty bytes and are skipped by the marshaller.
-    /// </summary>
+    [StructLayout(LayoutKind.Sequential)]
+    private struct RECT { public int Left, Top, Right, Bottom; }
+
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    private struct MONITORINFOEX
+    {
+        public int cbSize;
+        public RECT rcMonitor;
+        public RECT rcWork;
+        public uint dwFlags;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)] public string szDevice;
+    }
+
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
     private struct DEVMODE
     {
-        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)]
-        public string dmDeviceName;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)] public string dmDeviceName;
         public ushort dmSpecVersion;
         public ushort dmDriverVersion;
         public ushort dmSize;
@@ -65,8 +105,7 @@ public static class DisplayReader
         public short dmYResolution;
         public short dmTTOption;
         public short dmCollate;
-        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)]
-        public string dmFormName;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)] public string dmFormName;
         public ushort dmLogPixels;
         public uint dmBitsPerPel;
         public int dmPelsWidth;
