@@ -117,3 +117,69 @@ fn sensord_service_emits_snapshots_over_pipe() {
 
     drop(child);
 }
+
+#[test]
+fn pipe_sensord_shutdown_terminates_child() {
+    let sensord = locate_sensord();
+    assert!(
+        sensord.exists(),
+        "sensord.exe missing at {}",
+        sensord.display()
+    );
+
+    let pipe = format!("PerfWindowSensorShutdownTest_{}", std::process::id());
+
+    let mut child = GuardedChild(
+        Command::new(&sensord)
+            .args(["--service", "--pipe-name", &pipe])
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("spawn sensord"),
+    );
+
+    // Wait for the pipe to be ready, then connect through PipeSensord::connect_to.
+    let pipe_path = format!(r"\\.\pipe\{pipe}");
+    let deadline = Instant::now() + Duration::from_secs(15);
+    let mut sensord_client = loop {
+        std::thread::sleep(Duration::from_millis(200));
+        match perfwindow::ipc::pipe::PipeSensord::connect_to(&pipe_path, || {}) {
+            Ok(s) => break s,
+            Err(_) if Instant::now() < deadline => continue,
+            Err(e) => {
+                let _ = child.0.kill();
+                panic!("pipe never came up within 15s: {e}");
+            }
+        }
+    };
+
+    // Send the shutdown signal.
+    sensord_client.shutdown();
+
+    // Drop the client to release our pipe handle entirely (belt-and-braces;
+    // shutdown already wrote the message and closed the writer).
+    drop(sensord_client);
+
+    // The worker must exit cleanly within 5 s.
+    let exit_deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        match child.0.try_wait() {
+            Ok(Some(status)) => {
+                assert!(
+                    status.success(),
+                    "sensord exited non-zero after shutdown: {status:?}"
+                );
+                return;
+            }
+            Ok(None) if Instant::now() < exit_deadline => {
+                std::thread::sleep(Duration::from_millis(100));
+                continue;
+            }
+            Ok(None) => {
+                let _ = child.0.kill();
+                panic!("sensord did not exit within 5s after shutdown");
+            }
+            Err(e) => panic!("try_wait failed: {e}"),
+        }
+    }
+}
