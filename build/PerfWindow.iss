@@ -256,11 +256,12 @@ begin
     HandlePawnIoFailure(ExitCode);
 end;
 
-{ Install the PerfWindow sensor service as a LocalSystem auto-start service.
-  Idempotent: `sc create` returns error 1073 (ERROR_SERVICE_EXISTS) on a
-  re-install; we treat that as success and let `sc start` continue.
-  The service hosts sensord.exe --service from the install directory,
-  talking to dashboards over the named pipe \\.\pipe\PerfWindowSensor. }
+{ Install the PerfWindow sensor service as a LocalSystem demand-start
+  service. The installer starts it once so the first dashboard launch
+  finds it up. Subsequent lifecycle: dashboard launches sc start
+  silently (the ACL grant lets a non-admin user do that without UAC);
+  the worker auto-stops 60 s after the last client disconnects.
+  Net effect: the service runs only while PerfWindow is open. }
 procedure InstallSensorService;
 var
   Cmd: String;
@@ -268,12 +269,20 @@ var
 begin
   WizardForm.StatusLabel.Caption := 'Installing PerfWindow sensor service...';
   Cmd := 'create PerfWindowSensor binPath= "\"' + ExpandConstant('{app}\sensord.exe') + '\" --service"'
-       + ' start= auto'
+       + ' start= demand'
        + ' DisplayName= "PerfWindow Sensor"'
        + ' obj= LocalSystem';
   Exec('sc.exe', Cmd, '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
   Exec('sc.exe',
-       'description PerfWindowSensor "Provides hardware sensor readings to PerfWindow."',
+       'description PerfWindowSensor "Provides hardware sensor readings to PerfWindow. Auto-starts when PerfWindow launches; auto-stops 60s after PerfWindow closes."',
+       '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  { Grant Authenticated Users SERVICE_START (RP) and SERVICE_STOP (WP)
+    so the dashboard can manage the service lifecycle without UAC.
+    The rest of the SDDL is the Windows default for new services
+    (LocalSystem full control, Administrators full control, Interactive
+    Users + Service Logon read+query). }
+  Exec('sc.exe',
+       'sdset PerfWindowSensor "D:(A;;CCLCSWRPWPDTLOCRRC;;;SY)(A;;CCDCLCSWRPWPDTLOCRSDRCWDWO;;;BA)(A;;CCLCSWLOCRRC;;;IU)(A;;CCLCSWLOCRRC;;;SU)(A;;RPWP;;;AU)"',
        '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
   Exec('sc.exe', 'start PerfWindowSensor', '',
        SW_HIDE, ewWaitUntilTerminated, ResultCode);

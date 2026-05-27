@@ -7,6 +7,38 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ## [Unreleased]
 
+## [0.8.1] — 2026-05-27
+
+A **hotfix** release.
+
+### Fixed
+
+- **Hang on close** when shutting down the dashboard. The pipe client's
+  `Drop` impl was joining the reader thread, which was blocked reading
+  the pipe with its own file handle keeping the pipe open — the join
+  would never return. Process exit hung; Windows would force-kill it
+  after a few seconds and the user saw a "Not Responding" / crash. The
+  reader thread is now detached on drop; the OS reaps it on process
+  exit and the server detects the disconnect from its own side.
+
+### Changed
+
+- **Sensor service no longer runs in the background when PerfWindow is
+  closed.** v0.8.0 left `PerfWindowSensor` running 24/7 as
+  LocalSystem (idle, ~15 MB RAM, 0 % CPU). v0.8.1 switches the service
+  to demand-start with three small changes:
+  - Installer grants `Authenticated Users` the `SERVICE_START` and
+    `SERVICE_STOP` permissions via SDDL, so the non-elevated dashboard
+    can manage the service lifecycle without UAC.
+  - Dashboard silently runs `sc start PerfWindowSensor` on launch
+    (idempotent; if the service is already running, sc returns 1056
+    and we proceed straight to the pipe open).
+  - The worker auto-stops 60 s after the last client disconnects.
+  Net effect: opening the dashboard brings the service up tiny-amount
+  faster than v0.7.0 felt; closing the dashboard reliably tears it
+  down. No more sensord process visible in Task Manager when PerfWindow
+  is closed.
+
 ## [0.8.0] — 2026-05-27
 
 A **service architecture** release: `sensord` moves out of a child process
@@ -481,7 +513,9 @@ User-facing application behaviour is unchanged.
   matching uninstaller that removes the exclusions, the `R0sensord` driver
   service, the install directory and the per-user data directory.
 
-[Unreleased]: https://github.com/lukastojiljkovic/PerfWindow/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/lukastojiljkovic/PerfWindow/compare/v0.8.1...HEAD
+[0.8.1]: https://github.com/lukastojiljkovic/PerfWindow/releases/tag/v0.8.1
+[0.8.0]: https://github.com/lukastojiljkovic/PerfWindow/releases/tag/v0.8.0
 [0.7.0]: https://github.com/lukastojiljkovic/PerfWindow/releases/tag/v0.7.0
 [0.6.1]: https://github.com/lukastojiljkovic/PerfWindow/releases/tag/v0.6.1
 [0.6.0]: https://github.com/lukastojiljkovic/PerfWindow/releases/tag/v0.6.0

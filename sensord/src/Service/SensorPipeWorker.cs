@@ -22,6 +22,7 @@ internal sealed class SensorPipeWorker : BackgroundService
     private readonly string _pipeName;
     private int _intervalMs = 1000;
     private HealthInfo? _health;
+    private bool _everConnected;
 
     public SensorPipeWorker(ILogger<SensorPipeWorker> log, string pipeName)
     {
@@ -45,8 +46,27 @@ internal sealed class SensorPipeWorker : BackgroundService
             {
                 await using var pipe = PipeServer.Create(_pipeName);
                 _log.LogInformation("Waiting for client on {Pipe}", _pipeName);
-                await pipe.WaitForConnectionAsync(stoppingToken);
+
+                using var acceptCts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
+                if (_everConnected)
+                {
+                    // After the first client, exit cleanly if no new client arrives within 60s.
+                    // Dashboard re-starts the service on next launch.
+                    acceptCts.CancelAfter(TimeSpan.FromSeconds(60));
+                }
+
+                try
+                {
+                    await pipe.WaitForConnectionAsync(acceptCts.Token);
+                }
+                catch (OperationCanceledException) when (!stoppingToken.IsCancellationRequested)
+                {
+                    _log.LogInformation("Idle 60s after last client, stopping service");
+                    return;
+                }
+
                 _log.LogInformation("Client connected");
+                _everConnected = true;
                 await ServeOne(pipe, monitor, diskInfo, stoppingToken);
                 _log.LogInformation("Client disconnected, reopening pipe");
             }
