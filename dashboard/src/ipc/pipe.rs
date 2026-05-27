@@ -107,11 +107,20 @@ impl PipeSensord {
 
 impl Drop for PipeSensord {
     fn drop(&mut self) {
-        // Drop writer first so the server side sees EOF and stops its reader loop.
+        // Drop the writer handle so the server's reader-side sees EOF.
+        // We deliberately do NOT join the reader thread: it is blocked in
+        // BufReader::lines() and the only way to unblock it would be to
+        // close the pipe, but the reader's own File handle (moved into
+        // the closure) keeps the client side open after we drop the
+        // writer above. Joining would deadlock; we'd need
+        // CancelSynchronousIo against the reader thread to truly interrupt
+        // the read, which is more complexity than the win is worth.
+        //
+        // Instead: drop the JoinHandle, which detaches the thread. The OS
+        // reaps it on process exit, the reader's pipe handle closes, the
+        // server-side I/O returns IOException, and the server cleans up.
         self.writer.take();
-        if let Some(reader) = self.reader.take() {
-            let _ = reader.join();
-        }
+        let _ = self.reader.take();
     }
 }
 
