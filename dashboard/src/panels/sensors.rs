@@ -93,9 +93,7 @@ pub fn sensors_panel(
         items.truncate(capacity.rows);
 
         if capacity.columns >= 2 {
-            // First half goes in the left column, second half in the right —
-            // mirrors the v0.8.x two-up layout but with a ranked-and-trimmed
-            // candidate set instead of every reading.
+            // First half goes in the left column, second half in the right.
             let split = items.len().div_ceil(2);
             ui.columns(2, |cols| {
                 for (_, label, val, col) in &items[..split] {

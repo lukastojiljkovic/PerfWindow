@@ -7,6 +7,92 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ## [Unreleased]
 
+## [0.9.3] — 2026-05-28
+
+A **crash diagnostics + hardening** hotfix. 0.9.1 and 0.9.2 were crashing on
+some machines with an opaque `STATUS_STACK_BUFFER_OVERRUN` (0xc0000409) in
+Event Log a few seconds after launch and no other breadcrumb. Without a
+panic message we could only narrow the cause from a code review, so this
+release adds an in-process panic log, defensive guards in the widget layer
+against the likely-degenerate-Rect class of failure, and fixes a
+service-side crash that was firing on every clean shutdown.
+
+### Added
+
+- **`%APPDATA%\PerfWindow\panic.log`**: every Rust `panic!` now appends a
+  timestamped entry (location, message, full backtrace) before the process
+  tears down. The previous behaviour — `windows_subsystem = "windows"`
+  swallowing stderr and the OS reporting only an opaque fault offset — made
+  a postmortem essentially impossible. Stack-buffer-overrun aborts that
+  bypass `panic!` won't reach the log, but a double-panic *will* leave at
+  least the inner panic message before the outer `abort()`.
+
+### Fixed
+
+- **Sensor service no longer crashes on every clean shutdown.**
+  `ServeOne`'s writer was disposed via `using var`, which synchronously
+  flushes — and flushing a closed pipe (the normal path when the dashboard
+  exits) throws `IOException: Pipe is broken`. The exception escaped
+  `ExecuteAsync` and surfaced as "BackgroundService failed" in Event Log
+  every single time. Dispose is now manual with that flush failure
+  swallowed. Defensive try/catch wrapped around `pipe.DisposeAsync()` and
+  `HardwareMonitor.Dispose()` in the same `finally` block.
+- **Topology-change monitor reconstruction is now retried-on-fail instead
+  of swap-then-lose.** Previously a failing `new HardwareMonitor()` after a
+  topology change would still go through `monitorRef.Monitor = newMonitor`
+  before the throw, losing the previous (working) monitor for the rest of
+  the session. The new monitor is held in a local first; only if its
+  construction succeeds does the swap-and-dispose happen.
+- **Settings → refresh-rate change no longer silently fails on a broken
+  pipe.** `PipeSensord::set_interval` was `let _ = writeln!(...)` and the
+  user got unchanged poll cadence with no signal. The write now drops the
+  writer on `BrokenPipe`/I/O error and flips the shared `alive` flag so the
+  next `ingest()` pass promotes `Status` to `SensordDown` and the error
+  overlay is reachable.
+- **Defensive NaN / negative-width guards in `widgets/sparkline.rs`,
+  `widgets/bars.rs`, `widgets/stat.rs`.** Each widget's
+  `allocate_exact_size` now rejects non-finite or non-positive widths
+  *before* they reach the egui tessellator, which on Windows MSVC
+  release-LTO builds can `__fastfail` (STATUS_STACK_BUFFER_OVERRUN) on a
+  degenerate `Rect` instead of producing a recoverable Rust panic. This is
+  the most plausible class of failure behind the 0.9.1/0.9.2 startup
+  crashes; the panic log added in this release will confirm or rule it out
+  on the next reproduction.
+- **`Running` state with no first snapshot no longer hangs the loading
+  screen forever.** When the connect machine emits `Ready` but the first
+  NDJSON line never arrives (rare: sensord dies between accept and first
+  write), the dashboard now demotes to `SensordDown` after 30 s so the
+  RESPAWN overlay becomes reachable.
+
+### Changed
+
+- **Loading screen's RETRY / EXIT row stacks vertically on sub-240 px
+  windows** instead of overflowing the available width. Replaces the
+  previous "clamp the cursor offset to 0" workaround which still let the
+  two buttons sit on one row when they didn't fit.
+- **Diagnostic `sensord.exe --probe` scans for the PawnIO service** in
+  addition to WinRing0 / SystemTemp paths. Older builds only knew about
+  WinRing0 even though LHM 0.9.5+ has used PawnIO since 0.5.1.
+
+### Internal
+
+- **`.vscode/` added to `.gitignore`** (was already implied for `.vs/`,
+  `.idea/`).
+- **Test `apply_config_change_updates_*` renamed to
+  `config_*_field_is_writable`** — the previous names implied the tests
+  exercised `apply_config_change`, which they did not (they only assert
+  the underlying `Config` field round-trips through the `&mut` borrow).
+- **Stripped historic `v0.8.x` references** from `panels/battery.rs`,
+  `panels/sensors.rs`, `panels/storage.rs`, `ui/capacity.rs`,
+  `ui/stat_priority.rs`, `ipc/pipe.rs`, `theme/mod.rs` test, and
+  `sensord/Sensors/DisplayReader.cs`. The version pins were not pulling
+  weight beyond the history they implied; CHANGELOG remains the
+  authoritative source.
+- Doc fixes: `pipe::connect()` is documented as the production respawn
+  path (not "retained for tests only" — it's called by
+  `PerfApp::respawn_sensord` from the RESPAWN button on the sensord-down
+  overlay); `MonitorRef` nullable rationale added.
+
 ## [0.9.2] — 2026-05-28
 
 A **stability** hotfix focused on the dashboard-startup window and a class of
@@ -673,7 +759,8 @@ User-facing application behaviour is unchanged.
   matching uninstaller that removes the exclusions, the `R0sensord` driver
   service, the install directory and the per-user data directory.
 
-[Unreleased]: https://github.com/lukastojiljkovic/PerfWindow/compare/v0.9.2...HEAD
+[Unreleased]: https://github.com/lukastojiljkovic/PerfWindow/compare/v0.9.3...HEAD
+[0.9.3]: https://github.com/lukastojiljkovic/PerfWindow/releases/tag/v0.9.3
 [0.9.2]: https://github.com/lukastojiljkovic/PerfWindow/releases/tag/v0.9.2
 [0.9.1]: https://github.com/lukastojiljkovic/PerfWindow/releases/tag/v0.9.1
 [0.9.0]: https://github.com/lukastojiljkovic/PerfWindow/releases/tag/v0.9.0

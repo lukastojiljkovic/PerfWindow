@@ -67,9 +67,21 @@ pub struct PerfApp {
     /// hiding it for the rest of the session even if the degraded condition
     /// persists. Reset on next launch (not persisted).
     pub health_banner_dismissed: bool,
+    /// Timestamp of the most recent transition into [`Status::Running`]. Used
+    /// by [`Self::ingest`] to detect a "running but never got a snapshot"
+    /// stall: if a sensord client connects but dies before the first NDJSON
+    /// line arrives, the alive flag may not flip cleanly before the OS reaps
+    /// the reader thread, leaving the dashboard stuck on the loading screen.
+    /// After 30 s in that state we demote to `SensordDown` so the error
+    /// overlay's RESPAWN button is reachable.
+    pub running_since: Option<std::time::Instant>,
     update_source: Arc<GitHubReleaseSource>,
     os_is_light: bool,
 }
+
+/// Deadline for receiving the first snapshot after the connect machine has
+/// emitted `Ready`. See [`PerfApp::running_since`].
+const FIRST_SNAPSHOT_DEADLINE: std::time::Duration = std::time::Duration::from_secs(30);
 
 impl PerfApp {
     pub fn new(cc: &eframe::CreationContext<'_>, dev_mode: bool) -> Self {
@@ -115,6 +127,10 @@ impl PerfApp {
             });
         }
 
+        // Dev mode reaches Running synchronously inside `new`; record the
+        // start time so the no-first-snapshot deadline applies there too.
+        let running_since = matches!(status, Status::Running).then(std::time::Instant::now);
+
         let mut app = Self {
             config,
             theme,
@@ -139,6 +155,7 @@ impl PerfApp {
             applied_on_top: false,
             fullscreen: false,
             health_banner_dismissed: false,
+            running_since,
             update_source,
             os_is_light,
         };
@@ -251,6 +268,8 @@ impl PerfApp {
             Status::SensordDown
         };
         self.latest = None;
+        self.running_since = matches!(self.status, Status::Running)
+            .then(std::time::Instant::now);
         if let Some(sensord) = &mut self.sensord {
             sensord.set_interval(self.config.refresh.as_millis());
         }
@@ -279,17 +298,38 @@ impl PerfApp {
             // throughout the 5-15 s the service takes to come up.
             if !matches!(self.status, Status::Connecting(_)) {
                 self.status = Status::SensordDown;
+                self.running_since = None;
             }
             return;
         };
         if let Ok(state) = sensord.state().lock() {
             if !state.alive {
                 self.status = Status::SensordDown;
+                self.running_since = None;
             }
             if let Some(snap) = &state.latest {
                 if self.latest.as_ref().map(|p| p.ts) != Some(snap.ts) {
                     self.history.record(snap);
                     self.latest = Some(snap.clone());
+                    // First snapshot landed — clear the deadline so future
+                    // gaps don't trip the no-first-snapshot demotion below.
+                    self.running_since = None;
+                }
+            }
+        }
+        // Demote to SensordDown if we've been Running long past the deadline
+        // without ever seeing a snapshot — covers the race where sensord
+        // accepts the client, dies before sending anything, and the reader
+        // thread's alive flag hasn't been flipped yet.
+        if matches!(self.status, Status::Running) && self.latest.is_none() {
+            if let Some(t) = self.running_since {
+                if t.elapsed() > FIRST_SNAPSHOT_DEADLINE {
+                    eprintln!(
+                        "PerfWindow: no snapshot within {:?} of Running; demoting to SensordDown",
+                        FIRST_SNAPSHOT_DEADLINE
+                    );
+                    self.status = Status::SensordDown;
+                    self.running_since = None;
                 }
             }
         }
@@ -304,6 +344,7 @@ impl PerfApp {
         let (_phase, rx) = crate::ipc::connect::spawn_connect(move || repaint.request_repaint());
         self.connect_rx = Some(rx);
         self.status = Status::Connecting(crate::ipc::connect::ConnectPhase::OpeningPipe);
+        self.running_since = None;
     }
 
     /// Drain pending connect events from the worker thread, advancing
@@ -325,6 +366,7 @@ impl PerfApp {
                     s.set_interval(self.config.refresh.as_millis());
                     self.sensord = Some(s);
                     self.status = Status::Running;
+                    self.running_since = Some(std::time::Instant::now());
                     self.connect_rx = None;
                     break;
                 }
@@ -380,6 +422,7 @@ impl PerfApp {
             applied_on_top: false,
             fullscreen: false,
             health_banner_dismissed: false,
+            running_since: None,
             update_source: Arc::new(GitHubReleaseSource::new(OWNER, REPO)),
             os_is_light: false,
             config,
@@ -482,7 +525,7 @@ mod tests {
     use crate::format::TempUnit;
 
     #[test]
-    fn apply_config_change_updates_theme() {
+    fn config_theme_field_is_writable() {
         let cfg = Config {
             theme: ThemeId::Amber,
             ..Config::default()
@@ -493,14 +536,14 @@ mod tests {
     }
 
     #[test]
-    fn apply_config_change_updates_unit() {
+    fn config_unit_field_is_writable() {
         let mut app = PerfApp::for_tests(Config::default());
         app.config.unit = TempUnit::Fahrenheit;
         assert_eq!(app.config.unit, TempUnit::Fahrenheit);
     }
 
     #[test]
-    fn apply_config_change_updates_refresh_rate() {
+    fn config_refresh_field_is_writable() {
         let mut app = PerfApp::for_tests(Config::default());
         app.config.refresh = RefreshRate::S5;
         assert_eq!(app.config.refresh, RefreshRate::S5);

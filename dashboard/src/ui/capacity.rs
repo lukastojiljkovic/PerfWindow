@@ -2,10 +2,8 @@
 //!
 //! `rows` is the maximum number of priority-ranked stat rows a panel should
 //! emit; `columns` is whether to render them in a 2-column split or stacked
-//! single-column. Replaces the v0.8.x binary `LayoutDensity` enum: instead
-//! of a coarse "drop these specific rows in Compact mode" flag, each panel
-//! publishes a ranked candidate list and the renderer selects as many top
-//! priorities as `rows` allows.
+//! single-column. Each panel publishes a ranked candidate list and the
+//! renderer selects as many top priorities as `rows` allows.
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Capacity {

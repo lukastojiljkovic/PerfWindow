@@ -69,10 +69,12 @@ fn try_start_service() {
 }
 
 impl PipeSensord {
-    /// Legacy single-shot connect path retained for tests: open the pipe,
-    /// best-effort start the service if the pipe is missing, retry. Production
-    /// callers use the state machine in `connect.rs`, which routes the same
-    /// open through a UAC step and surfaces phase updates to the UI.
+    /// Single-shot connect: open the pipe, best-effort start the service if
+    /// the pipe is missing, retry. Used by `PerfApp::respawn_sensord` (the
+    /// RESPAWN button on the sensord-down overlay) and by integration tests.
+    /// The initial launch path goes through `connect.rs`'s state machine
+    /// instead, which routes the same open through a UAC step and surfaces
+    /// phase updates to the loading screen.
     pub fn connect(repaint: impl Fn() + Send + 'static) -> Result<Self, ConnectError> {
         let read = match Self::open_pipe_at(PIPE_PATH) {
             Ok(f) => f,
@@ -167,8 +169,18 @@ impl PipeSensord {
     }
 
     pub fn set_interval(&mut self, ms: u32) {
-        if let Some(w) = &mut self.writer {
-            let _ = writeln!(w, "{{\"interval_ms\":{ms}}}");
+        let Some(w) = &mut self.writer else { return };
+        if let Err(e) = writeln!(w, "{{\"interval_ms\":{ms}}}") {
+            // Pipe broken (sensord exited): drop our writer so subsequent
+            // calls are no-ops and flip `alive` so the next `ingest()` pass
+            // promotes status to `SensordDown` — without this the Settings
+            // refresh-rate change silently fails and the user is left
+            // staring at unchanged poll cadence with no signal.
+            eprintln!("PerfWindow: set_interval write failed: {e}");
+            self.writer = None;
+            if let Ok(mut s) = self.state.lock() {
+                s.alive = false;
+            }
         }
     }
 
@@ -189,8 +201,10 @@ impl PipeSensord {
             let _ = writeln!(w, "{{\"shutdown\":true}}");
             // `w` drops here, closing our writer half of the pipe.
         }
-        // The reader thread is detached (see Drop history); drop the JoinHandle
-        // without joining, exactly as Drop has done since v0.8.1.
+        // The reader thread is detached; drop the JoinHandle without joining.
+        // Joining would deadlock because the thread blocks in `BufReader::lines`
+        // on a pipe handle that only closes once we drop the writer above —
+        // but here we are *being* the drop path.
         let _ = self.reader.take();
     }
 }

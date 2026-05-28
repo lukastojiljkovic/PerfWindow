@@ -42,9 +42,7 @@ pub fn storage_panel(
 ) {
     // Storage card is laid out with a minimum span of 2 columns (see
     // `layout_spans` in ui/mod.rs), so its allocated width is always wide
-    // enough to fit the TEMP column. Dropping the capacity-based gate
-    // restores the v0.8.x behaviour where the per-disk temperature is part
-    // of the row even at the narrowest viable window.
+    // enough to fit the TEMP column at every viable window size.
     let show_temp = true;
 
     card(ui, theme, min_h, |ui| {

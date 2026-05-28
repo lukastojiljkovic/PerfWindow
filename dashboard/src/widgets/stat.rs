@@ -22,6 +22,13 @@ pub fn stat_row(
     value_color: Option<Color32>,
 ) -> Response {
     let available_w = ui.available_width();
+    // Reject NaN / non-positive width before it reaches the tessellator
+    // (see widgets/sparkline.rs for the failure mode — wgpu epaint can abort
+    // on a degenerate Rect in release-LTO builds).
+    if !available_w.is_finite() || available_w <= 0.0 {
+        let (_, response) = ui.allocate_exact_size(Vec2::new(0.0, ROW_H), Sense::hover());
+        return response;
+    }
     let (rect, response) = ui.allocate_exact_size(Vec2::new(available_w, ROW_H), Sense::hover());
 
     if !ui.is_rect_visible(rect) {

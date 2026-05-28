@@ -27,6 +27,7 @@ sensord/**/obj/
 Thumbs.db
 .DS_Store
 .vs/
+.vscode/
 .idea/
 *.user
 *.swp

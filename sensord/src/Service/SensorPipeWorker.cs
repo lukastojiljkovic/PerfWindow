@@ -63,6 +63,10 @@ internal sealed class SensorPipeWorker : BackgroundService
         //      with the client already attached.
         // Every step is wrapped: an uncaught throw before the first `await`
         // would surface as a synchronous SCM failure with no log breadcrumbs.
+        // Both holders below are nullable because they are initialised inside
+        // the try block (after `WaitForConnectionAsync` returns) and the
+        // finally needs to clean up whatever was actually built — possibly
+        // nothing, if pipe creation or the client-accept step failed first.
         NamedPipeServerStream? pipe = null;
         MonitorRef? monitorRef = null;
         try
@@ -131,9 +135,19 @@ internal sealed class SensorPipeWorker : BackgroundService
         }
         finally
         {
-            monitorRef?.Monitor.Dispose();
+            // Defensive disposal: any throw in finally would mask the original
+            // exception (or, if there is none, crash the host on a clean
+            // shutdown). LHM's Computer.Close and a broken-pipe DisposeAsync
+            // are both known throwers.
+            try { monitorRef?.Monitor.Dispose(); }
+            catch (Exception ex) { _log.LogWarning(ex, "HardwareMonitor.Dispose threw"); }
+
             if (pipe is not null)
-                await pipe.DisposeAsync();
+            {
+                try { await pipe.DisposeAsync(); }
+                catch (IOException) { /* peer gone */ }
+                catch (Exception ex) { _log.LogWarning(ex, "pipe.DisposeAsync threw"); }
+            }
             // BackgroundService.ExecuteAsync completing normally does NOT stop
             // the host in .NET 8 — the process would idle forever with no
             // hosted work. Explicitly request shutdown so the service exits
@@ -190,7 +204,13 @@ internal sealed class SensorPipeWorker : BackgroundService
         CancellationToken token)
     {
         using var clientCts = CancellationTokenSource.CreateLinkedTokenSource(token);
-        using var writer = new StreamWriter(
+        // Plain `var` (not `using var`) because `StreamWriter.Dispose()`
+        // synchronously flushes, and flushing a closed pipe throws
+        // `IOException: Pipe is broken` — which would otherwise propagate
+        // out of ServeOne and surface as a BackgroundService crash in Event
+        // Log on every normal client disconnect. Dispose is done manually in
+        // the finally below with that flush failure swallowed.
+        var writer = new StreamWriter(
             pipe, new UTF8Encoding(false), bufferSize: 8192, leaveOpen: true)
         {
             AutoFlush = true,
@@ -212,56 +232,78 @@ internal sealed class SensorPipeWorker : BackgroundService
         HashSet<string> currentIds = TopologySignature.IdentifierSet(monitorRef.Monitor.Refresh());
         var currentDiskInfo = diskInfo;
 
-        while (!clientCts.Token.IsCancellationRequested)
+        try
         {
-            try
+            while (!clientCts.Token.IsCancellationRequested)
             {
-                var hardware = monitorRef.Monitor.Refresh();
-
-                if (++tickCounter >= 5)
+                try
                 {
-                    tickCounter = 0;
-                    var newIds = TopologySignature.IdentifierSet(hardware);
-                    if (!newIds.SetEquals(currentIds))
+                    var hardware = monitorRef.Monitor.Refresh();
+
+                    if (++tickCounter >= 5)
                     {
-                        var added = string.Join(",", newIds.Except(currentIds));
-                        var removed = string.Join(",", currentIds.Except(newIds));
-                        _log.LogInformation(
-                            "Topology change detected (added=[{Added}] removed=[{Removed}]); recreating monitor",
-                            added, removed);
+                        tickCounter = 0;
+                        var newIds = TopologySignature.IdentifierSet(hardware);
+                        if (!newIds.SetEquals(currentIds))
+                        {
+                            var added = string.Join(",", newIds.Except(currentIds));
+                            var removed = string.Join(",", currentIds.Except(newIds));
+                            _log.LogInformation(
+                                "Topology change detected (added=[{Added}] removed=[{Removed}]); recreating monitor",
+                                added, removed);
 
-                        // Construct first so a Computer.Open() failure leaves the old (working)
-                        // monitor in place; the next 5-tick window will retry the topology check.
-                        var newMonitor = new HardwareMonitor();
-                        var oldMonitor = monitorRef.Monitor;
-                        monitorRef.Monitor = newMonitor;
-                        oldMonitor.Dispose();
-                        currentDiskInfo = DiskInfoReader.Read();
-                        hardware = monitorRef.Monitor.Refresh();
-                        currentIds = TopologySignature.IdentifierSet(hardware);
+                            // Construct first so a failure leaves the old monitor in
+                            // place; the next 5-tick window will retry the topology check.
+                            HardwareMonitor? newMonitor = null;
+                            try
+                            {
+                                newMonitor = new HardwareMonitor();
+                            }
+                            catch (Exception ctorEx) when (ctorEx is not OperationCanceledException)
+                            {
+                                _log.LogWarning(ctorEx,
+                                    "topology-change monitor reconstruction failed; keeping previous monitor");
+                            }
+
+                            if (newMonitor is not null)
+                            {
+                                var oldMonitor = monitorRef.Monitor;
+                                monitorRef.Monitor = newMonitor;
+                                oldMonitor.Dispose();
+                                currentDiskInfo = DiskInfoReader.Read();
+                                hardware = monitorRef.Monitor.Refresh();
+                                currentIds = TopologySignature.IdentifierSet(hardware);
+                            }
+                        }
                     }
-                }
 
-                Snapshot snap = SnapshotBuilder.Build(
-                    hardware, PagefileReader.Read(), LinkSpeeds(), currentDiskInfo)
-                    with
-                { Health = _health };
-                string json = JsonSerializer.Serialize(snap, SensordJsonContext.Default.Snapshot);
-                await writer.WriteLineAsync(json);
-                await Task.Delay(_intervalMs, clientCts.Token);
+                    Snapshot snap = SnapshotBuilder.Build(
+                        hardware, PagefileReader.Read(), LinkSpeeds(), currentDiskInfo)
+                        with
+                    { Health = _health };
+                    string json = JsonSerializer.Serialize(snap, SensordJsonContext.Default.Snapshot);
+                    await writer.WriteLineAsync(json);
+                    await Task.Delay(_intervalMs, clientCts.Token);
+                }
+                catch (IOException) { return; }
+                catch (OperationCanceledException)
+                {
+                    // Task.Delay observed clientCts.Cancel(); shutdown requested.
+                    return;
+                }
+                catch (Exception ex)
+                {
+                    _log.LogError(ex, "snapshot emit error");
+                    try { await Task.Delay(1000, clientCts.Token); }
+                    catch (OperationCanceledException) { return; }
+                }
             }
-            catch (IOException) { return; }
-            catch (OperationCanceledException)
-            {
-                // Task.Delay observed clientCts.Cancel(); shutdown requested.
-                return;
-            }
-            catch (Exception ex)
-            {
-                _log.LogError(ex, "snapshot emit error");
-                try { await Task.Delay(1000, clientCts.Token); }
-                catch (OperationCanceledException) { return; }
-            }
+        }
+        finally
+        {
+            // See the writer-construction comment: flushing a broken pipe
+            // would otherwise crash the service on every clean shutdown.
+            try { writer.Dispose(); } catch (IOException) { /* peer gone */ }
         }
     }
 
