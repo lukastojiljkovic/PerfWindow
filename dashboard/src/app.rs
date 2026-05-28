@@ -268,8 +268,7 @@ impl PerfApp {
             Status::SensordDown
         };
         self.latest = None;
-        self.running_since = matches!(self.status, Status::Running)
-            .then(std::time::Instant::now);
+        self.running_since = matches!(self.status, Status::Running).then(std::time::Instant::now);
         if let Some(sensord) = &mut self.sensord {
             sensord.set_interval(self.config.refresh.as_millis());
         }

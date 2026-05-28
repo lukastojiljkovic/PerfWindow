@@ -10,8 +10,7 @@ pub fn bar_meter(ui: &mut egui::Ui, theme: &Theme, fraction: f32, warn: bool) ->
     // Reject NaN / negative width before it reaches the tessellator (see the
     // sparkline comment for the failure mode — abort, not a panic).
     if !available_w.is_finite() || available_w <= 0.0 {
-        let (_, response) =
-            ui.allocate_exact_size(Vec2::new(0.0, 6.0), Sense::hover());
+        let (_, response) = ui.allocate_exact_size(Vec2::new(0.0, 6.0), Sense::hover());
         return response;
     }
     let (rect, response) = ui.allocate_exact_size(Vec2::new(available_w, 6.0), Sense::hover());

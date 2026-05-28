@@ -79,11 +79,7 @@ fn write_panic_entry(info: &std::panic::PanicHookInfo<'_>) {
         .payload()
         .downcast_ref::<&str>()
         .copied()
-        .or_else(|| {
-            info.payload()
-                .downcast_ref::<String>()
-                .map(String::as_str)
-        })
+        .or_else(|| info.payload().downcast_ref::<String>().map(String::as_str))
         .unwrap_or("<non-string panic payload>");
     let location = info
         .location()
