@@ -234,8 +234,7 @@ struct ExceptionPointers {
     context_record: PVOID,
 }
 
-type UnhandledExceptionFilter =
-    Option<unsafe extern "system" fn(*mut ExceptionPointers) -> LONG>;
+type UnhandledExceptionFilter = Option<unsafe extern "system" fn(*mut ExceptionPointers) -> LONG>;
 
 const EXCEPTION_CONTINUE_SEARCH: LONG = 0;
 
