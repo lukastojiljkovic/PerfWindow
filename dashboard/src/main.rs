@@ -5,12 +5,18 @@ use perfwindow::app::PerfApp;
 use perfwindow::config::Config;
 
 fn main() -> eframe::Result {
-    // Capture any panic to `%APPDATA%\PerfWindow\panic.log` with a backtrace.
-    // Release builds run with `windows_subsystem = "windows"` so stderr goes
-    // nowhere and the OS surfaces only an opaque STATUS_STACK_BUFFER_OVERRUN
-    // (0xc0000409) in Event Viewer — without this hook a panic is effectively
-    // un-diagnosable in the field.
+    // Two complementary crash recorders, both writing to
+    // `%APPDATA%\PerfWindow\panic.log`:
+    //   * `install_panic_log` — catches `panic!()` / `unreachable!()` /
+    //     `assert!()` (the Rust panic path).
+    //   * `install_seh_handler` — catches Win32 structured exceptions
+    //     (0xc0000409 STATUS_STACK_BUFFER_OVERRUN among them) that come from
+    //     stack-canary failures, heap corruption, or native code calling
+    //     `__fastfail` directly; the Rust panic hook NEVER fires for those.
+    // Order: SEH first so the startup marker below is bracketed by both.
     install_panic_log();
+    install_seh_handler();
+    write_startup_marker();
 
     // `--dev` swaps the production named-pipe client for the legacy
     // child-spawn path (no installed Windows service required) — useful for
@@ -149,4 +155,191 @@ fn days_to_ymd(mut days: u64) -> (i32, u32, u32) {
     let m = if mp < 10 { mp + 3 } else { mp - 9 };
     let year = if m <= 2 { y + 1 } else { y };
     (year as i32, m as u32, d as u32)
+}
+
+/// Write a "process started" line to `panic.log` so a postmortem can
+/// distinguish "binary never launched" (PE loader / VC++ runtime missing)
+/// from "binary launched then crashed". Appended, so successive launches
+/// stack up — useful for matching a crash entry below to the launch that
+/// produced it.
+fn write_startup_marker() {
+    use std::io::Write;
+    let Some(path) = panic_log_path() else { return };
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let Ok(mut file) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+    else {
+        return;
+    };
+    let _ = writeln!(
+        file,
+        "--- PerfWindow v{} startup @ {} (UTC unix={}) pid={} ---",
+        env!("CARGO_PKG_VERSION"),
+        chrono_like_utc(),
+        unix_now(),
+        std::process::id(),
+    );
+    let _ = file.flush();
+}
+
+// ---------------------------------------------------------------------------
+// Win32 SEH unhandled-exception filter
+// ---------------------------------------------------------------------------
+//
+// The Rust `panic` hook above never fires for native crashes
+// (`STATUS_STACK_BUFFER_OVERRUN`, `STATUS_ACCESS_VIOLATION`, fastfail aborts
+// from inlined wgpu/eframe internals, stack canary failures from MSVC's
+// `/GS` check, etc.). Those land in the kernel's structured-exception
+// machinery instead, and by default Windows just terminates the process
+// after spilling a `BEX64` event into the Application log.
+//
+// `SetUnhandledExceptionFilter` lets us interpose before that — we record
+// the exception code + faulting address + a Rust backtrace into the same
+// `panic.log` the panic hook uses, then hand back `EXCEPTION_CONTINUE_SEARCH`
+// so the OS still terminates the process (we don't *recover*; we just leave
+// a breadcrumb).
+
+// Win32 type aliases — kept verbatim from `winnt.h` so that the FFI signature
+// is self-evidently a 1:1 match with the SDK header. The lint allow-list is
+// the same one `ui/settings.rs::ymdhm_local` uses for the same reason.
+#[allow(non_camel_case_types, clippy::upper_case_acronyms)]
+type DWORD = u32;
+#[allow(non_camel_case_types, clippy::upper_case_acronyms)]
+type LONG = i32;
+#[allow(non_camel_case_types)]
+type ULONG_PTR = usize;
+#[allow(non_camel_case_types, clippy::upper_case_acronyms)]
+type PVOID = *mut std::ffi::c_void;
+
+/// Mirrors `_EXCEPTION_RECORD` from `winnt.h`. Only the fields we read are
+/// declared with their real types; we leave `ExceptionRecord` as an opaque
+/// pointer and `ExceptionInformation` as a fixed-size array.
+#[repr(C)]
+struct ExceptionRecord {
+    exception_code: DWORD,
+    exception_flags: DWORD,
+    exception_record: *mut ExceptionRecord,
+    exception_address: PVOID,
+    number_parameters: DWORD,
+    exception_information: [ULONG_PTR; 15],
+}
+
+#[repr(C)]
+struct ExceptionPointers {
+    exception_record: *mut ExceptionRecord,
+    context_record: PVOID,
+}
+
+type UnhandledExceptionFilter = Option<unsafe extern "system" fn(*mut ExceptionPointers) -> LONG>;
+
+const EXCEPTION_CONTINUE_SEARCH: LONG = 0;
+
+extern "system" {
+    fn SetUnhandledExceptionFilter(filter: UnhandledExceptionFilter) -> UnhandledExceptionFilter;
+}
+
+fn install_seh_handler() {
+    unsafe {
+        SetUnhandledExceptionFilter(Some(seh_filter));
+    }
+}
+
+/// Win32 unhandled-exception callback. Best-effort — runs inside the OS's
+/// crash-handling path where heap state may already be corrupt, so it does
+/// minimal work and swallows every secondary failure (the worst case is the
+/// log entry is missed; the worst case is NOT making the original crash
+/// worse).
+unsafe extern "system" fn seh_filter(info: *mut ExceptionPointers) -> LONG {
+    use std::io::Write;
+
+    // `catch_unwind` to make sure a panic inside this handler does not
+    // escape the FFI boundary and abort with no log at all.
+    let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let Some(path) = panic_log_path() else { return };
+        if let Some(parent) = path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        let Ok(mut file) = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&path)
+        else {
+            return;
+        };
+
+        let (code, address, params): (DWORD, PVOID, String) = if info.is_null() {
+            (0, std::ptr::null_mut(), "<null info>".into())
+        } else {
+            let rec = (*info).exception_record;
+            if rec.is_null() {
+                (0, std::ptr::null_mut(), "<null record>".into())
+            } else {
+                let n = (*rec).number_parameters.min(15) as usize;
+                // `&(*raw)` to be explicit about the autoref — the compiler
+                // rejects implicit reference-to-deref of a raw pointer.
+                let info_ref: &[ULONG_PTR; 15] = &(*rec).exception_information;
+                let params = info_ref[..n]
+                    .iter()
+                    .map(|p| format!("{p:#x}"))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                ((*rec).exception_code, (*rec).exception_address, params)
+            }
+        };
+
+        let code_name = seh_code_name(code);
+        // Backtrace is captured from the SEH handler's stack, not the
+        // faulting thread's — still useful because most of egui/wgpu lives
+        // in the same thread, and the addresses below are absolute so the
+        // PDB (if shipped) can resolve them.
+        let backtrace = std::backtrace::Backtrace::force_capture();
+
+        let _ = writeln!(
+            file,
+            "=== PerfWindow v{} SEH crash @ {} (UTC unix={}) pid={} ===\n\
+             exception : {code:#010x} ({code_name})\n\
+             address   : {address:?}\n\
+             parameters: [{params}]\n\
+             backtrace (handler-side, may differ from faulting thread):\n{backtrace}\n",
+            env!("CARGO_PKG_VERSION"),
+            chrono_like_utc(),
+            unix_now(),
+            std::process::id(),
+        );
+        let _ = file.flush();
+    }));
+
+    // Hand back to the OS so the standard termination path runs (WER, event
+    // log entry, process exit). We logged what we wanted; we are NOT
+    // trying to recover.
+    EXCEPTION_CONTINUE_SEARCH
+}
+
+/// Symbolic name for the common SEH codes — saves the maintainer a trip to
+/// the SDK docs when triaging a `panic.log` entry.
+fn seh_code_name(code: DWORD) -> &'static str {
+    match code {
+        0xC0000005 => "ACCESS_VIOLATION",
+        0xC0000006 => "IN_PAGE_ERROR",
+        0xC000001D => "ILLEGAL_INSTRUCTION",
+        0xC0000025 => "NONCONTINUABLE_EXCEPTION",
+        0xC000008C => "ARRAY_BOUNDS_EXCEEDED",
+        0xC000008D => "FLT_DENORMAL_OPERAND",
+        0xC000008E => "FLT_DIVIDE_BY_ZERO",
+        0xC0000094 => "INT_DIVIDE_BY_ZERO",
+        0xC0000095 => "INT_OVERFLOW",
+        0xC0000096 => "PRIV_INSTRUCTION",
+        0xC00000FD => "STACK_OVERFLOW",
+        0xC0000135 => "DLL_NOT_FOUND",
+        0xC0000139 => "ENTRYPOINT_NOT_FOUND",
+        0xC0000142 => "DLL_INIT_FAILED",
+        0xC0000409 => "STACK_BUFFER_OVERRUN (fastfail)",
+        0xC0000417 => "INVALID_CRUNTIME_PARAMETER",
+        0xE06D7363 => "C++ exception (MSVC throw)",
+        _ => "<unknown>",
+    }
 }
