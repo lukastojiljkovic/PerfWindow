@@ -321,13 +321,13 @@ mod tests {
 
     #[test]
     fn rapid_theme_cycling_does_not_panic() {
-        // Regression for the v0.9.0 cumulative-crash report: rapidly clicking
-        // through themes used to grow egui's style Arc on every call because
-        // `apply` wrote into whichever style slot egui had picked at startup,
-        // not the slot matching the new palette. set_theme now forces the
-        // correct slot first so set_visuals lands in place. Twenty full cycles
-        // (120 calls) covers the 4–6-click crash window the user reported
-        // with comfortable headroom.
+        // Regression test for a cumulative-style-allocation crash that fired
+        // after 4–6 quick theme clicks: `apply` used to write into whichever
+        // style slot egui picked at startup rather than the slot matching the
+        // new palette, so each call cloned the underlying Arc<Style> and
+        // bloated the egui context. set_theme now forces the correct slot
+        // first so set_visuals lands in place. Twenty full cycles (120 calls)
+        // covers that crash window with comfortable headroom.
         let ctx = egui::Context::default();
         let palette = [
             ThemeId::Amber,

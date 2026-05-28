@@ -17,6 +17,13 @@ const MAX_HEIGHT: f32 = 200.0;
 pub fn sparkline(ui: &mut egui::Ui, theme: &Theme, samples: &[f32], max: f32) {
     let available_w = ui.available_width();
     let height = ui.available_height().clamp(MIN_HEIGHT, MAX_HEIGHT);
+    // Reject NaN / negative / zero dimensions before they reach the tessellator
+    // — `allocate_exact_size` with a degenerate Vec2 builds a Rect that wgpu's
+    // epaint pipeline rejects via `__fastfail` (STATUS_STACK_BUFFER_OVERRUN) in
+    // release-LTO builds rather than a recoverable Rust panic.
+    if !available_w.is_finite() || available_w <= 0.0 || !height.is_finite() || height <= 0.0 {
+        return;
+    }
     let (rect, _response) = ui.allocate_exact_size(Vec2::new(available_w, height), Sense::hover());
 
     if samples.len() < 2 || !ui.is_rect_visible(rect) {
@@ -86,6 +93,9 @@ pub fn dual_sparkline(
 ) {
     let available_w = ui.available_width();
     let height = ui.available_height().clamp(MIN_HEIGHT, MAX_HEIGHT);
+    if !available_w.is_finite() || available_w <= 0.0 || !height.is_finite() || height <= 0.0 {
+        return;
+    }
     let (rect, _response) = ui.allocate_exact_size(Vec2::new(available_w, height), Sense::hover());
 
     if primary.len() < 2 || !ui.is_rect_visible(rect) {

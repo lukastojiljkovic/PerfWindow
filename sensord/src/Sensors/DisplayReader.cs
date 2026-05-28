@@ -54,7 +54,11 @@ public static class DisplayReader
         return results;
     }
 
-    /// <summary>Primary display only. Preserved for backward-compat with v0.8.x dashboards.</summary>
+    /// <summary>
+    /// Primary display only. Kept as a separate top-level Snapshot field
+    /// alongside the multi-monitor <c>Displays</c> list so older dashboard
+    /// builds that only read <c>display</c> keep functioning.
+    /// </summary>
     public static DisplayInfo? Read()
     {
         var all = ReadAll();

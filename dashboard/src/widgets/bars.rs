@@ -7,6 +7,12 @@ use egui::{Rect, Response, Sense, Vec2};
 /// fill uses `theme.accent`, or `theme.warn` when `warn` is `true`.
 pub fn bar_meter(ui: &mut egui::Ui, theme: &Theme, fraction: f32, warn: bool) -> Response {
     let available_w = ui.available_width();
+    // Reject NaN / negative width before it reaches the tessellator (see the
+    // sparkline comment for the failure mode — abort, not a panic).
+    if !available_w.is_finite() || available_w <= 0.0 {
+        let (_, response) = ui.allocate_exact_size(Vec2::new(0.0, 6.0), Sense::hover());
+        return response;
+    }
     let (rect, response) = ui.allocate_exact_size(Vec2::new(available_w, 6.0), Sense::hover());
 
     if ui.is_rect_visible(rect) {
@@ -49,6 +55,9 @@ pub fn core_strip(ui: &mut egui::Ui, theme: &Theme, loads: &[f32], p_core_count:
     // bar has the same load.
     let cluster_gap_extra = 8.0;
     let available_w = ui.available_width();
+    if !available_w.is_finite() || available_w <= 0.0 {
+        return;
+    }
     let (rect, _response) = ui.allocate_exact_size(Vec2::new(available_w, strip_h), Sense::hover());
 
     if !ui.is_rect_visible(rect) {
@@ -128,6 +137,9 @@ pub fn core_grid(
     const CORNER_PAD: f32 = 3.0;
 
     let available_w = ui.available_width();
+    if !available_w.is_finite() || available_w <= 0.0 {
+        return;
+    }
     let cols = ((available_w + GAP) / (CELL_W + GAP)).floor().max(1.0) as usize;
     let rows = loads.len().div_ceil(cols);
     let total_h = rows as f32 * CELL_H + (rows as f32 - 1.0).max(0.0) * GAP;

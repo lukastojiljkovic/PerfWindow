@@ -21,9 +21,11 @@ public static class HardwareProbe
         {
             using var monitor = new HardwareMonitor();
 
-            // LHM has now extracted and loaded its WinRing0 driver. Report
-            // where the .sys file landed, while the monitor is still open.
-            w.WriteLine("--- WinRing0 driver .sys locations (LHM open) ---");
+            // LHM has now extracted and loaded its kernel driver (PawnIO on
+            // 0.9.5+, WinRing0 on older builds — we scan both location sets
+            // because users may have leftover WinRing0 files from a prior
+            // install). Report where the .sys files landed.
+            w.WriteLine("--- kernel driver .sys locations (LHM open) ---");
             string localAppData =
                 Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
             ScanForDriver(Path.GetTempPath(), w);
@@ -125,10 +127,10 @@ public static class HardwareProbe
 
     /// <summary>
     /// Prints every kernel-driver service whose ImagePath looks like a
-    /// temp-staged <c>.sys</c> (WinRing0 and friends). LHM keeps its driver
-    /// service registered while the monitor is open, so the ImagePath reveals
-    /// exactly where the driver file was written even after the file itself is
-    /// deleted post-load.
+    /// temp-staged <c>.sys</c> (PawnIO, WinRing0 and friends). LHM keeps its
+    /// driver service registered while the monitor is open, so the ImagePath
+    /// reveals exactly where the driver file was written even after the file
+    /// itself is deleted post-load.
     /// </summary>
     private static void DumpDriverServices(TextWriter w)
     {
@@ -151,6 +153,7 @@ public static class HardwareProbe
                 if (!img.Contains(".sys", StringComparison.OrdinalIgnoreCase))
                     continue;
                 if (img.Contains("PerfWindow", StringComparison.OrdinalIgnoreCase)
+                    || img.Contains("PawnIO", StringComparison.OrdinalIgnoreCase)
                     || img.Contains("WinRing", StringComparison.OrdinalIgnoreCase)
                     || img.Contains(@"\Temp", StringComparison.OrdinalIgnoreCase)
                     || img.Contains("SystemTemp", StringComparison.OrdinalIgnoreCase))

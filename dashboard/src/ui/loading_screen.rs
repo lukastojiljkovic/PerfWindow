@@ -18,6 +18,11 @@ const BUTTON_GAP: f32 = 24.0;
 const BUTTON_PAD: Vec2 = Vec2::new(20.0, 9.0);
 const SPINNER_GLYPHS: [&str; 4] = ["\u{25d0}", "\u{25d3}", "\u{25d1}", "\u{25d2}"];
 const SPINNER_PERIOD_S: f64 = 1.0;
+/// Below this card width the Retry / Exit buttons stack vertically instead
+/// of going side-by-side — fits roughly one full button (~96 px) plus padding
+/// on either side. Same threshold the egui examples use for narrow-window
+/// layouts.
+const HORIZONTAL_BUTTON_BREAKPOINT: f32 = 240.0;
 
 /// User action taken on this frame. `None` is the normal case (no click).
 #[derive(Debug, Clone, Copy)]
@@ -122,22 +127,35 @@ fn failed(ui: &mut egui::Ui, theme: &Theme, reason: &FailedReason) -> LoadingAct
     );
     ui.add_space(BUTTON_GAP);
     let mut chosen = LoadingAction::None;
-    ui.horizontal(|ui| {
-        ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
-            // `max(0.0)`: on a sub-200-px-wide window the offset goes
-            // negative, which historically pushed the cursor past max_rect
-            // and produced non-finite `Rect`s in the buttons that follow.
-            let offset = ((ui.available_width() / 2.0) - 100.0).max(0.0);
-            ui.add_space(offset);
+    // Side-by-side at the usual width; stack vertically when the window is
+    // too narrow to seat both buttons on one row without clipping.
+    let available_w = ui.available_width();
+    let stack_vertical = !available_w.is_finite() || available_w < HORIZONTAL_BUTTON_BREAKPOINT;
+    if stack_vertical {
+        ui.vertical_centered(|ui| {
             if action_button(ui, theme, "RETRY").clicked() {
                 chosen = LoadingAction::Retry;
             }
-            ui.add_space(12.0);
+            ui.add_space(8.0);
             if action_button(ui, theme, "EXIT").clicked() {
                 chosen = LoadingAction::Exit;
             }
         });
-    });
+    } else {
+        ui.horizontal(|ui| {
+            ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
+                let offset = ((available_w / 2.0) - 100.0).max(0.0);
+                ui.add_space(offset);
+                if action_button(ui, theme, "RETRY").clicked() {
+                    chosen = LoadingAction::Retry;
+                }
+                ui.add_space(12.0);
+                if action_button(ui, theme, "EXIT").clicked() {
+                    chosen = LoadingAction::Exit;
+                }
+            });
+        });
+    }
     chosen
 }
 

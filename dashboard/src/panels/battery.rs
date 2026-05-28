@@ -59,10 +59,9 @@ pub fn battery_panel(
                     tooltip_key: "TIME",
                 });
 
-                // RATE: dedicated row with directional arrow restored from
-                // v0.8.x. Folded into STATE during v0.9.0 transition; the
-                // arrow + decimals carry more information than the rounded
-                // integer in the STATE row.
+                // RATE: dedicated row with directional arrow. The arrow +
+                // decimals carry more information than the rounded integer in
+                // the STATE row.
                 if let Some(rate) = batt.rate_w {
                     cands.push(StatCandidate {
                         priority: 2,
@@ -90,9 +89,9 @@ pub fn battery_panel(
                     });
                 }
 
-                // HEALTH: restored from v0.8.x as remaining life percentage.
-                // Wear is computed internally for the health colour band but
-                // the visible value matches user expectation ("100 % = new").
+                // HEALTH is reported as remaining life percentage. Wear is
+                // computed internally for the health colour band but the
+                // visible value matches user expectation ("100 % = new").
                 if let (Some(design), Some(full)) =
                     (batt.design_capacity_mwh, batt.full_capacity_mwh)
                 {

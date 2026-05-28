@@ -5,11 +5,9 @@
 //! truncates to `capacity.rows`, then lays the survivors out in either a
 //! single column (`capacity.columns == 1`) or a 2-column split (otherwise).
 //!
-//! The model replaces v0.8.x's `LayoutDensity` enum: instead of "drop this
-//! specific row in Compact mode", each panel publishes a ranked list and the
-//! renderer keeps as many top entries as the card's allocated width affords.
-//! Primaries (TEMP, VRAM used/total, USED/FREE) survive at every capacity
-//! tier; secondaries (HOTSPOT, JUNCTION, PCIE, V, etc.) drop first.
+//! The renderer keeps as many top entries as the card's allocated width
+//! affords: primaries (TEMP, VRAM used/total, USED/FREE) survive at every
+//! capacity tier; secondaries (HOTSPOT, JUNCTION, PCIE, V, etc.) drop first.
 
 use crate::theme::Theme;
 use crate::ui::capacity::Capacity;
