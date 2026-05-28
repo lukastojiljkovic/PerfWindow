@@ -1,6 +1,6 @@
 [package]
 name = "perfwindow"
-version = "0.9.3"
+version = "0.9.4"
 edition = "2021"
 description = "PerfWindow — a lightweight Windows hardware monitor"
 license = "MIT"
@@ -40,5 +40,16 @@ perfwindow = { path = ".", features = ["test-support"] }
 
 [profile.release]
 opt-level = 3
-lto = true
-strip = true
+# Diagnostic build profile for the 0.9.4 crash investigation. The two changes
+# from a clean release build:
+#   * `debug = true` keeps the function-name DWARF/PDB info inside the binary,
+#     so a `panic.log` SEH crash address (an absolute pointer into PerfWindow.exe)
+#     can be resolved back to a source location without a separate symbol drop.
+#   * `lto = false` keeps function boundaries intact across crate-graph
+#     edges so the resolved name actually points at the real culprit instead
+#     of whatever blob LTO merged it into.
+# Once the 0.9.x startup crash is identified and fixed, lto/strip can be
+# restored.
+debug = true
+lto = false
+strip = false

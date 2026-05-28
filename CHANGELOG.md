@@ -7,6 +7,39 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ## [Unreleased]
 
+## [0.9.4] — 2026-05-28
+
+A **diagnostic** release for the still-unidentified dashboard startup crash
+(0xc0000409 `STATUS_STACK_BUFFER_OVERRUN`) that 0.9.3's panic-to-file hook
+failed to catch — confirming the crash is a Win32 structured exception
+rather than a Rust `panic!`. This build adds the missing piece (a SEH
+handler), a launch-marker, and keeps debug symbols in the release binary so
+the faulting address actually means something.
+
+### Added
+
+- **Win32 SEH unhandled-exception filter** (`SetUnhandledExceptionFilter`)
+  writes a `panic.log` entry with the exception code (named, e.g.
+  `STACK_BUFFER_OVERRUN (fastfail)`), the faulting absolute address, the
+  exception parameters and a backtrace. Complementary to the Rust panic
+  hook (which only covers `panic!()` / `assert!()` / `unreachable!()`),
+  this catches everything that bypasses the Rust panic infrastructure:
+  fastfail aborts from inlined wgpu/eframe, MSVC `/GS` stack-canary
+  failures, access violations, stack overflows, etc.
+- **Process-start marker** appended to `panic.log` on every launch
+  (version, timestamp, pid), so a postmortem can distinguish "binary
+  never launched" from "binary launched then crashed", and so a crash
+  entry can be matched to the launch that produced it.
+
+### Changed
+
+- **Release profile keeps debug info** (`debug = true`, `lto = false`,
+  `strip = false`). The 0.9.3 release was LTO-merged and stripped, which
+  reduced `PerfWindow.exe` size but made absolute crash addresses
+  un-resolvable — fine for stable releases, fatal for triaging an opaque
+  fastfail. The clean release profile will return as soon as the
+  underlying crash is identified.
+
 ## [0.9.3] — 2026-05-28
 
 A **crash diagnostics + hardening** hotfix. 0.9.1 and 0.9.2 were crashing on
@@ -759,7 +792,8 @@ User-facing application behaviour is unchanged.
   matching uninstaller that removes the exclusions, the `R0sensord` driver
   service, the install directory and the per-user data directory.
 
-[Unreleased]: https://github.com/lukastojiljkovic/PerfWindow/compare/v0.9.3...HEAD
+[Unreleased]: https://github.com/lukastojiljkovic/PerfWindow/compare/v0.9.4...HEAD
+[0.9.4]: https://github.com/lukastojiljkovic/PerfWindow/releases/tag/v0.9.4
 [0.9.3]: https://github.com/lukastojiljkovic/PerfWindow/releases/tag/v0.9.3
 [0.9.2]: https://github.com/lukastojiljkovic/PerfWindow/releases/tag/v0.9.2
 [0.9.1]: https://github.com/lukastojiljkovic/PerfWindow/releases/tag/v0.9.1
