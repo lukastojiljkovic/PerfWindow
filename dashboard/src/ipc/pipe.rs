@@ -69,10 +69,10 @@ fn try_start_service() {
 }
 
 impl PipeSensord {
-    /// Existing legacy path: open the pipe at the default location, attempt
-    /// elevation if needed, retry. Used by the `--dev` child path's
-    /// fallback test infrastructure. Production callers use the
-    /// `connect_no_elevation` + state-machine combo.
+    /// Legacy single-shot connect path retained for tests: open the pipe,
+    /// best-effort start the service if the pipe is missing, retry. Production
+    /// callers use the state machine in `connect.rs`, which routes the same
+    /// open through a UAC step and surfaces phase updates to the UI.
     pub fn connect(repaint: impl Fn() + Send + 'static) -> Result<Self, ConnectError> {
         let read = match Self::open_pipe_at(PIPE_PATH) {
             Ok(f) => f,
@@ -95,7 +95,7 @@ impl PipeSensord {
             Err(e) => return Err(e),
         };
 
-        Ok(Self::start_reader(read, repaint))
+        Self::start_reader(read, repaint)
     }
 
     /// Open the pipe at the default location without trying to elevate.
@@ -103,7 +103,7 @@ impl PipeSensord {
     #[allow(dead_code)]
     pub fn connect_no_elevation(repaint: impl Fn() + Send + 'static) -> Result<Self, ConnectError> {
         let read = Self::open_pipe_at(PIPE_PATH)?;
-        Ok(Self::start_reader(read, repaint))
+        Self::start_reader(read, repaint)
     }
 
     /// Open the pipe at an explicit path (used by integration tests that
@@ -114,7 +114,7 @@ impl PipeSensord {
         repaint: impl Fn() + Send + 'static,
     ) -> Result<Self, ConnectError> {
         let read = Self::open_pipe_at(path)?;
-        Ok(Self::start_reader(read, repaint))
+        Self::start_reader(read, repaint)
     }
 
     fn open_pipe_at(path: &str) -> Result<File, ConnectError> {
@@ -126,8 +126,14 @@ impl PipeSensord {
             .map_err(ConnectError::from)
     }
 
-    fn start_reader(read: File, repaint: impl Fn() + Send + 'static) -> Self {
-        let writer = read.try_clone().expect("clone pipe handle");
+    fn start_reader(read: File, repaint: impl Fn() + Send + 'static) -> Result<Self, ConnectError> {
+        // `DuplicateHandle` can transiently fail (kernel handle exhaustion,
+        // a flaky ACL change between open and clone, the peer side dropping
+        // the pipe mid-handshake). Propagate as `ConnectError::Io` so the
+        // connect state machine surfaces it on the loading screen instead of
+        // panicking the worker thread and freezing the UI on "Loading
+        // sensors..." until the rx side hangs up.
+        let writer = read.try_clone().map_err(ConnectError::from)?;
         let state: SharedState = Arc::new(Mutex::new(SensorState {
             latest: None,
             alive: true,
@@ -153,11 +159,11 @@ impl PipeSensord {
             }
             repaint();
         });
-        PipeSensord {
+        Ok(PipeSensord {
             writer: Some(writer),
             reader: Some(reader),
             state,
-        }
+        })
     }
 
     pub fn set_interval(&mut self, ms: u32) {

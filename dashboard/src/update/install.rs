@@ -3,9 +3,9 @@
 //! [`launch`] starts the supplied installer executable and returns. The
 //! caller is expected to immediately set
 //! [`crate::app::PerfApp::want_quit`] so the next UI frame closes the
-//! application's window. The Inno installer carries `CloseApplications=yes`,
-//! so even an ill-timed exit will not corrupt the install; the explicit
-//! close exists to remove the race.
+//! application's window. The Inno installer carries
+//! `CloseApplications=force`, so even an ill-timed exit will not corrupt
+//! the install; the explicit close exists to remove the race.
 
 use std::path::Path;
 use std::process::Command;

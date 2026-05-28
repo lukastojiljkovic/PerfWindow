@@ -7,6 +7,66 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ## [Unreleased]
 
+## [0.9.2] — 2026-05-28
+
+A **stability** hotfix focused on the dashboard-startup window and a class of
+panic-induced crashes that left the UI frozen on "Loading sensors…".
+
+### Fixed
+
+- **"Loading sensors…" no longer times out on the first launch after a
+  PawnIO install.** `SensorPipeWorker` previously did its full
+  `HardwareMonitor.Open` + topology probe *before* creating the named
+  pipe, so a slow LHM enumeration (several seconds on a cold start) blew
+  the dashboard's connect deadline and the screen surfaced "service did
+  not start in time". The pipe is now created first; HardwareMonitor
+  initialises *after* the client has attached and the dashboard is
+  already showing the loading screen.
+- **`HardwareMonitor.Open` failures now surface as the dashboard's
+  health banner** instead of a silent service exit. The worker emits a
+  single `pawnio: "denied"` snapshot carrying the underlying exception
+  message before exiting, so the user gets a concrete reason ("PawnIO
+  access denied", quarantined driver binary, etc.) rather than a blank
+  reconnect loop.
+- **Dashboard no longer panics when the OS refuses to clone the pipe
+  handle.** `start_reader`'s `try_clone().expect(…)` was on the
+  connect hot path; a transient `DuplicateHandle` failure (kernel
+  handle exhaustion, ACL race, peer disconnect mid-handshake) panicked
+  the connect worker thread and froze the UI on "Loading sensors…"
+  until the receiver hung up. The clone now propagates as
+  `ConnectError::Io` and surfaces on the loading screen's Failed state
+  with RETRY / EXIT actions.
+- **`--dev` child-spawn dashboard shutdown no longer hangs.** The
+  `Sensord::Child` `Drop` impl was joining the reader thread, which
+  blocks in `BufReader::lines()` while the child's stdout handle is
+  still open — the same bug class the pipe path fixed in 0.8.1. The
+  reader is now detached on drop, mirroring the pipe path.
+- **Loading-screen action buttons no longer produce non-finite layout
+  rects on sub-200 px-wide windows.** The Retry / Exit button row's
+  horizontal offset was computed as `available_width / 2 − 100`, which
+  could go negative; it is now clamped to zero.
+- **Loading screen is shown for the full startup window**, including
+  the gap between the connect machine emitting `Ready` and the first
+  NDJSON snapshot arriving. Previously a brief "waiting for sensord…"
+  placeholder appeared in that window, which on slow machines lasted
+  several seconds and read like an outright stall.
+
+### Internal
+
+- Removed dead `service_dialog_open` / `service_dialog_message` /
+  `service_starting` fields from `PerfApp` (leftovers from the 0.8 → 0.9
+  loading-screen migration).
+- Architecture sections of `README.md` rewritten to match the
+  post-0.8.0 Windows Service model — the previous wording still
+  described the v0.7.x child-process IPC and a `requireAdministrator`
+  dashboard manifest.
+- Stripped dead `(mockup …)` parenthetical references from doc
+  comments across `widgets/`, `panels/`, `ui/` and `format.rs`; the
+  `docs/mockups/*.html` files they linked to had been removed.
+- Several other comment fixes (six-card theme picker, no more T-tag
+  workflow markers, accurate IPC descriptions in `pipe.rs` /
+  `process.rs`).
+
 ## [0.9.1] — 2026-05-28
 
 ### Fixed
@@ -613,7 +673,10 @@ User-facing application behaviour is unchanged.
   matching uninstaller that removes the exclusions, the `R0sensord` driver
   service, the install directory and the per-user data directory.
 
-[Unreleased]: https://github.com/lukastojiljkovic/PerfWindow/compare/v0.8.1...HEAD
+[Unreleased]: https://github.com/lukastojiljkovic/PerfWindow/compare/v0.9.2...HEAD
+[0.9.2]: https://github.com/lukastojiljkovic/PerfWindow/releases/tag/v0.9.2
+[0.9.1]: https://github.com/lukastojiljkovic/PerfWindow/releases/tag/v0.9.1
+[0.9.0]: https://github.com/lukastojiljkovic/PerfWindow/releases/tag/v0.9.0
 [0.8.1]: https://github.com/lukastojiljkovic/PerfWindow/releases/tag/v0.8.1
 [0.8.0]: https://github.com/lukastojiljkovic/PerfWindow/releases/tag/v0.8.0
 [0.7.0]: https://github.com/lukastojiljkovic/PerfWindow/releases/tag/v0.7.0

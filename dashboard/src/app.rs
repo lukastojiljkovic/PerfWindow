@@ -63,13 +63,6 @@ pub struct PerfApp {
     /// True while the window is in F11 fullscreen mode. Transient — not
     /// persisted to config. Toggled by the F11 keypress handler.
     pub fullscreen: bool,
-    // removed in T13; readers cleared in T17 — kept as immutable defaults so
-    // `ui::service_dialog` (deleted in T14) still compiles in the interim.
-    pub service_dialog_open: bool,
-    // removed in T13; readers cleared in T17
-    pub service_dialog_message: String,
-    // removed in T13; readers cleared in T17
-    pub service_starting: bool,
     /// Set to true when the user clicks Dismiss on the sensord health banner,
     /// hiding it for the rest of the session even if the degraded condition
     /// persists. Reset on next launch (not persisted).
@@ -145,9 +138,6 @@ impl PerfApp {
             show_changelog: false,
             applied_on_top: false,
             fullscreen: false,
-            service_dialog_open: false,
-            service_dialog_message: String::new(),
-            service_starting: false,
             health_banner_dismissed: false,
             update_source,
             os_is_light,
@@ -389,9 +379,6 @@ impl PerfApp {
             show_changelog: false,
             applied_on_top: false,
             fullscreen: false,
-            service_dialog_open: false,
-            service_dialog_message: String::new(),
-            service_starting: false,
             health_banner_dismissed: false,
             update_source: Arc::new(GitHubReleaseSource::new(OWNER, REPO)),
             os_is_light: false,
@@ -515,18 +502,15 @@ mod tests {
     #[test]
     fn apply_config_change_updates_refresh_rate() {
         let mut app = PerfApp::for_tests(Config::default());
-        // `Status::Running` is the only "ok" variant; the only other variant
-        // is `SensordDown`. The set of `RefreshRate` variants is
-        // {Ms500, S1, S2, S5} (see `config.rs`).
         app.config.refresh = RefreshRate::S5;
         assert_eq!(app.config.refresh, RefreshRate::S5);
     }
 
     #[test]
     fn default_status_is_running() {
-        // `for_tests` initialises `status` to `Running`; production sets
-        // `SensordDown` only when the sensord spawn fails, so `Running` is
-        // the default "happy path" status.
+        // `for_tests` initialises `status` to `Running` — the "happy path"
+        // status. Production starts in `Connecting(OpeningPipe)` (named-pipe
+        // path) or directly in `Running` (`--dev` child-spawn path).
         let app = PerfApp::for_tests(Config::default());
         assert!(matches!(app.status, Status::Running));
     }

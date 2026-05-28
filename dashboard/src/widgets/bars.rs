@@ -5,7 +5,6 @@ use egui::{Rect, Response, Sense, Vec2};
 ///
 /// `fraction` is 0.0–1.0 (clamped). The background uses `theme.track`; the
 /// fill uses `theme.accent`, or `theme.warn` when `warn` is `true`.
-/// Matches the `.pw-bar` element in the mockup.
 pub fn bar_meter(ui: &mut egui::Ui, theme: &Theme, fraction: f32, warn: bool) -> Response {
     let available_w = ui.available_width();
     let (rect, response) = ui.allocate_exact_size(Vec2::new(available_w, 6.0), Sense::hover());
@@ -33,7 +32,6 @@ pub fn bar_meter(ui: &mut egui::Ui, theme: &Theme, fraction: f32, warn: bool) ->
 /// Each bar's height is proportional to its load (0–100), minimum 2 px.
 /// Bars are separated by 3 px gaps and sit on the baseline (grow upward).
 /// Fill is `theme.accent` at ~0.72 opacity.
-/// Matches the `.pw-cores` element in the mockup.
 ///
 /// `p_core_count = Some(n)` switches to hybrid-CPU coloring: the first `n`
 /// bars (P-Cores) paint at full `theme.accent` opacity and a wider visual gap

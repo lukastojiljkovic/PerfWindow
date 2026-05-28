@@ -14,7 +14,7 @@ use crate::widgets::sparkline::sparkline;
 use crate::widgets::{temp_color, TempKind};
 use egui::{FontId, Sense, Vec2};
 
-/// Height of the SWAP row (matches the mockup's `.pw-swap { height: 24px }`).
+/// Height of the SWAP row.
 const SWAP_ROW_H: f32 = 24.0;
 
 /// Render the RAM card: title, a usage donut beside used/free/cached stats, a
@@ -136,7 +136,7 @@ fn swap_row(ui: &mut egui::Ui, theme: &Theme, used_mb: Option<f64>, total_mb: Op
     let active = total > 0.0;
     let used = used_mb.unwrap_or(0.0);
 
-    // Active label is `dim` per the mockup; inactive drops it to `faint`.
+    // Active label is `dim`; inactive drops it to `faint`.
     let label_color = if active { theme.dim } else { theme.faint };
     let value_color = if active { theme.ink } else { theme.dim };
     let label_font = FontId::new(9.0, theme.font_data.egui());

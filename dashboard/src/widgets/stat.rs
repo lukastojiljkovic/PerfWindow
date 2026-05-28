@@ -7,10 +7,9 @@ const ROW_H: f32 = 22.0;
 
 /// Draw a single labelled stat row.
 ///
-/// Left side: `label` in ~9 px dim data-font, uppercase (matches `.pw-stat
-/// label`). Right side: `value` in ~14 px bold data-font (matches `.pw-stat
-/// b`), coloured `value_color` if `Some`, else `theme.ink`. A 1 px rule in
-/// `theme.border` is drawn across the bottom. Matches `.pw-stat` in the mockup.
+/// Left side: `label` in ~9 px dim data-font, uppercase. Right side: `value`
+/// in ~14 px bold data-font, coloured `value_color` if `Some`, else
+/// `theme.ink`. A 1 px rule in `theme.border` is drawn across the bottom.
 ///
 /// Returns the row's egui [`Response`] so callers can chain
 /// [`Response::on_hover_text`] (or [`crate::ui::tooltips::tip`]) to attach an

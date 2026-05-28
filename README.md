@@ -9,9 +9,9 @@ temperatures, power and lifetime metrics** for CPU, GPU (discrete and
 integrated), RAM, storage, motherboard, fans, voltages, battery and network
 throughput, in a single retro-utilitarian dashboard.
 
-PerfWindow runs only while its window is open — no background service and no
-system tray. It is installed by a standard Windows setup program and removed
-cleanly through Add/Remove Programs.
+PerfWindow has no resident background process while its window is closed and
+no system tray. It is installed by a standard Windows setup program and
+removed cleanly through Add/Remove Programs.
 
 ## What it monitors
 
@@ -56,7 +56,9 @@ Download `PerfWindow-Setup.exe` from the [latest
 release](https://github.com/lukastojiljkovic/PerfWindow/releases/latest) and
 run it. PerfWindow installs into `C:\Program Files\PerfWindow`, adds a Start
 Menu shortcut and registers an Add/Remove Programs entry. The installer
-requests administrator rights.
+requests administrator rights so it can register the
+`PerfWindowSensor` Windows Service (see *Architecture* below); the dashboard
+itself runs as the current user from that point on.
 
 The installer bundles **two third-party components** and chain-installs them
 silently:
@@ -94,24 +96,38 @@ GitHub's public Releases API.
 
 PerfWindow is two processes shipped as a single installer:
 
-- **`sensord`** — a .NET 8 console process built on
-  [LibreHardwareMonitorLib](https://github.com/LibreHardwareMonitor/LibreHardwareMonitor).
-  It polls the hardware and writes sensor snapshots to standard output as
-  NDJSON.
 - **`PerfWindow.exe`** — the dashboard: a Rust application using
-  [`eframe`/`egui`](https://github.com/emilk/egui). It renders the UI and owns
-  the `sensord` lifecycle.
+  [`eframe`/`egui`](https://github.com/emilk/egui). Runs as the current user
+  (no elevation manifest) and renders the UI.
+- **`PerfWindowSensor`** — a Windows Service running `sensord.exe --service`
+  as `LocalSystem`. Built on
+  [LibreHardwareMonitorLib](https://github.com/LibreHardwareMonitor/LibreHardwareMonitor),
+  it polls the hardware and emits NDJSON snapshots over a named pipe.
 
-The installer places `PerfWindow.exe` and `sensord.exe` side by side in the
-install directory. At launch the dashboard spawns the neighbouring
-`sensord.exe` as a child process and reads sensor snapshots over its stdout
-pipe; when the window closes, the child is terminated. `sensord` is published
-self-contained, so no separate .NET runtime installation is needed.
+The installer registers the service with the SCM as **demand-start**
+(admin-only). Each dashboard launch triggers a single UAC-elevated
+`sc start PerfWindowSensor`; the service exits as soon as the dashboard
+disconnects, so nothing remains resident while PerfWindow is closed. IPC is
+the full-duplex named pipe `\\.\pipe\PerfWindowSensor` (single client,
+NDJSON snapshots downstream, control messages upstream). `sensord` is
+published self-contained, so no separate .NET runtime installation is
+needed.
 
-`sensord` exposes a diagnostic mode — running `sensord.exe --probe` from an
-elevated prompt dumps the full LibreHardwareMonitor hardware / sensor tree
-to stdout, useful for understanding which sensors are available on a given
-machine without any dashboard mapping in between.
+The dashboard shows a phase-aware loading screen during the 5–15 s startup
+window ("Connecting to sensor service" → "Windows will ask for permission"
+→ "Starting sensor service" → "Loading sensors"), with RETRY / EXIT actions
+if the service fails to come up.
+
+`sensord` exposes two non-service modes for development and diagnostics:
+
+- `sensord.exe --dev` runs in legacy console mode (NDJSON on stdout, control
+  on stdin) — what the dashboard's `--dev` flag connects to via
+  `cargo run -p perfwindow`. Useful when you want to work on the dashboard
+  without installing the service.
+- `sensord.exe --probe` dumps the full LibreHardwareMonitor hardware /
+  sensor tree to stdout from an elevated prompt; useful for understanding
+  which sensors are available on a given machine without any dashboard
+  mapping in between.
 
 ## Building
 
@@ -145,14 +161,17 @@ it only needs to be run if the icon is changed.
 
 ## Administrator elevation
 
-`PerfWindow.exe` carries an application manifest that requests
-`requireAdministrator`, so Windows prompts for elevation at launch.
+`PerfWindow.exe` runs as the current user — its manifest is `asInvoker`, so
+Windows never prompts to elevate the dashboard itself.
 
-Elevation is required because LibreHardwareMonitor reads low-level sensors
-(temperatures, voltages, fan speeds) through a kernel-mode driver and direct
-hardware access. Those interfaces are not available to a standard-privilege
-process; without administrator rights most temperature and voltage readings
-would be unavailable.
+The elevation requirement was moved into the `PerfWindowSensor` Windows
+Service (introduced in 0.8.0): the service runs as `LocalSystem` and is the
+only thing that needs admin-level access to LibreHardwareMonitor's
+kernel-mode sensors (PawnIO MSRs, NVMe SMART, Super-I/O voltages). On each
+launch the dashboard issues one UAC prompt to authorise
+`sc start PerfWindowSensor`; if you cancel it, the dashboard surfaces a
+"service start was cancelled" message on the loading screen with RETRY /
+EXIT actions instead of crashing or running in a degraded mode.
 
 ## Themes
 

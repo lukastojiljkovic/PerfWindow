@@ -1,6 +1,9 @@
 # Brainstorming / visual companion (session artifacts)
 .superpowers/
 
+# Claude Code session config (CLAUDE.md, memory) — kept locally only
+.claude/
+
 # Internal design specifications and implementation plans — kept locally only
 docs/superpowers/
 

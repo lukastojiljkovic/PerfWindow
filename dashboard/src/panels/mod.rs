@@ -16,12 +16,11 @@ pub mod storage;
 use crate::theme::Theme;
 use egui::{FontId, Frame, Margin, Pos2, RichText, Sense, Stroke, Vec2};
 
-/// Inner padding of a panel card, in pixels (mockup `.pw-panel { padding: 11px }`).
+/// Inner padding of a panel card, in pixels.
 const CARD_PADDING: i8 = 11;
-/// Vertical gap between items stacked inside a card (mockup `.pw-panel { gap: 10px }`).
+/// Vertical gap between items stacked inside a card.
 const CARD_ITEM_SPACING: f32 = 10.0;
-/// Thickness of the accent line along the card's top edge
-/// (mockup `.pw-panel { border-top: 2px solid var(--accent) }`).
+/// Thickness of the accent line along the card's top edge.
 const TOP_ACCENT_THICKNESS: f32 = 2.0;
 /// Height of a panel's empty-state row — a single centred dimmed line.
 const EMPTY_NOTE_H: f32 = 22.0;
@@ -30,8 +29,7 @@ const EMPTY_NOTE_H: f32 = 22.0;
 ///
 /// The card has a `theme.panel` fill, a 1 px `theme.border` stroke, ~11 px of
 /// inner padding and ~10 px of vertical spacing between stacked items. A 2 px
-/// `theme.accent` line is painted over the card's top edge, matching the
-/// mockup's `border-top: 2px solid var(--accent)`.
+/// `theme.accent` line is painted over the card's top edge.
 ///
 /// `min_h` is the desired outer card height; when intrinsic content is
 /// shorter the body is padded so all cards in a row come out the same height.
@@ -66,7 +64,7 @@ pub fn card(ui: &mut egui::Ui, theme: &Theme, min_h: f32, contents: impl FnOnce(
 
 /// Draw a panel's title row: an upper-cased `title` on the left in the display
 /// font and `theme.accent`, plus an optional right-aligned upper-cased `sub` in
-/// the data font and `theme.faint`. Matches `.pw-pt` / `.pw-sub` in the mockup.
+/// the data font and `theme.faint`.
 pub fn panel_title(ui: &mut egui::Ui, theme: &Theme, title: &str, sub: Option<&str>) {
     ui.horizontal(|ui| {
         ui.label(

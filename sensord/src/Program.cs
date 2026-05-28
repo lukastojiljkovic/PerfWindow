@@ -116,14 +116,14 @@ internal static class Program
 
     /// <summary>
     /// Points this process's TMP/TEMP at a PerfWindow-owned directory.
-    /// LibreHardwareMonitor extracts its WinRing0 kernel driver next to the
-    /// executable; only if that fails does it fall back to a temp-directory
-    /// file. WinRing0 is on Microsoft's vulnerable-driver list, so in the
-    /// normal user temp folder Windows Defender quarantines it on sight. This
-    /// redirects that fallback into <c>%LOCALAPPDATA%\PerfWindow\driver</c> — a
-    /// folder the setup step excludes — so neither the primary location (next
-    /// to the executable) nor the fallback is ever scanned. Process-scoped —
-    /// the machine's temp configuration is untouched.
+    /// LibreHardwareMonitor extracts a kernel driver next to the executable;
+    /// only if that fails does it fall back to a temp-directory file.
+    /// Historically (LHM &lt; 0.9.5) the driver was WinRing0, which is on
+    /// Microsoft's vulnerable-driver list and was being quarantined by
+    /// Defender from the user temp folder on sight; current LHM uses PawnIO
+    /// (signed, not flagged) but the redirect is kept as a future-proofing
+    /// measure for any further driver swap. Process-scoped — the machine's
+    /// temp configuration is untouched.
     /// </summary>
     private static void RedirectDriverTempDir()
     {

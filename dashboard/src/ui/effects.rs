@@ -2,41 +2,37 @@
 //!
 //! [`paint_grid`] draws the 25 px grid. It is called inside the central panel,
 //! after the body fill but before the cards, so the opaque card frames paint
-//! over it and it shows only through the inter-card gaps — like the mockup's
-//! grid `background-image`. [`paint_effects`] draws the scanlines and vignette
-//! on a foreground layer as the last thing the render method does each frame,
-//! so they sit on top of everything.
+//! over it and it shows only through the inter-card gaps. [`paint_effects`]
+//! draws the scanlines and vignette on a foreground layer as the last thing
+//! the render method does each frame, so they sit on top of everything.
 //!
 //! Every effect is theme-parameterised and guarded: the Light theme sets
 //! `scanline_opacity` and `vignette` to (near) zero, so it shows no CRT
-//! atmosphere — only the faint base grid, exactly as the mockup does.
+//! atmosphere — only the faint base grid.
 
 use crate::theme::Theme;
 use egui::{Color32, Id, LayerId, Order, Rect, Stroke, StrokeKind};
 
-/// Grid cell size, in pixels (mockup `.pw-mock { background-size: 25px 25px }`).
+/// Grid cell size, in pixels.
 const GRID_STEP: f32 = 25.0;
-/// Grid line alpha as a fraction of `theme.border`
-/// (mockup grid `linear-gradient(rgba(127,127,127,.05) 1px, ...)`).
+/// Grid line alpha as a fraction of `theme.border`.
 const GRID_ALPHA: f32 = 0.05;
-/// Scanline period, in pixels (mockup scanline `repeating-linear-gradient`
-/// stop at `4px`).
+/// Scanline period, in pixels.
 const SCANLINE_STEP: f32 = 4.0;
 /// Number of concentric vignette strokes drawn inward from the window edge.
 const VIGNETTE_RINGS: usize = 14;
 /// Peak alpha, in 0..255, of the outermost vignette ring at
-/// `theme.vignette == 1.0`. The mockup's vignette is a soft 110 px inset
-/// shadow; a short stack of fading 1 px strokes approximates that band without
-/// any blur work.
+/// `theme.vignette == 1.0`. A short stack of fading 1 px strokes approximates a
+/// soft inset shadow without any blur work.
 const VIGNETTE_MAX_ALPHA: f32 = 80.0;
 
 /// Draw the faint 25 px background grid into `ui`.
 ///
 /// Called inside the central panel — after its body fill, before the cards —
 /// so the opaque card frames paint over it and it shows only through the
-/// inter-card gaps and body padding, mirroring the mockup's grid
-/// `background-image`. The lines are `theme.border` faded to ~5 % alpha: just
-/// enough texture to read as a grid without competing with panel content.
+/// inter-card gaps and body padding. The lines are `theme.border` faded to
+/// ~5 % alpha: just enough texture to read as a grid without competing with
+/// panel content.
 pub fn paint_grid(ui: &egui::Ui, theme: &Theme) {
     let color = theme.border.gamma_multiply(GRID_ALPHA);
     // `gamma_multiply` can land on a fully transparent colour; nothing to draw.
@@ -86,8 +82,7 @@ pub fn paint_effects(ctx: &egui::Context, theme: &Theme) {
 /// Draw horizontal scanlines every 4 px across the whole window.
 ///
 /// Skipped unless `theme.scanline_opacity > 0` (the Light theme sets it to 0).
-/// Each line is solid black at `scanline_opacity` alpha, matching the mockup's
-/// `repeating-linear-gradient(..., rgba(0,0,0,var(--scanA)) 2px 4px)`.
+/// Each line is solid black at `scanline_opacity` alpha.
 fn scanlines(painter: &egui::Painter, theme: &Theme, screen: Rect) {
     if theme.scanline_opacity <= 0.0 {
         return;
@@ -110,9 +105,8 @@ fn scanlines(painter: &egui::Painter, theme: &Theme, screen: Rect) {
 ///
 /// Skipped unless `theme.vignette > 0`. The strokes step inward 1 px at a time;
 /// alpha is highest at the outermost ring and decays linearly to zero, scaled
-/// overall by `theme.vignette`. This is the cheap painter equivalent of the
-/// mockup's `box-shadow: inset 0 0 110px 16px rgba(0,0,0,var(--vig))` — a dark
-/// band hugging the frame, no blur pass required.
+/// overall by `theme.vignette`. A dark band hugging the frame without a blur
+/// pass.
 fn vignette(painter: &egui::Painter, theme: &Theme, screen: Rect) {
     if theme.vignette <= 0.0 {
         return;

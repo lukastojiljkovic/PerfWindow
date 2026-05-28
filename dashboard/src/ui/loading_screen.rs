@@ -1,8 +1,9 @@
 //! Full-viewport overlay shown while the connect state machine is running
 //! or after it has reached a failure state. Rendered by `card_grid` in
-//! place of the cards whenever `Status::Connecting(_)` is active (T17
-//! wires this in). Returns the user's button choice as a `LoadingAction`
-//! so the caller can drive Retry / Exit semantics from a single place.
+//! place of the cards whenever `Status::Connecting(_)` is active, plus the
+//! Running-with-no-snapshot gap (mapped onto `LoadingSensors`). Returns the
+//! user's button choice as a `LoadingAction` so the caller can drive Retry /
+//! Exit semantics from a single place.
 
 use crate::format::letter_spaced;
 use crate::ipc::connect::{ConnectPhase, FailedReason};
@@ -123,7 +124,11 @@ fn failed(ui: &mut egui::Ui, theme: &Theme, reason: &FailedReason) -> LoadingAct
     let mut chosen = LoadingAction::None;
     ui.horizontal(|ui| {
         ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
-            ui.add_space((ui.available_width() / 2.0) - 100.0);
+            // `max(0.0)`: on a sub-200-px-wide window the offset goes
+            // negative, which historically pushed the cursor past max_rect
+            // and produced non-finite `Rect`s in the buttons that follow.
+            let offset = ((ui.available_width() / 2.0) - 100.0).max(0.0);
+            ui.add_space(offset);
             if action_button(ui, theme, "RETRY").clicked() {
                 chosen = LoadingAction::Retry;
             }

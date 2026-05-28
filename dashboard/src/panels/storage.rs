@@ -9,13 +9,13 @@ use crate::widgets::bars::bar_meter;
 use crate::widgets::{health_color, temp_color, TempKind};
 use egui::{FontId, Pos2, Sense, Stroke, Vec2};
 
-/// Fixed width of the TEMP column (mockup `.pw-disk` grid `42px`).
+/// Fixed width of the TEMP column.
 const TEMP_COL_W: f32 = 42.0;
 /// Fixed width of the HEALTH column (sized to fit "100%" with breathing room).
 const HEALTH_COL_W: f32 = 50.0;
-/// Fixed width of the CAPACITY column (mockup `.pw-disk` grid `80px`).
+/// Fixed width of the CAPACITY column.
 const CAP_COL_W: f32 = 80.0;
-/// Horizontal gap between columns (mockup `.pw-disk { gap: 11px }`).
+/// Horizontal gap between columns.
 const COL_GAP: f32 = 11.0;
 /// Flexible-column ratio: DISK gets `1.7fr`, ACTIVITY gets `1fr`.
 const DISK_FR: f32 = 1.7;
@@ -87,7 +87,7 @@ fn column_widths(total_w: f32, show_temp: bool) -> Vec<f32> {
     }
 }
 
-/// Draw the faint, upper-cased column-header row (mockup `.pw-disk-h`).
+/// Draw the faint, upper-cased column-header row.
 fn header_row(ui: &mut egui::Ui, theme: &Theme, show_temp: bool) {
     let total_w = ui.available_width();
     let widths = column_widths(total_w, show_temp);
@@ -319,8 +319,8 @@ fn format_capacity(used_gb: Option<f64>, total_gb: Option<f64>) -> String {
 }
 
 /// Display form of a disk `kind` tag. `sensord` emits lower-case tags
-/// (`"nvme"`, `"ssd"`, `"hdd"`); this restores their conventional casing to
-/// match the mockup. An unrecognised tag is upper-cased as a fallback.
+/// (`"nvme"`, `"ssd"`, `"hdd"`); this restores their conventional casing.
+/// An unrecognised tag is upper-cased as a fallback.
 fn kind_label(kind: &str) -> String {
     match kind.to_ascii_lowercase().as_str() {
         "nvme" => "NVMe".to_string(),
