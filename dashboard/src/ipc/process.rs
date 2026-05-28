@@ -24,9 +24,11 @@ pub struct Sensord {
 }
 
 impl Sensord {
-    /// Spawn the bundled `sensord.exe` (installed alongside `PerfWindow.exe`)
-    /// and start the reader thread. `repaint` is called whenever a new snapshot
-    /// arrives so the UI wakes up.
+    /// Dev-mode path only (`PerfWindow --dev`): spawn the bundled `sensord.exe`
+    /// as a child process and read NDJSON snapshots from its stdout. Production
+    /// builds talk to the installed `PerfWindowSensor` service via
+    /// [`crate::ipc::pipe::PipeSensord`] instead. `repaint` is called whenever
+    /// a new snapshot arrives so the UI wakes up.
     pub fn spawn(repaint: impl Fn() + Send + 'static) -> std::io::Result<Sensord> {
         let exe_path = sensord_path()?;
 
@@ -134,9 +136,13 @@ impl Drop for Sensord {
         }
         let _ = self.child.kill();
         let _ = self.child.wait();
-        if let Some(reader) = self.reader.take() {
-            let _ = reader.join();
-        }
+        // The reader thread is detached on drop. Joining here can hang
+        // shutdown: `BufReader::lines()` blocks on `read()`, and even after
+        // the child is killed there is a window where the stdout handle the
+        // thread holds is still considered open by the OS. The pipe-client
+        // path made the same fix in 0.8.1; the dev-mode child path was
+        // overlooked at the time.
+        let _ = self.reader.take();
     }
 }
 

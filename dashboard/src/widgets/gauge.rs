@@ -6,7 +6,7 @@ use std::f32::consts::TAU;
 const SIZE: f32 = 86.0;
 /// Outer radius of the ring.
 const OUTER_R: f32 = 43.0;
-/// Ring thickness (matches mockup's `inset: 8px` inner disc).
+/// Ring thickness.
 const RING_THICK: f32 = 8.0;
 /// Mid-radius where the stroke is centred.
 const MID_R: f32 = OUTER_R - RING_THICK / 2.0;

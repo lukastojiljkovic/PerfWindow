@@ -13,7 +13,7 @@ const MAX_HEIGHT: f32 = 200.0;
 /// `samples` are arbitrary f32 values; `max` is the scale ceiling (maps to the
 /// top edge). Values are linearly interpolated across the available width.
 /// If fewer than 2 samples are provided the area is still allocated but nothing
-/// is drawn.  Matches the `.pw-spark` element in the mockup.
+/// is drawn.
 pub fn sparkline(ui: &mut egui::Ui, theme: &Theme, samples: &[f32], max: f32) {
     let available_w = ui.available_width();
     let height = ui.available_height().clamp(MIN_HEIGHT, MAX_HEIGHT);

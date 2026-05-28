@@ -28,20 +28,20 @@ use crate::config::ThemeId;
 use crate::format::{
     finite, format_bytes_per_sec, format_percent, format_uptime, letter_spaced, TempUnit,
 };
+use crate::ipc::connect::ConnectPhase;
 use crate::panels;
 use crate::theme::Theme;
 use egui::{Align, FontId, Layout, Margin, RichText, Sense, Stroke, Vec2};
 
-/// Title-bar / footer strip height (mockup `.pw-tb` / `.pw-foot` padding).
+/// Title-bar / footer strip padding.
 const STRIP_PADDING_X: i8 = 13;
 const STRIP_PADDING_Y_TB: i8 = 9;
 const STRIP_PADDING_Y_FOOT: i8 = 7;
-/// Gap between cards in the grid (mockup `.pw-grid { gap: 10px }`).
+/// Gap between cards in the grid.
 const GRID_GAP: f32 = 10.0;
-/// Inner padding around the grid (mockup `.pw-body { padding: 13px }`).
+/// Inner padding around the grid.
 const GRID_BODY_PADDING: i8 = 13;
-/// Period, in seconds, of the wordmark's blinking block cursor
-/// (mockup `.cur { animation: blink 1.1s }`).
+/// Period, in seconds, of the wordmark's blinking block cursor.
 const CURSOR_BLINK_PERIOD: f64 = 1.1;
 /// Column-count breakpoints, in pixels of available grid width.
 const BREAKPOINT_4_COLS: f32 = 1100.0;
@@ -171,7 +171,7 @@ fn chip_row(ui: &mut egui::Ui, theme: &Theme, app: &mut PerfApp) {
 /// Draw one title-bar chip: a small bordered box with letter-spaced ~10 px
 /// `label`. When `on`, it is filled `accent` with `bg`-coloured text; otherwise
 /// it is a `dim` label inside a 1 px `border` outline. Returns the click-sensing
-/// response. Matches `.pw-chip` / `.pw-chip.on` in the mockup.
+/// response.
 fn chip(ui: &mut egui::Ui, theme: &Theme, label: &str, on: bool) -> egui::Response {
     let font = FontId::new(10.0, theme.font_data.egui());
     let text_color = if on { theme.bg } else { theme.dim };
@@ -179,7 +179,6 @@ fn chip(ui: &mut egui::Ui, theme: &Theme, label: &str, on: bool) -> egui::Respon
         .painter()
         .layout_no_wrap(letter_spaced(label), font, text_color);
 
-    // Padding mirrors the mockup's `.pw-chip { padding: 5px 8px }`.
     let pad = Vec2::new(8.0, 5.0);
     let size = galley.size() + pad * 2.0;
     let (rect, response) = ui.allocate_exact_size(size, Sense::click());
@@ -187,7 +186,7 @@ fn chip(ui: &mut egui::Ui, theme: &Theme, label: &str, on: bool) -> egui::Respon
     if ui.is_rect_visible(rect) {
         let painter = ui.painter_at(rect);
         // Active chip: `accent` fill with an `accent` outline. Inactive chip:
-        // no fill, a 1 px `border` outline (mockup `.pw-chip` / `.pw-chip.on`).
+        // no fill, a 1 px `border` outline.
         let stroke_color = if on { theme.accent } else { theme.border };
         if on {
             painter.rect_filled(rect, 0.0, theme.accent);
@@ -211,7 +210,7 @@ fn chip(ui: &mut egui::Ui, theme: &Theme, label: &str, on: bool) -> egui::Respon
 /// uptime, and the latest snapshot's headline CPU / GPU / network figures.
 /// While `sensord` is alive, the version label is a clickable widget that
 /// opens the in-app changelog viewer; in `NO SIGNAL` state it stays a plain
-/// label. Matches `.pw-foot` in the mockup.
+/// label.
 pub fn footer(ui: &mut egui::Ui, app: &mut PerfApp) {
     let theme = app.theme.clone();
     let frame = egui::Frame::NONE
@@ -339,7 +338,19 @@ pub fn card_grid(ui: &mut egui::Ui, app: &mut PerfApp) {
     // as deliberate progress rather than a "sensor feed stopped" failure.
     // `Status::Connecting(_)` is held by `poll_connect_events`; the guard in
     // `ingest()` prevents it from being flipped to SensordDown frame-by-frame.
-    if let Status::Connecting(phase) = app.status.clone() {
+    //
+    // The Running+no-snapshot case (Ready event already consumed but the
+    // first NDJSON snapshot hasn't arrived) reuses the LoadingSensors phase
+    // of the same screen — without this fallback the user sees a brief
+    // "waiting for sensord..." placeholder between Ready and the first
+    // snapshot, which on a slow machine can last several seconds and reads
+    // like an outright stall.
+    let connecting_phase = match &app.status {
+        Status::Connecting(p) => Some(p.clone()),
+        Status::Running if app.latest.is_none() => Some(ConnectPhase::LoadingSensors),
+        _ => None,
+    };
+    if let Some(phase) = connecting_phase {
         let theme = app.theme.clone();
         let ctx = ui.ctx().clone();
         match loading_screen::loading_screen(ui, &theme, &phase) {
@@ -365,6 +376,10 @@ pub fn card_grid(ui: &mut egui::Ui, app: &mut PerfApp) {
     // (a handful of Vecs of primitives); a clone per ~17 ms of UI frame is
     // negligible compared to the Vec allocations done by serde_json's parser
     // upstream.
+    //
+    // The `None` arm is a defensive safety net: every `Running`/no-snapshot
+    // path is already absorbed by the loading-screen fallback above, so in
+    // practice this branch is unreachable.
     let snap = match &app.latest {
         Some(s) => s.clone(),
         None => {

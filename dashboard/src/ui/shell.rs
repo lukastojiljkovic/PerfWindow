@@ -1,7 +1,7 @@
 //! Win32 ShellExecuteExW("runas", ...) helper. Surfaces an interactive UAC
-//! prompt for a single child-process launch without elevating the dashboard
-//! itself. Used by the connect state machine to start the PerfWindow sensor
-//! service per launch.
+//! prompt for a single elevated `sc.exe` invocation without elevating the
+//! dashboard itself. Used by the connect state machine to start the
+//! PerfWindow sensor service per launch.
 
 /// Invoke `ShellExecuteExW` with the `runas` verb so Windows prompts for
 /// elevation for just this one process launch. Returns `Ok(())` when the

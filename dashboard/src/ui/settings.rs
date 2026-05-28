@@ -9,7 +9,7 @@
 //!
 //! The window paints its own chrome (a `chrome` title bar with a `✕` button and
 //! a `chrome` footer) in the active theme, so egui's default window visuals are
-//! never seen. Matches `docs/mockups/settings-light.html`.
+//! never seen.
 
 use crate::app::PerfApp;
 use crate::config::{RefreshRate, ThemeId};
@@ -19,7 +19,7 @@ use egui::{
     Align2, Color32, FontId, Margin, Pos2, Rect, Response, Sense, Stroke, StrokeKind, Vec2,
 };
 
-/// Fixed outer width of the settings window (mockup `.cfg { width: 600px }`).
+/// Fixed outer width of the settings window.
 const WINDOW_WIDTH: f32 = 600.0;
 /// Combined height of the title bar + footer + outer breathing room. The body's
 /// `ScrollArea` is capped at `viewport_height - CHROME_RESERVE` so the chrome
@@ -28,44 +28,45 @@ const CHROME_RESERVE: f32 = 90.0;
 /// Floor for the body's `ScrollArea` max height. Below this the modal becomes
 /// useless even with scroll — pick something that still shows one section.
 const MIN_BODY_HEIGHT: f32 = 180.0;
-/// Title-bar / footer strip padding (mockup `.cfg-tb { padding: 12px 15px }`).
+/// Title-bar strip padding.
 const TB_PADDING_X: i8 = 15;
 const TB_PADDING_Y: i8 = 12;
-/// Footer strip padding (mockup `.cfg-foot { padding: 10px 15px }`).
+/// Footer strip padding.
 const FOOT_PADDING_X: i8 = 15;
 const FOOT_PADDING_Y: i8 = 10;
-/// Body padding (mockup `.cfg-body { padding: 19px 16px }`).
+/// Body padding.
 const BODY_PADDING_X: i8 = 16;
 const BODY_PADDING_Y: i8 = 19;
-/// Vertical gap between body sections (mockup `.cfg-body { gap: 21px }`).
+/// Vertical gap between body sections.
 const SECTION_GAP: f32 = 21.0;
-/// Vertical gap between a section's label and its control (mockup `.cfg-sec { gap: 10px }`).
+/// Vertical gap between a section's label and its control.
 const SECTION_INNER_GAP: f32 = 10.0;
-/// Gap between the four theme cards (mockup `.theme-grid { gap: 8px }`).
+/// Gap between the six theme cards.
 const THEME_CARD_GAP: f32 = 8.0;
-/// Inner padding of one theme card (mockup `.tcard { padding: 8px }`).
+/// Inner padding of one theme card.
 const THEME_CARD_PADDING: i8 = 8;
-/// Height of a theme card's preview strip (mockup `.tcard-prev { height: 52px }`).
+/// Height of a theme card's preview strip.
 const THEME_PREVIEW_H: f32 = 52.0;
-/// Diameter of the preview ring (mockup `.pv-ring { width: 28px }`).
+/// Diameter of the preview ring.
 const PREVIEW_RING_D: f32 = 28.0;
-/// Ring thickness — the mockup masks the centre with `inset: 6px`.
+/// Ring thickness — the centre is masked over with the previewed theme's panel
+/// colour to give the donut appearance.
 const PREVIEW_RING_THICK: f32 = 6.0;
-/// Width of the three preview bars (mockup `.pv-bars { width: 36px }`).
+/// Width of the three preview bars.
 const PREVIEW_BARS_W: f32 = 36.0;
-/// Height of one preview bar (mockup `.pv-bars i { height: 4px }`).
+/// Height of one preview bar.
 const PREVIEW_BAR_H: f32 = 4.0;
-/// Gap between the stacked preview bars (mockup `.pv-bars { gap: 4px }`).
+/// Gap between the stacked preview bars.
 const PREVIEW_BAR_GAP: f32 = 4.0;
-/// Toggle track size (mockup `.tg { width: 34px; height: 18px }`).
+/// Toggle track size.
 const TOGGLE_W: f32 = 34.0;
 const TOGGLE_H: f32 = 18.0;
-/// Toggle knob size (mockup `.tg-dot { width: 12px; height: 12px }`).
+/// Toggle knob size.
 const TOGGLE_DOT: f32 = 12.0;
-/// Segmented-control segment padding (mockup `.seg-i { padding: 8px 15px }`).
+/// Segmented-control segment padding.
 const SEG_PADDING_X: f32 = 15.0;
 const SEG_PADDING_Y: f32 = 8.0;
-/// Section-label and hint font size (mockup `.cfg-label` / `.cfg-hint`).
+/// Section-label and hint font size.
 const LABEL_FONT_SIZE: f32 = 10.0;
 
 /// A pending change to `app.config`, queued by a control and applied after the
@@ -95,8 +96,8 @@ pub fn settings_modal(ctx: &egui::Context, app: &mut PerfApp) {
     let theme = app.theme.clone();
 
     // The window's `Frame` carries the theme background, a 1 px border and a
-    // soft drop shadow (mockup `.cfg { box-shadow: 0 26px 64px ... }`). No
-    // inner margin: the title bar, body and footer each set their own padding.
+    // soft drop shadow. No inner margin: the title bar, body and footer each
+    // set their own padding.
     let frame = egui::Frame::NONE
         .fill(theme.bg)
         .stroke(Stroke::new(1.0, theme.border))
@@ -182,8 +183,7 @@ pub fn settings_modal(ctx: &egui::Context, app: &mut PerfApp) {
 
 /// Draw the modal title bar: a `chrome` strip with the `⚙ SETTINGS` wordmark on
 /// the left and a bordered `✕` close button on the right, closed by a 1 px
-/// `border` bottom rule. Returns the close button's click response. Matches
-/// `.cfg-tb` / `.cfg-x` in the mockup.
+/// `border` bottom rule. Returns the close button's click response.
 fn title_bar(ui: &mut egui::Ui, theme: &Theme) -> Response {
     let inner = egui::Frame::NONE
         .fill(theme.chrome)
@@ -204,7 +204,7 @@ fn title_bar(ui: &mut egui::Ui, theme: &Theme) -> Response {
             .inner
         });
 
-    // 1 px `border` rule along the strip's bottom edge (mockup `.cfg-tb`).
+    // 1 px `border` rule along the strip's bottom edge.
     let rect = inner.response.rect;
     ui.painter().add(egui::Shape::line_segment(
         [rect.left_bottom(), rect.right_bottom()],
@@ -214,11 +214,9 @@ fn title_bar(ui: &mut egui::Ui, theme: &Theme) -> Response {
 }
 
 /// Draw the `✕` close button: a `dim` glyph inside a 1 px `border` box that
-/// fills `accent` on hover. Returns its click-sensing response. Matches
-/// `.cfg-x` in the mockup.
+/// fills `accent` on hover. Returns its click-sensing response.
 fn close_button(ui: &mut egui::Ui, theme: &Theme) -> Response {
     let font = FontId::new(12.0, theme.font_data.egui());
-    // Padding mirrors the mockup's `.cfg-x { padding: 4px 9px }`.
     let pad = Vec2::new(9.0, 4.0);
     // Laid out with `PLACEHOLDER` so the hover-dependent `text_color` below
     // tints the glyph via `painter.galley`'s fallback colour.
@@ -254,7 +252,7 @@ fn close_button(ui: &mut egui::Ui, theme: &Theme) -> Response {
 }
 
 /// Draw a section header: a letter-spaced, ~10 px `accent` label in the display
-/// font (mockup `.cfg-label`).
+/// font.
 fn section_label(ui: &mut egui::Ui, theme: &Theme, text: &str) {
     ui.label(
         egui::RichText::new(letter_spaced(text))
@@ -265,7 +263,7 @@ fn section_label(ui: &mut egui::Ui, theme: &Theme, text: &str) {
 }
 
 /// Draw a section's hint line: ~10 px `dim` data-font text that wraps inside
-/// the window width (mockup `.cfg-hint`).
+/// the window width.
 fn section_hint(ui: &mut egui::Ui, theme: &Theme, text: &str) {
     ui.label(
         egui::RichText::new(text)
@@ -275,7 +273,7 @@ fn section_hint(ui: &mut egui::Ui, theme: &Theme, text: &str) {
     );
 }
 
-/// Draw the THEME section: the four-card theme picker followed by the
+/// Draw the THEME section: the six-card theme picker followed by the
 /// "Follow Windows" toggle.
 fn theme_section(ui: &mut egui::Ui, theme: &Theme, app: &PerfApp, change: &mut Option<Change>) {
     ui.vertical(|ui| {
@@ -299,7 +297,7 @@ const THEME_CARDS: [(ThemeId, &str); 6] = [
 
 /// Draw the theme-card grid as 3 columns x 2 rows (6 cards total). `selected`
 /// is the currently configured theme; clicking a different card queues a
-/// [`Change::Theme`]. Matches `.theme-grid` in the mockup.
+/// [`Change::Theme`].
 fn theme_grid(ui: &mut egui::Ui, theme: &Theme, selected: ThemeId, change: &mut Option<Change>) {
     const COLS: usize = 3;
     let card_w = (ui.available_width() - THEME_CARD_GAP * (COLS as f32 - 1.0)) / COLS as f32;
@@ -329,8 +327,7 @@ fn theme_grid(ui: &mut egui::Ui, theme: &Theme, selected: ThemeId, change: &mut 
 
 /// Draw one theme card: a tiny preview (a ring + three bars in `id`'s palette),
 /// the theme name and a short tag. The selected card gets an `accent` border
-/// and a 1 px inset `accent` outline. Returns the click response. Matches
-/// `.tcard` / `.tcard.sel` in the mockup.
+/// and a 1 px inset `accent` outline. Returns the click response.
 fn theme_card(
     ui: &mut egui::Ui,
     theme: &Theme,
@@ -351,14 +348,14 @@ fn theme_card(
     let inner = frame.show(ui, |ui| {
         ui.spacing_mut().item_spacing.y = 7.0;
         theme_preview(ui, &preview);
-        // Card name — ~11 px data font in `ink` (mockup `.tcard-name`).
+        // Card name — ~11 px data font in `ink`.
         ui.label(
             egui::RichText::new(preview.name)
                 .family(theme.font_data.egui())
                 .size(11.0)
                 .color(theme.ink),
         );
-        // Short tag — ~8 px letter-spaced `dim` (mockup `.tcard-tag`).
+        // Short tag — ~8 px letter-spaced `dim`.
         ui.label(
             egui::RichText::new(letter_spaced(tag))
                 .family(theme.font_data.egui())
@@ -369,7 +366,7 @@ fn theme_card(
 
     let rect = inner.response.rect;
     // The selected card carries a second 1 px `accent` rule just inside its
-    // border (mockup `.tcard.sel { box-shadow: inset 0 0 0 1px var(--accent) }`).
+    // border.
     if selected {
         ui.painter().rect_stroke(
             rect.shrink(1.0),
@@ -386,8 +383,7 @@ fn theme_card(
 }
 
 /// Paint the tiny theme preview inside a card: a bordered 52 px strip holding a
-/// donut ring and three stacked bars, all in `preview`'s own palette. Matches
-/// `.tcard-prev` plus `.pv-ring` / `.pv-bars` in the mockup.
+/// donut ring and three stacked bars, all in `preview`'s own palette.
 fn theme_preview(ui: &mut egui::Ui, preview: &Theme) {
     let (rect, _) = ui.allocate_exact_size(
         Vec2::new(ui.available_width(), THEME_PREVIEW_H),
@@ -402,8 +398,7 @@ fn theme_preview(ui: &mut egui::Ui, preview: &Theme) {
     // 1 px border in the *outer* theme so card edges stay consistent.
     painter.rect_filled(rect, 0.0, preview.bg);
 
-    // Lay the ring and the bar stack out as one centred group, 8 px apart
-    // (mockup `.tcard-prev { gap: 8px }`).
+    // Lay the ring and the bar stack out as one centred group, 8 px apart.
     let group_w = PREVIEW_RING_D + 8.0 + PREVIEW_BARS_W;
     let group_x0 = rect.center().x - group_w / 2.0;
     let ring_center = Pos2::new(group_x0 + PREVIEW_RING_D / 2.0, rect.center().y);
@@ -420,8 +415,7 @@ fn preview_ring(painter: &egui::Painter, preview: &Theme, center: Pos2) {
     let radius = PREVIEW_RING_D / 2.0;
     let mid_r = radius - PREVIEW_RING_THICK / 2.0;
 
-    // Approximate each arc as a short polyline; 64 % filled like the mockup's
-    // `conic-gradient(var(--pa) 0 64%, var(--pt) 64% 100%)`.
+    // Approximate each arc as a short polyline; 64 % filled.
     let arc = |from: f32, to: f32, color: Color32| {
         let n = (((to - from).abs() * 64.0).ceil() as usize + 1).max(2);
         let pts: Vec<Pos2> = (0..n)
@@ -448,8 +442,7 @@ fn preview_ring(painter: &egui::Painter, preview: &Theme, center: Pos2) {
 }
 
 /// Draw the three stacked preview bars: 36 px wide, 4 px tall, in the
-/// previewed theme's `accent` at decreasing opacity (1.0 / 0.55 / 0.28),
-/// matching the mockup's `.pv-bars i` opacity steps.
+/// previewed theme's `accent` at decreasing opacity (1.0 / 0.55 / 0.28).
 fn preview_bars(painter: &egui::Painter, preview: &Theme, x0: f32, center_y: f32) {
     const OPACITIES: [f32; 3] = [1.0, 0.55, 0.28];
     let stack_h = PREVIEW_BAR_H * 3.0 + PREVIEW_BAR_GAP * 2.0;
@@ -462,8 +455,7 @@ fn preview_bars(painter: &egui::Painter, preview: &Theme, x0: f32, center_y: f32
 }
 
 /// Draw the "Follow Windows" toggle: a 34×18 switch followed by a label and a
-/// dimmed hint. Toggling it queues a [`Change::Follow`]. Matches `.cfg-toggle`
-/// in the mockup.
+/// dimmed hint. Toggling it queues a [`Change::Follow`].
 fn follow_toggle(ui: &mut egui::Ui, theme: &Theme, on: bool, change: &mut Option<Change>) {
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 11.0;
@@ -485,8 +477,7 @@ fn follow_toggle(ui: &mut egui::Ui, theme: &Theme, on: bool, change: &mut Option
                 Stroke::new(1.0, track_stroke),
                 StrokeKind::Inside,
             );
-            // Knob: 2 px inset, slid to the right edge when on (mockup
-            // `.tg-dot { top: 2px; left: 2px }` / `.on .tg-dot { left: 18px }`).
+            // Knob: 2 px inset, slid to the right edge when on.
             let knob_x = if on {
                 track_rect.max.x - 2.0 - TOGGLE_DOT
             } else {
@@ -503,8 +494,7 @@ fn follow_toggle(ui: &mut egui::Ui, theme: &Theme, on: bool, change: &mut Option
             ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
         }
 
-        // Label: the ink lead-in and the dimmed hint share one wrapped line
-        // (mockup `.cfg-toggle .lbl` with the inner `<em>`).
+        // Label: the ink lead-in and the dimmed hint share one wrapped line.
         let mut job = egui::text::LayoutJob::default();
         let data_font = FontId::new(11.0, theme.font_data.egui());
         job.wrap.max_width = ui.available_width();
@@ -587,7 +577,7 @@ fn refresh_section(
 /// Draw a segmented control: a single bordered strip of equal-height segments,
 /// divided by 1 px `border` rules. The `on` segment fills `accent` with
 /// `bg`-coloured text; the rest are `dim` labels. Returns `Some(index)` of a
-/// clicked segment, or `None`. Matches `.seg` / `.seg-i` in the mockup.
+/// clicked segment, or `None`.
 fn segmented(ui: &mut egui::Ui, theme: &Theme, segments: &[(&str, bool)]) -> Option<usize> {
     let font = FontId::new(11.0, theme.font_data.egui());
 
@@ -632,8 +622,7 @@ fn segmented(ui: &mut egui::Ui, theme: &Theme, segments: &[(&str, bool)]) -> Opt
             );
             painter.galley(text_pos, galley, text_color);
 
-            // Divider rule between this segment and the next (mockup
-            // `.seg-i { border-right: 1px solid var(--border) }`).
+            // Divider rule between this segment and the next.
             if i + 1 < segments.len() {
                 painter.add(egui::Shape::line_segment(
                     [
@@ -661,7 +650,7 @@ fn segmented(ui: &mut egui::Ui, theme: &Theme, segments: &[(&str, bool)]) -> Opt
             x += seg_widths[i];
         }
 
-        // The single 1 px outline around the whole strip (mockup `.seg`).
+        // The single 1 px outline around the whole strip.
         painter.rect_stroke(
             rect,
             0.0,
@@ -674,7 +663,7 @@ fn segmented(ui: &mut egui::Ui, theme: &Theme, segments: &[(&str, bool)]) -> Opt
 }
 
 /// Draw the modal footer: a `chrome` strip with the version / licence credit,
-/// opened by a 1 px `border` top rule. Matches `.cfg-foot` in the mockup.
+/// opened by a 1 px `border` top rule.
 fn footer(ui: &mut egui::Ui, theme: &Theme) {
     egui::Frame::NONE
         .fill(theme.chrome)

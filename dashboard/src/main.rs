@@ -5,8 +5,9 @@ use perfwindow::app::PerfApp;
 use perfwindow::config::Config;
 
 fn main() -> eframe::Result {
-    // `--dev` swaps the production pipe-client transport for the v0.7.x
-    // child-spawn path (no installed service required). Default = pipe.
+    // `--dev` swaps the production named-pipe client for the legacy
+    // child-spawn path (no installed Windows service required) — useful for
+    // `cargo run` against a freshly built sensord. Default = pipe.
     let dev_mode = std::env::args().any(|a| a == "--dev");
 
     // Read the persisted `always_on_top` preference before the viewport opens

@@ -47,7 +47,7 @@ pub fn format_link(bps: Option<i64>) -> String {
 }
 
 /// Human throughput, e.g. `"4.2 MB/s"`. Bytes/sec in; 1024-based KB/MB/GB out
-/// (binary, consistent with `format_gb_from_mb` and the mockup).
+/// (binary, consistent with `format_gb_from_mb`).
 pub fn format_bytes_per_sec(bps: f64) -> String {
     const KB: f64 = 1024.0;
     const MB: f64 = 1024.0 * 1024.0;
