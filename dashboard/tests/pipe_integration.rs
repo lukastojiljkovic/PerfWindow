@@ -57,16 +57,18 @@ fn sensord_service_emits_snapshots_over_pipe() {
     // pipe behaves inconsistently w.r.t. the "instance is busy" check.
     use std::fs::OpenOptions;
     use std::io::{BufRead, BufReader, ErrorKind};
-    use std::os::windows::fs::OpenOptionsExt;
 
     let pipe_path = format!(r"\\.\pipe\{TEST_PIPE}");
     let start = Instant::now();
     let deadline = start + Duration::from_secs(15);
     let f = loop {
+        // Synchronous (blocking) open — NO FILE_FLAG_OVERLAPPED. A sync read on
+        // an overlapped handle can return ERROR_IO_PENDING and abort the
+        // process; see `PipeSensord::open_pipe_at`. This loop reads with
+        // `BufReader::lines()`, so it must use a blocking handle too.
         match OpenOptions::new()
             .read(true)
             .write(true)
-            .custom_flags(0x4000_0000) // FILE_FLAG_OVERLAPPED
             .open(&pipe_path)
         {
             Ok(f) => break f,
@@ -182,4 +184,130 @@ fn pipe_sensord_shutdown_terminates_child() {
             Err(e) => panic!("try_wait failed: {e}"),
         }
     }
+}
+
+/// Regression guard for the 0.9.1–0.9.4 startup crash: the pipe client must
+/// open in **synchronous (blocking)** mode. A handle opened with
+/// `FILE_FLAG_OVERLAPPED` that is then read synchronously (as the reader thread
+/// does via `BufReader::lines()`) can return `ERROR_IO_PENDING`, which the Rust
+/// standard library treats as a fatal runtime error and `abort()`s the whole
+/// process — surfacing as `0xc0000409` with no panic-hook entry.
+///
+/// This test stands up a minimal named-pipe server and connects the real
+/// `PipeSensord` client, then writes the first snapshot only *after* a delay,
+/// so the client's reader is forced to block on an empty pipe — the exact
+/// timing that aborted the shipped builds. If `open_pipe_at` ever reopens the
+/// pipe overlapped, the reader aborts here and takes the whole test binary
+/// down (a hard CI failure), which is the regression we want to catch.
+#[test]
+fn pipe_client_blocks_on_empty_pipe_without_aborting() {
+    use std::ffi::OsStr;
+    use std::os::windows::ffi::OsStrExt;
+    use std::ptr;
+
+    // Win32 named-pipe server primitives (kernel32 is implicitly linked, same
+    // as the FFI in `ui/shell.rs` and `main.rs`).
+    extern "system" {
+        fn CreateNamedPipeW(
+            name: *const u16,
+            open_mode: u32,
+            pipe_mode: u32,
+            max_instances: u32,
+            out_buffer_size: u32,
+            in_buffer_size: u32,
+            default_timeout: u32,
+            security_attributes: *mut core::ffi::c_void,
+        ) -> isize;
+        fn ConnectNamedPipe(handle: isize, overlapped: *mut core::ffi::c_void) -> i32;
+        fn WriteFile(
+            handle: isize,
+            buf: *const u8,
+            len: u32,
+            written: *mut u32,
+            overlapped: *mut core::ffi::c_void,
+        ) -> i32;
+        fn FlushFileBuffers(handle: isize) -> i32;
+        fn CloseHandle(handle: isize) -> i32;
+    }
+    const PIPE_ACCESS_DUPLEX: u32 = 0x0000_0003;
+    const PIPE_TYPE_BYTE: u32 = 0x0000_0000;
+    const PIPE_WAIT: u32 = 0x0000_0000;
+    const INVALID_HANDLE_VALUE: isize = -1;
+
+    let name = format!(r"\\.\pipe\PerfWindowOverlapRegr_{}", std::process::id());
+    let wide: Vec<u16> = OsStr::new(&name)
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect();
+
+    let server = unsafe {
+        CreateNamedPipeW(
+            wide.as_ptr(),
+            PIPE_ACCESS_DUPLEX,
+            PIPE_TYPE_BYTE | PIPE_WAIT,
+            1,
+            4096,
+            4096,
+            0,
+            ptr::null_mut(),
+        )
+    };
+    assert_ne!(
+        server,
+        INVALID_HANDLE_VALUE,
+        "CreateNamedPipeW failed: {}",
+        std::io::Error::last_os_error()
+    );
+
+    // Server side: accept the client, wait long enough that the client's first
+    // read is issued against an empty pipe, then deliver one snapshot line.
+    let server_thread = std::thread::spawn(move || {
+        // Returns 0 with ERROR_PIPE_CONNECTED if the client beat us here; both
+        // outcomes mean "client attached", so the result is intentionally ignored.
+        let _ = unsafe { ConnectNamedPipe(server, ptr::null_mut()) };
+        std::thread::sleep(Duration::from_millis(400));
+        let line = b"{\"v\":1,\"ts\":1,\"cpu\":{\"name\":\"Regr\",\"load\":1.0}}\n";
+        let mut written = 0u32;
+        unsafe {
+            WriteFile(
+                server,
+                line.as_ptr(),
+                line.len() as u32,
+                &mut written,
+                ptr::null_mut(),
+            );
+            FlushFileBuffers(server);
+        }
+        // Hold the pipe open briefly so the client finishes reading the line.
+        std::thread::sleep(Duration::from_millis(300));
+        unsafe { CloseHandle(server) };
+    });
+
+    // The real client. With the fix this opens a blocking handle and the reader
+    // thread waits 400 ms for the delayed write; with the old overlapped flag
+    // the reader would abort the process before this returns.
+    let client = perfwindow::ipc::pipe::PipeSensord::connect_to(&name, || {})
+        .expect("client connects to the test pipe");
+
+    // The snapshot must arrive — proving the blocking read completed instead of
+    // aborting on ERROR_IO_PENDING.
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        if client
+            .state
+            .lock()
+            .map(|s| s.latest.is_some())
+            .unwrap_or(false)
+        {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "no snapshot within 5s — blocking read did not deliver the delayed line"
+        );
+        std::thread::sleep(Duration::from_millis(25));
+    }
+
+    drop(client);
+    let _ = server_thread.join();
 }

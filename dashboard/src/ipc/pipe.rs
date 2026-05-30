@@ -1,12 +1,10 @@
 use crate::ipc::{parse_snapshot, SensorState, SharedState};
 use std::fs::{File, OpenOptions};
 use std::io::{BufRead, BufReader, Write};
-use std::os::windows::fs::OpenOptionsExt;
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 
 const PIPE_PATH: &str = r"\\.\pipe\PerfWindowSensor";
-const FILE_FLAG_OVERLAPPED: u32 = 0x4000_0000;
 
 #[derive(Debug)]
 pub enum ConnectError {
@@ -120,10 +118,25 @@ impl PipeSensord {
     }
 
     fn open_pipe_at(path: &str) -> Result<File, ConnectError> {
+        // Open the client end of the named pipe in the default *synchronous*
+        // (blocking) mode — NO `FILE_FLAG_OVERLAPPED`.
+        //
+        // The reader thread blocks in `BufReader::lines()` and the writer uses
+        // blocking `writeln!`; both are synchronous `ReadFile`/`WriteFile`
+        // calls. On a handle opened with `FILE_FLAG_OVERLAPPED`, a synchronous
+        // `ReadFile` can return `ERROR_IO_PENDING` (the completion is delivered
+        // via the OVERLAPPED structure, which `std::fs::File` never waits on).
+        // The Rust standard library treats that as an unrecoverable condition
+        // and calls `abort()` — "fatal runtime error: I/O error: operation
+        // failed to complete synchronously". That abort surfaces as a Win32
+        // `__fastfail` (0xc0000409 STATUS_STACK_BUFFER_OVERRUN), bypassing both
+        // the Rust panic hook and `SetUnhandledExceptionFilter`, so it left no
+        // breadcrumb in `panic.log` — the 0.9.1–0.9.4 "startup crash". Reads
+        // on a blocking handle simply wait for data, which is exactly what the
+        // reader thread wants, so the flag was never needed.
         OpenOptions::new()
             .read(true)
             .write(true)
-            .custom_flags(FILE_FLAG_OVERLAPPED)
             .open(path)
             .map_err(ConnectError::from)
     }

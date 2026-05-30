@@ -120,10 +120,13 @@ if the service fails to come up.
 
 `sensord` exposes two non-service modes for development and diagnostics:
 
-- `sensord.exe --dev` runs in legacy console mode (NDJSON on stdout, control
-  on stdin) — what the dashboard's `--dev` flag connects to via
-  `cargo run -p perfwindow`. Useful when you want to work on the dashboard
-  without installing the service.
+- Run with **no arguments**, `sensord.exe` starts in console mode (NDJSON on
+  stdout, control on stdin). This is what the dashboard's own `--dev` flag
+  spawns as a child (`cargo run -p perfwindow -- --dev`), so you can work on
+  the dashboard without installing the service. Note that, run as a normal
+  user, this path cannot read the admin-only sensors (CPU MSR temperatures /
+  clocks, NVMe SMART, so no Storage card) — those need the `LocalSystem`
+  service.
 - `sensord.exe --probe` dumps the full LibreHardwareMonitor hardware /
   sensor tree to stdout from an elevated prompt; useful for understanding
   which sensors are available on a given machine without any dashboard

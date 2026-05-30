@@ -7,6 +7,54 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ## [Unreleased]
 
+## [0.9.5] — 2026-05-30
+
+The release that **identifies and fixes** the startup crash 0.9.1–0.9.4 chased
+with ever-deeper diagnostics. The fault was a Rust runtime `abort()` — neither
+a `panic!` nor a native exception — which is exactly why neither the
+`panic.log` hook (0.9.3) nor the SEH filter (0.9.4) ever caught it.
+
+### Fixed
+
+- **Dashboard no longer aborts a few seconds into every session
+  (`0xc0000409` `STATUS_STACK_BUFFER_OVERRUN`).** The named-pipe client
+  (`ipc/pipe.rs`) opened the pipe with `FILE_FLAG_OVERLAPPED` but then read it
+  **synchronously** through `BufReader::lines()` (and wrote with blocking
+  `writeln!`). On Windows a synchronous `ReadFile` against an overlapped handle
+  can return `ERROR_IO_PENDING`; the Rust standard library treats that as
+  unrecoverable and calls `abort()` — *"fatal runtime error: I/O error:
+  operation failed to complete synchronously"*. The abort lowers to a Win32
+  `__fastfail`, which bypasses **both** the Rust panic hook and
+  `SetUnhandledExceptionFilter`, so it left no entry in `panic.log` — the dead
+  end every prior diagnostic release hit. The reads now use a default
+  **synchronous (blocking)** handle, which simply waits for data; the flag was
+  never needed, since nothing in the client uses overlapped / IOCP I/O. The
+  `--dev` child-process path never tripped this (its stdout is an ordinary
+  synchronous pipe), which is why the crash only ever reproduced through the
+  installed service. This also resolves the "Loading sensors… then crashes
+  halfway" symptom: the reader thread was aborting the whole process mid-load.
+
+### Added
+
+- **Deterministic regression guard**
+  (`tests/pipe_integration.rs::pipe_client_blocks_on_empty_pipe_without_aborting`):
+  stands up a named-pipe server, connects the real client and delivers the first
+  snapshot only after a delay, forcing the reader to block on an empty pipe —
+  the exact timing that aborted the shipped builds. If the pipe is ever reopened
+  overlapped, the reader aborts and fails the test binary outright.
+- **Headless full-UI render harness** (`tests/render_stress.rs`): renders every
+  panel across both temperature units, the heat-map, all six themes, several
+  viewport sizes and DPI scales, fed realistic *and* adversarial snapshots
+  (NaN / infinity / huge / empty / inconsistent core counts), running egui
+  layout + tessellation on the CPU with no GPU. Built to rule the panel/widget
+  layer out as the crash site; kept as a degenerate-geometry regression guard.
+
+### Changed
+
+- **Clean release profile restored** (`lto = true`, `strip = true`, `debug`
+  off). The 0.9.4 diagnostic profile that kept symbols and disabled LTO has
+  served its purpose now that the crash is identified and fixed.
+
 ## [0.9.4] — 2026-05-28
 
 A **diagnostic** release for the still-unidentified dashboard startup crash
@@ -792,7 +840,8 @@ User-facing application behaviour is unchanged.
   matching uninstaller that removes the exclusions, the `R0sensord` driver
   service, the install directory and the per-user data directory.
 
-[Unreleased]: https://github.com/lukastojiljkovic/PerfWindow/compare/v0.9.4...HEAD
+[Unreleased]: https://github.com/lukastojiljkovic/PerfWindow/compare/v0.9.5...HEAD
+[0.9.5]: https://github.com/lukastojiljkovic/PerfWindow/releases/tag/v0.9.5
 [0.9.4]: https://github.com/lukastojiljkovic/PerfWindow/releases/tag/v0.9.4
 [0.9.3]: https://github.com/lukastojiljkovic/PerfWindow/releases/tag/v0.9.3
 [0.9.2]: https://github.com/lukastojiljkovic/PerfWindow/releases/tag/v0.9.2
