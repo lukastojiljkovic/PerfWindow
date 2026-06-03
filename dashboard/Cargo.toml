@@ -14,7 +14,7 @@ name = "PerfWindow"
 path = "src/main.rs"
 
 [dependencies]
-eframe = "0.34.2"
+eframe = "0.34.3"
 egui = "0.34.2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -35,7 +35,7 @@ winresource = "0.1.31"
 test-support = []
 
 [dev-dependencies]
-egui_kittest = { version = "0.34.2", features = ["snapshot", "wgpu"] }
+egui_kittest = { version = "0.34.3", features = ["snapshot", "wgpu"] }
 perfwindow = { path = ".", features = ["test-support"] }
 
 [profile.release]
