@@ -7,16 +7,18 @@ public static class SnapshotBuilder
 {
     public static CpuInfo BuildCpu(IHardware cpu)
     {
+        // Heat-map cells are positional, so a missing/non-finite per-core load
+        // degrades to 0 rather than shifting every later core.
         var cores = cpu.Sensors
             .Where(s => s.SensorType == SensorType.Load && s.Name.StartsWith("CPU Core #"))
             .OrderBy(s => s.Index)
-            .Select(s => (double)(s.Value ?? 0f))
+            .Select(s => s.Value is float v && float.IsFinite(v) ? (double)v : 0.0)
             .ToList();
 
         var coreTemps = cpu.Sensors
             .Where(s => s.SensorType == SensorType.Temperature && s.Name.StartsWith("CPU Core #"))
             .OrderBy(s => s.Index)
-            .Select(s => (double?)s.Value)
+            .Select(s => s.Value is float v && float.IsFinite(v) ? (double?)v : null)
             .ToList();
 
         double? temp = cpu.Val(SensorType.Temperature, "Package")
@@ -30,7 +32,8 @@ public static class SnapshotBuilder
         // is the chipset bus base, not a CPU core clock.
         double? clock = cpu.Sensors
             .Where(s => s.SensorType == SensorType.Clock
-                     && !s.Name.Equals("Bus Speed", StringComparison.OrdinalIgnoreCase))
+                     && !s.Name.Equals("Bus Speed", StringComparison.OrdinalIgnoreCase)
+                     && s.Value is float v && float.IsFinite(v))
             .Select(s => (double?)s.Value)
             .DefaultIfEmpty(null)
             .Max();
@@ -48,7 +51,7 @@ public static class SnapshotBuilder
         double? distanceToTjMax = cpu.Sensors
             .Where(s => s.SensorType == SensorType.Temperature
                      && s.Name.Contains("Distance to TjMax", StringComparison.OrdinalIgnoreCase)
-                     && s.Value is float)
+                     && s.Value is float v && float.IsFinite(v))
             .Select(s => (double?)s.Value)
             .DefaultIfEmpty(null)
             .Min();
@@ -80,7 +83,46 @@ public static class SnapshotBuilder
             PowerMemoryW: cpu.Val(SensorType.Power, "CPU Memory"),
             PowerPlatformW: cpu.Val(SensorType.Power, "CPU Platform"),
             PCoreCount: pCoreCount > 0 ? pCoreCount : null,
-            ECoreCount: eCoreCount > 0 ? eCoreCount : null);
+            ECoreCount: eCoreCount > 0 ? eCoreCount : null,
+            BusClockMhz: cpu.Val(SensorType.Clock, "Bus Speed"),
+            CoreClocksMhz: CollectCoreClocks(cpu));
+    }
+
+    /// <summary>
+    /// Per-core clocks in core order, mirroring the <c>cores</c>/<c>core_temps</c>
+    /// partition: on hybrid CPUs P-Cores first then E-Cores, otherwise plain
+    /// "CPU Core #N" / "Core #N" by sensor index. Entries are positional, so a
+    /// missing/non-finite reading becomes a null element rather than shifting
+    /// later cores. Returns null when no per-core clock sensor exists.
+    /// </summary>
+    internal static IReadOnlyList<double?>? CollectCoreClocks(IHardware cpu)
+    {
+        List<(int Index, double? Value)>? pCores = null;
+        List<(int Index, double? Value)>? eCores = null;
+        List<(int Index, double? Value)>? plain = null;
+        foreach (var s in cpu.Sensors)
+        {
+            if (s.SensorType != SensorType.Clock) continue;
+            double? v = s.Value is float f && float.IsFinite(f) ? (double?)f : null;
+            if (s.Name.StartsWith("P-Core #", StringComparison.OrdinalIgnoreCase))
+                (pCores ??= new()).Add((s.Index, v));
+            else if (s.Name.StartsWith("E-Core #", StringComparison.OrdinalIgnoreCase))
+                (eCores ??= new()).Add((s.Index, v));
+            else if (s.Name.StartsWith("CPU Core #", StringComparison.OrdinalIgnoreCase)
+                  || s.Name.StartsWith("Core #", StringComparison.OrdinalIgnoreCase))
+                (plain ??= new()).Add((s.Index, v));
+        }
+
+        if (pCores is not null || eCores is not null)
+        {
+            var hybrid = new List<double?>((pCores?.Count ?? 0) + (eCores?.Count ?? 0));
+            if (pCores is not null)
+                hybrid.AddRange(pCores.OrderBy(c => c.Index).Select(c => c.Value));
+            if (eCores is not null)
+                hybrid.AddRange(eCores.OrderBy(c => c.Index).Select(c => c.Value));
+            return hybrid;
+        }
+        return plain?.OrderBy(c => c.Index).Select(c => c.Value).ToList();
     }
 
     /// <summary>
@@ -136,7 +178,9 @@ public static class SnapshotBuilder
                 DedicatedVramUsedMb: hw.Val(SensorType.SmallData, "D3D Dedicated Memory Used"),
                 SharedVramUsedMb: hw.Val(SensorType.SmallData, "D3D Shared Memory Used"),
                 VoltageV: voltage,
-                D3DEngines: CollectD3DEngines(hw)));
+                D3DEngines: CollectD3DEngines(hw),
+                MemoryClockMhz: hw.Val(SensorType.Clock, "GPU Memory"),
+                VideoEngineLoad: hw.Val(SensorType.Load, "GPU Video Engine")));
         }
         return gpus;
     }
@@ -161,7 +205,10 @@ public static class SnapshotBuilder
         {
             if (s.SensorType != SensorType.Load) continue;
             if (!s.Name.StartsWith("D3D ", StringComparison.OrdinalIgnoreCase)) continue;
-            if (s.Value is not float v) continue;
+            // D3DEngineLoad.Load is non-nullable, so a non-finite reading is
+            // filtered out entirely (it would otherwise kill JSON serialization
+            // of the whole snapshot).
+            if (s.Value is not float v || !float.IsFinite(v)) continue;
             string label = s.Name.Substring(4).Trim();
             if (label.Length == 0) continue;
             byName[label] = byName.TryGetValue(label, out var prior) ? prior + v : v;
@@ -225,7 +272,8 @@ public static class SnapshotBuilder
             CachedMb: pf.CachedMb,
             PagefileUsedMb: pf.UsedMb,
             PagefileTotalMb: pf.TotalMb,
-            DimmTemps: allHardware is null ? null : CollectDimmTemps(allHardware));
+            DimmTemps: allHardware is null ? null : CollectDimmTemps(allHardware),
+            Modules: allHardware is null ? null : CollectRamModules(allHardware));
     }
 
     /// <summary>
@@ -250,13 +298,95 @@ public static class SnapshotBuilder
             foreach (var s in hw.Sensors)
             {
                 if (s.SensorType != SensorType.Temperature) continue;
-                if (s.Value is not float v) continue;
+                // DimmTemp.TempC is non-nullable: a non-finite reading is
+                // filtered rather than substituted, keeping the JSON finite.
+                if (s.Value is not float v || !float.IsFinite(v)) continue;
                 if (!s.Name.StartsWith("DIMM ", StringComparison.OrdinalIgnoreCase)) continue;
                 list.Add(new DimmTemp(s.Name, v));
                 break;
             }
         }
         return list.Count > 0 ? list : null;
+    }
+
+    /// <summary>
+    /// Per-module SPD detail from the LHM <c>/memory/dimm/N</c> hardware nodes
+    /// (same enumeration as <see cref="CollectDimmTemps"/>). Returns <c>null</c>
+    /// when no module node exists so the JSON field stays absent.
+    /// </summary>
+    internal static IReadOnlyList<RamModule>? CollectRamModules(IEnumerable<IHardware> hardware)
+    {
+        List<RamModule>? list = null;
+        foreach (var hw in hardware)
+        {
+            if (hw.HardwareType != HardwareType.Memory) continue;
+            string id = hw.Identifier.ToString() ?? string.Empty;
+            if (!id.Contains("/memory/dimm/", StringComparison.OrdinalIgnoreCase)) continue;
+
+            // Same headline-sensor rule as CollectDimmTemps: only the exact
+            // "DIMM #N" reading is the module temperature; the other
+            // Temperature sensors on a dimm node are SPD spec limits.
+            double? temp = null;
+            foreach (var s in hw.Sensors)
+            {
+                if (s.SensorType != SensorType.Temperature) continue;
+                if (s.Value is not float v || !float.IsFinite(v)) continue;
+                if (!s.Name.StartsWith("DIMM ", StringComparison.OrdinalIgnoreCase)) continue;
+                temp = v;
+                break;
+            }
+
+            (list ??= new()).Add(new RamModule(
+                Label: hw.Name,
+                CapacityGb: hw.Val(SensorType.Data, "Capacity"),
+                TempC: temp,
+                Timings: FormatTimings(
+                    tAaNs: TimingVal(hw, "tAA "),
+                    tRcdNs: TimingVal(hw, "tRCD "),
+                    tRpNs: TimingVal(hw, "tRP "),
+                    tRasNs: TimingVal(hw, "tRAS "),
+                    tCkAvgMinNs: TimingVal(hw, "tCKAVGmin"))));
+        }
+        return list;
+    }
+
+    /// <summary>
+    /// SPD Timing sensor lookup by name prefix. LHM names timings
+    /// "tAA (CAS Latency Time)", "tCKAVGmin (Minimum Cycle Time)" etc.;
+    /// prefix matching (with the trailing space where ambiguity exists, e.g.
+    /// tRP vs tRPRE, tCKAVGmin vs tCKAVGmax) is exact enough while staying
+    /// robust against descriptive-suffix wording changes.
+    /// </summary>
+    private static double? TimingVal(IHardware hw, string namePrefix)
+    {
+        foreach (var s in hw.Sensors)
+            if (s.SensorType == SensorType.Timing
+                && s.Name.StartsWith(namePrefix, StringComparison.OrdinalIgnoreCase)
+                && s.Value is float v && float.IsFinite(v))
+                return v;
+        return null;
+    }
+
+    /// <summary>
+    /// CL-style timing summary, e.g. "CL40-40-40-80 @ 5602 MT/s". SPD stores
+    /// timings as nanoseconds; dividing each by the minimum cycle time yields
+    /// the familiar clock-cycle figures, and 2000/tCK is the DDR transfer
+    /// rate (two transfers per clock). Null unless the full set is finite —
+    /// a partial summary would look like a different (wrong) kit.
+    /// </summary>
+    internal static string? FormatTimings(double? tAaNs, double? tRcdNs, double? tRpNs,
+                                          double? tRasNs, double? tCkAvgMinNs)
+    {
+        if (tAaNs is not double tAa || tRcdNs is not double tRcd || tRpNs is not double tRp
+            || tRasNs is not double tRas || tCkAvgMinNs is not double tCk || tCk <= 0)
+            return null;
+
+        int mts = (int)Math.Round(2000.0 / tCk);
+        int cl = (int)Math.Round(tAa / tCk);
+        int trcd = (int)Math.Round(tRcd / tCk);
+        int trp = (int)Math.Round(tRp / tCk);
+        int tras = (int)Math.Round(tRas / tCk);
+        return $"CL{cl}-{trcd}-{trp}-{tras} @ {mts} MT/s";
     }
 
     public static List<StorageInfo> BuildStorage(IEnumerable<IHardware> hardware,
@@ -333,7 +463,12 @@ public static class SnapshotBuilder
                 WriteBps: writeBps,
                 PowerOnHours: powerOnHours,
                 PowerOnCount: powerOnCount,
-                AvailableSparePct: availableSparePct));
+                AvailableSparePct: availableSparePct,
+                PercentageUsedPct: hw.Val(SensorType.Level, "Percentage Used"),
+                TempWarnC: hw.Val(SensorType.Temperature, "Warning Temperature"),
+                TempCritC: hw.Val(SensorType.Temperature, "Critical Temperature"),
+                DataReadGb: hw.Val(SensorType.Data, "Data Read"),
+                DataWrittenGb: hw.Val(SensorType.Data, "Data Written")));
         }
         return list;
     }
@@ -351,13 +486,21 @@ public static class SnapshotBuilder
 
     public static BoardInfo? BuildBoard(IHardware? motherboard)
     {
+        // Identity (board name + BIOS) is worth a BoardInfo even when the
+        // super-IO chip is missing or unreadable; only a machine with neither
+        // a motherboard node nor BIOS data omits the section entirely.
         var io = motherboard?.SubHardware.FirstOrDefault();
-        if (io is null) return null;
+        var (biosVersion, biosDate) = BiosReader.Read();
+        if (motherboard is null && biosVersion is null && biosDate is null) return null;
         return new BoardInfo(
-            Temp: io.Val(SensorType.Temperature, "System")
+            Temp: io is null ? null
+                : io.Val(SensorType.Temperature, "System")
                ?? io.Val(SensorType.Temperature, "Motherboard")
                ?? io.FirstVal(SensorType.Temperature),
-            VrmTemp: io.Val(SensorType.Temperature, "VRM"));
+            VrmTemp: io?.Val(SensorType.Temperature, "VRM"),
+            Name: motherboard?.Name,
+            BiosVersion: biosVersion,
+            BiosDate: biosDate);
     }
 
     public static (List<FanInfo> fans, List<VoltageInfo> voltages) BuildBoardSensors(IHardware? motherboard)
@@ -367,11 +510,13 @@ public static class SnapshotBuilder
         var io = motherboard?.SubHardware.FirstOrDefault();
         if (io is not null)
         {
+            // Non-finite readings are dropped: a glitched super-IO value must
+            // never reach the JSON writer (strict number handling throws).
             foreach (var s in io.Sensors)
             {
-                if (s.SensorType == SensorType.Fan && s.Value is float rpm)
+                if (s.SensorType == SensorType.Fan && s.Value is float rpm && float.IsFinite(rpm))
                     fans.Add(new FanInfo(s.Name, rpm));
-                else if (s.SensorType == SensorType.Voltage && s.Value is float v)
+                else if (s.SensorType == SensorType.Voltage && s.Value is float v && float.IsFinite(v))
                     voltages.Add(new VoltageInfo(s.Name, v));
             }
         }
@@ -438,7 +583,7 @@ public static class SnapshotBuilder
         {
             if (s.SensorType == SensorType.Power
                 && s.Name.Equals(exactName, StringComparison.OrdinalIgnoreCase)
-                && s.Value is float v)
+                && s.Value is float v && float.IsFinite(v))
             {
                 return v;
             }
@@ -467,7 +612,8 @@ public static class SnapshotBuilder
             UpBps: upBps,
             LinkBps: linkBps > 0 ? linkBps : null,
             DownPct: linkBps > 0 ? NetUtil.Utilisation(downBps, linkBps) : null,
-            UpPct: linkBps > 0 ? NetUtil.Utilisation(upBps, linkBps) : null);
+            UpPct: linkBps > 0 ? NetUtil.Utilisation(upBps, linkBps) : null,
+            Wifi: WifiReader.Read(best.Name));
     }
 
     public static Snapshot Build(IReadOnlyList<IHardware> hardware, PagefileInfo pf,
@@ -500,9 +646,13 @@ public static class SnapshotBuilder
         // (Displays = full list) derive from this single call.
         var displays = TryBuild(() => (IReadOnlyList<DisplayInfo>?)DisplayReader.ReadAll());
 
+        // ts (seconds, back-compat) and ts_ms derive from one instant so a
+        // consumer can mix the two fields without seeing them disagree.
+        var now = DateTimeOffset.UtcNow;
+
         return new Snapshot(
             Version: 1,
-            Timestamp: DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
+            Timestamp: now.ToUnixTimeSeconds(),
             Cpu: TryBuild(() => cpuHw is null ? null : BuildCpu(cpuHw)),
             Gpu: TryBuild(() =>
             {
@@ -526,7 +676,8 @@ public static class SnapshotBuilder
             AtkFans: TryBuild(() => (IReadOnlyList<FanInfo>?)AtkReader.Read()),
             Display: displays is { Count: > 0 } ? displays[0] : null,
             Displays: displays,
-            Health: null);
+            Health: null,
+            TsMs: now.ToUnixTimeMilliseconds());
     }
 
     /// <summary>

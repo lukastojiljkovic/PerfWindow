@@ -31,11 +31,12 @@ pub fn tip(response: Response, label: &str) -> Response {
     }
 }
 
-/// The canonical metric → description table. Keep entries short and concrete.
+/// The canonical metric → description table. Keep entries short and concrete,
+/// keys unique (lookup returns the first match, so a duplicate key shadows
+/// every later entry) and every entry wired to a caller — dead text rots.
 #[rustfmt::skip]
 const DESCRIPTIONS: &[(&str, &str)] = &[
     // ---- CPU panel ----
-    ("LOAD",     "CPU utilisation across every logical core, 0–100 %. 100 % means every core is executing instructions every cycle."),
     ("TEMP",     "Hottest temperature reported by the component, in °C. Sustained values above ~85 °C on a CPU or ~83 °C on a GPU usually trigger thermal throttling."),
     ("CLOCK",    "Highest current core frequency, in GHz. Modern CPUs and GPUs boost above their base clock when there is thermal and power headroom."),
     ("POWER",    "Component power draw, in watts. Combines every on-die power domain reported by the silicon (cores, cache, memory controller, platform)."),
@@ -54,22 +55,16 @@ const DESCRIPTIONS: &[(&str, &str)] = &[
     ("USED",     "Memory currently allocated by running processes. Does not include OS file cache (see CACHED)."),
     ("FREE",     "Memory immediately available for new allocations. Does not count reclaimable cache pages — Windows can release the cache on demand."),
     ("CACHED",   "OS file-system cache. The kernel treats this as free memory and reclaims it transparently when applications need RAM."),
-    ("PAGEFILE", "Windows swap file usage. Sustained high usage means physical RAM is under pressure and access latency suffers."),
     ("DIMM",     "Hottest DIMM temperature on the board, in °C. Some platforms expose per-module thermal sensors; sustained values above ~85 °C usually indicate weak case airflow."),
-    ("DIMM MAX", "Hottest of multiple DIMM temperature sensors, in °C. Reported when the platform exposes more than one DIMM thermal sensor."),
 
-    // ---- Storage panel ----
-    ("HEALTH",   "Remaining drive life, 0–100 % (100 = new). Prefers vendor 'Remaining Life'; falls back to the NVMe-spec 'Available Spare' when only the latter is exposed."),
-    ("ACTIVITY", "Instantaneous busy time on the drive, 0–100 %. Spiking high while throughput stays low usually means many small random IOs."),
-    ("R/W",      "Per-drive read and write throughput, bytes per second."),
-    ("HOURS",    "Cumulative time the drive has spent powered on. A 24/7 server reaches 8 760 h per year."),
-    ("CYCLES",   "Number of cold-start cycles the drive has seen. Useful for spotting drives moved between machines or used in laptops with frequent sleep cycles."),
-    ("SPARE",    "NVMe Available Spare — percentage of the drive's spare flash blocks still untouched. Distinct from the Health figure: drops only when the firmware burns through its over-provisioning."),
+    // ---- Battery panel (HEALTH) ----
+    ("HEALTH",   "Remaining capacity relative to the design capacity, 0–100 % (100 = new). Computed from the embedded controller's full-charge and design figures."),
 
     // ---- Network panel ----
     ("DOWN",     "Inbound throughput on the active network adapter, bytes per second."),
     ("UP",       "Outbound throughput on the active network adapter, bytes per second."),
     ("LINK",     "Adapter's negotiated link speed (for example 1 Gbit/s or 2.4 Gbit/s). Empty when the OS does not report it."),
+    ("WI-FI",    "Connected wireless network: SSID, signal quality and the negotiated PHY rate (the radio link's current top speed, not your internet speed)."),
     ("IFACE",    "Active network interface (Wi-Fi adapter name or Ethernet device). Selected as the interface currently passing traffic."),
 
     // ---- Battery panel ----
@@ -83,7 +78,9 @@ const DESCRIPTIONS: &[(&str, &str)] = &[
     ("VRM",      "Voltage Regulator Module temperature, in °C. Hot VRMs throttle CPU power delivery; values above 90 °C suggest a heatsink or airflow problem."),
 
     // ---- Footer ----
-    ("UP",       "Time since the OS last booted. Resets after a full shutdown or restart, not after sleep."),
+    // Keyed "UPTIME", not "UP": the network panel already owns "UP" and a
+    // duplicate key would shadow this entry (lookup returns the first match).
+    ("UPTIME",   "Time since the OS last booted. Resets after a full shutdown or restart, not after sleep."),
 ];
 
 #[cfg(test)]
@@ -113,5 +110,24 @@ mod tests {
             assert!(!key.is_empty(), "empty key in DESCRIPTIONS");
             assert!(!value.is_empty(), "empty value for key {key}");
         }
+    }
+
+    #[test]
+    fn keys_are_unique_so_no_entry_is_shadowed() {
+        let mut seen = std::collections::HashSet::new();
+        for (key, _) in DESCRIPTIONS {
+            assert!(
+                seen.insert(key.to_ascii_uppercase()),
+                "duplicate DESCRIPTIONS key: {key}"
+            );
+        }
+    }
+
+    #[test]
+    fn uptime_and_network_up_are_distinct_entries() {
+        let uptime = describe("UPTIME").expect("UPTIME entry exists");
+        let up = describe("UP").expect("UP entry exists");
+        assert!(uptime.contains("booted"));
+        assert!(up.contains("Outbound"));
     }
 }

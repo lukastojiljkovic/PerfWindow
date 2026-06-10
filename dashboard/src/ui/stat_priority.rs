@@ -18,6 +18,11 @@ use egui::Color32;
 /// One stat-row candidate. `priority == 0` is the highest priority (kept
 /// first); higher numbers drop earlier as capacity shrinks. `tooltip_key`
 /// must be a label recognised by [`crate::ui::tooltips::describe`].
+///
+/// `hover_extra`, when set, replaces the table tooltip wholesale — panels use
+/// it for data-bearing hovers (per-DIMM module detail, bus clock) and are
+/// expected to fold the [`crate::ui::tooltips::describe`] base text into the
+/// string themselves when they want to keep it.
 #[derive(Debug, Clone)]
 pub struct StatCandidate {
     pub priority: u8,
@@ -25,6 +30,7 @@ pub struct StatCandidate {
     pub value: String,
     pub color: Option<Color32>,
     pub tooltip_key: &'static str,
+    pub hover_extra: Option<String>,
 }
 
 /// Select the subset of `candidates` that fits the capacity, sorted by
@@ -52,10 +58,7 @@ pub fn render(
     match capacity.columns {
         1 => {
             for c in selected {
-                tip(
-                    stat_row(ui, theme, c.label, &c.value, c.color),
-                    c.tooltip_key,
-                );
+                attach_hover(stat_row(ui, theme, c.label, &c.value, c.color), c);
             }
         }
         _ => {
@@ -65,19 +68,26 @@ pub fn render(
             ui.columns(2, |cols| {
                 let left = &mut cols[0];
                 for c in &selected[..split] {
-                    tip(
-                        stat_row(left, theme, c.label, &c.value, c.color),
-                        c.tooltip_key,
-                    );
+                    attach_hover(stat_row(left, theme, c.label, &c.value, c.color), c);
                 }
                 let right = &mut cols[1];
                 for c in &selected[split..] {
-                    tip(
-                        stat_row(right, theme, c.label, &c.value, c.color),
-                        c.tooltip_key,
-                    );
+                    attach_hover(stat_row(right, theme, c.label, &c.value, c.color), c);
                 }
             });
+        }
+    }
+}
+
+/// Attach the candidate's hover text: a panel-supplied `hover_extra` wins
+/// over the static tooltip table.
+fn attach_hover(response: egui::Response, c: &StatCandidate) {
+    match &c.hover_extra {
+        Some(text) => {
+            response.on_hover_text(text.clone());
+        }
+        None => {
+            tip(response, c.tooltip_key);
         }
     }
 }
@@ -93,6 +103,7 @@ mod tests {
             value: "x".into(),
             color: None,
             tooltip_key: label,
+            hover_extra: None,
         }
     }
 

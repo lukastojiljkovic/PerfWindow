@@ -1,7 +1,7 @@
-use crate::ipc::{parse_snapshot, Snapshot};
-use std::io::{BufRead, BufReader, Write};
+use crate::ipc::{parse_line, spawn_control_writer, ControlMsg, Line, ProgressInfo, Snapshot};
+use std::io::{BufRead, BufReader};
 use std::os::windows::process::CommandExt;
-use std::process::{Child, ChildStdin, Command, Stdio};
+use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 
@@ -11,6 +11,12 @@ use std::thread::JoinHandle;
 pub struct SensorState {
     pub latest: Option<Snapshot>,
     pub alive: bool,
+    /// Latest staged-init progress line, if sensord has emitted any.
+    pub progress: Option<ProgressInfo>,
+    /// When the reader last parsed ANY line (snapshot or progress). The
+    /// startup watchdog in `PerfApp::ingest` treats a fresh value as proof
+    /// of life even before the first snapshot arrives.
+    pub last_line_at: Option<std::time::Instant>,
 }
 
 pub type SharedState = Arc<Mutex<SensorState>>;
@@ -18,7 +24,8 @@ pub type SharedState = Arc<Mutex<SensorState>>;
 /// A running (or crashed) `sensord` child and the resources to talk to it.
 pub struct Sensord {
     child: Child,
-    stdin: Option<ChildStdin>,
+    control: Option<std::sync::mpsc::Sender<ControlMsg>>,
+    writer: Option<JoinHandle<()>>,
     reader: Option<JoinHandle<()>>,
     pub state: SharedState,
 }
@@ -45,25 +52,26 @@ impl Sensord {
         let stdout = child.stdout.take().expect("piped stdout");
         let stdin = child.stdin.take();
         let state: SharedState = Arc::new(Mutex::new(SensorState {
-            latest: None,
             alive: true,
+            ..SensorState::default()
         }));
 
         let reader_state = Arc::clone(&state);
         let reader = std::thread::spawn(move || {
             let lines = BufReader::new(stdout).lines();
             for line in lines {
-                match line {
-                    Ok(line) => {
-                        if let Some(snap) = parse_snapshot(&line) {
-                            if let Ok(mut s) = reader_state.lock() {
-                                s.latest = Some(snap);
-                            }
-                            repaint();
-                        }
+                let Ok(line) = line else { break };
+                let Some(parsed) = parse_line(&line) else {
+                    continue;
+                };
+                if let Ok(mut s) = reader_state.lock() {
+                    s.last_line_at = Some(std::time::Instant::now());
+                    match parsed {
+                        Line::Snap(snap) => s.latest = Some(*snap),
+                        Line::Progress(p) => s.progress = Some(p),
                     }
-                    Err(_) => break,
                 }
+                repaint();
             }
             // stdout closed or errored -> sensord exited.
             if let Ok(mut s) = reader_state.lock() {
@@ -72,18 +80,32 @@ impl Sensord {
             repaint();
         });
 
+        let (control, writer) = match stdin {
+            Some(stdin) => {
+                let (tx, rx) = std::sync::mpsc::channel();
+                let writer = spawn_control_writer(stdin, rx, Arc::clone(&state));
+                (Some(tx), Some(writer))
+            }
+            None => (None, None),
+        };
+
         Ok(Sensord {
             child,
-            stdin,
+            control,
+            writer,
             reader: Some(reader),
             state,
         })
     }
 
-    /// Send a refresh-interval change to sensord.
+    /// Queue a refresh-interval change for the writer thread. Non-blocking.
     pub fn set_interval(&mut self, ms: u32) {
-        if let Some(stdin) = &mut self.stdin {
-            let _ = writeln!(stdin, "{{\"interval_ms\":{ms}}}");
+        if let Some(tx) = &self.control {
+            if tx.send(ControlMsg::SetInterval(ms)).is_err() {
+                // The writer thread already exited (it flips `alive` on a
+                // write failure); drop the dead channel so later calls no-op.
+                self.control = None;
+            }
         }
     }
 
@@ -92,11 +114,19 @@ impl Sensord {
         self.state.lock().map(|s| s.alive).unwrap_or(false)
     }
 
-    /// Close `stdin` so the console-child sees EOF on its control loop and
-    /// exits cleanly. Idempotent. This is the canonical close path; `Drop`
-    /// below calls it as a safety net.
+    /// Queue a shutdown message and close the control channel; the writer
+    /// thread performs the blocking write off the UI thread and then drops
+    /// `stdin`, so the console-child sees EOF on its control loop and exits
+    /// cleanly. Idempotent; never joins or blocks. This is the canonical
+    /// close path; `Drop` below calls it as a safety net.
     pub fn shutdown(&mut self) {
-        self.stdin.take();
+        if let Some(tx) = self.control.take() {
+            let _ = tx.send(ControlMsg::Shutdown);
+        }
+        // Detach both threads: the reader blocks in `BufReader::lines` until
+        // the child's stdout closes, and the writer may be mid-write.
+        let _ = self.reader.take();
+        let _ = self.writer.take();
     }
 }
 
@@ -126,6 +156,9 @@ fn sensord_path() -> std::io::Result<std::path::PathBuf> {
 
 impl Drop for Sensord {
     fn drop(&mut self) {
+        // `shutdown` queues the exit message and detaches both I/O threads —
+        // joining them here could hang teardown, because the reader blocks in
+        // `BufReader::lines()` until the OS fully releases the child's stdout.
         self.shutdown();
         // Give the child a moment, then force-kill if still running.
         for _ in 0..20 {
@@ -136,13 +169,6 @@ impl Drop for Sensord {
         }
         let _ = self.child.kill();
         let _ = self.child.wait();
-        // The reader thread is detached on drop. Joining here can hang
-        // shutdown: `BufReader::lines()` blocks on `read()`, and even after
-        // the child is killed there is a window where the stdout handle the
-        // thread holds is still considered open by the OS. The pipe-client
-        // path made the same fix in 0.8.1; the dev-mode child path was
-        // overlooked at the time.
-        let _ = self.reader.take();
     }
 }
 
@@ -153,21 +179,21 @@ mod tests {
 
     #[test]
     fn fresh_state_is_not_alive_by_default() {
-        // `SensorState::default()` is what `Sensord::spawn` overwrites with a
-        // freshly-built `SensorState { latest: None, alive: true }`. The
-        // derived default carries `bool::default() == false` and is used only
-        // for sites that construct a placeholder before plumbing in a real
-        // sensord child.
+        // The derived default carries `bool::default() == false` and is used
+        // only for sites that construct a placeholder before plumbing in a
+        // real sensord child; `Sensord::spawn` builds an alive state itself.
         let s = SensorState::default();
         assert!(!s.alive);
         assert!(s.latest.is_none());
+        assert!(s.progress.is_none());
+        assert!(s.last_line_at.is_none());
     }
 
     #[test]
     fn mark_dead_flips_alive_to_false() {
         let mut s = SensorState {
-            latest: None,
             alive: true,
+            ..SensorState::default()
         };
         s.alive = false;
         assert!(!s.alive);
@@ -176,8 +202,8 @@ mod tests {
     #[test]
     fn is_alive_reads_through_the_mutex() {
         let state = Arc::new(Mutex::new(SensorState {
-            latest: None,
             alive: true,
+            ..SensorState::default()
         }));
         let alive_first = state.lock().map(|s| s.alive).unwrap_or(false);
         assert!(alive_first);
@@ -189,8 +215,8 @@ mod tests {
     #[test]
     fn is_alive_returns_false_on_poisoned_mutex() {
         let state: Arc<Mutex<SensorState>> = Arc::new(Mutex::new(SensorState {
-            latest: None,
             alive: true,
+            ..SensorState::default()
         }));
         let state_for_panic = Arc::clone(&state);
         let _ = std::thread::spawn(move || {

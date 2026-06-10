@@ -40,42 +40,72 @@ public static class AtkReader
     };
 
     /// <summary>
+    /// Probe-once gate (SND-4): null = never probed, false = ATK absent. On
+    /// the ~100 % of machines that are not ASUS, the first call fails the WMI
+    /// lookup and every later tick returns without touching WMI at all —
+    /// re-connecting the scope each second cost real CPU for nothing.
+    /// </summary>
+    private static bool? s_present;
+
+    /// <summary>
+    /// The single AsusAtkWmi_WMNB instance, kept alive across ticks on ASUS
+    /// hardware so DSTS calls reuse the established WMI connection.
+    /// </summary>
+    private static ManagementObject? s_instance;
+
+    /// <summary>
     /// Returns every populated ATK fan reading, or <c>null</c> when the ATK
     /// bridge is unreachable. Never throws.
     /// </summary>
     public static List<FanInfo>? Read()
     {
+        if (s_present == false) return null;
         try
         {
-            var scope = new ManagementScope(Namespace);
-            scope.Connect();
-            if (!scope.IsConnected) return null;
-
-            // Get the (single) instance of AsusAtkWmi_WMNB.
-            using var searcher = new ManagementObjectSearcher(scope, new ObjectQuery($"SELECT * FROM {ClassName}"));
-            using var collection = searcher.Get();
-            ManagementObject? instance = null;
-            foreach (ManagementObject mo in collection)
+            if (s_instance is null)
             {
-                instance = mo;
-                break;
+                var scope = new ManagementScope(Namespace);
+                scope.Connect();
+                if (!scope.IsConnected)
+                {
+                    s_present = false;
+                    return null;
+                }
+
+                // Get the (single) instance of AsusAtkWmi_WMNB.
+                using var searcher = new ManagementObjectSearcher(scope, new ObjectQuery($"SELECT * FROM {ClassName}"));
+                using var collection = searcher.Get();
+                foreach (ManagementObject mo in collection)
+                {
+                    s_instance = mo;
+                    break;
+                }
+                if (s_instance is null)
+                {
+                    s_present = false;
+                    return null;
+                }
+                s_present = true;
             }
-            if (instance is null) return null;
 
             var fans = new List<FanInfo>();
             foreach (var (id, label) in FanDevices)
             {
-                double? value = InvokeDsts(instance, id);
+                double? value = InvokeDsts(s_instance, id);
                 if (value.HasValue)
                     fans.Add(new FanInfo(label, value.Value));
             }
-            instance.Dispose();
             return fans.Count > 0 ? fans : null;
         }
         catch
         {
-            // ATK driver not present, WMI namespace missing, or DSTS not
-            // callable — caller treats as "no data".
+            // A failure during the initial probe (ATK driver not present, WMI
+            // namespace missing) marks ATK permanently absent. A failure after
+            // a successful probe — ASUS hardware hitting a transient WMI error
+            // — only drops the cached instance so the next tick reconnects.
+            if (s_present != true) s_present = false;
+            try { s_instance?.Dispose(); } catch { /* COM teardown is best-effort */ }
+            s_instance = null;
             return null;
         }
     }

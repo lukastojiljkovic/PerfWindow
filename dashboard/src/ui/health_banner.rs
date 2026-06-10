@@ -105,10 +105,7 @@ pub fn health_banner(ui: &mut egui::Ui, app: &mut PerfApp) {
     ));
 
     if install_clicked {
-        // `webbrowser::open` returns `Result`; we deliberately swallow it
-        // because there's no UI surface for an "open failed" path and the
-        // user can always copy the URL manually.
-        let _ = webbrowser::open("https://pawnio.eu");
+        crate::ui::shell::open_url("https://pawnio.eu");
     }
     if dismiss_clicked {
         app.health_banner_dismissed = true;
@@ -173,6 +170,7 @@ mod tests {
             display: None,
             displays: None,
             health,
+            ts_ms: None,
         }
     }
 

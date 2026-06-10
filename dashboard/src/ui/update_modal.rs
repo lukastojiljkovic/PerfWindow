@@ -36,8 +36,12 @@ pub enum ModalPhase {
         bytes: u64,
         total: u64,
     },
-    /// "Failed" screen: an error message + browser fallback + retry.
+    /// "Failed" screen for a download error: message + browser fallback +
+    /// retry.
     Failed { message: String },
+    /// "Failed" screen for an installer that downloaded fine but could not
+    /// be started — distinct so the headline does not blame the download.
+    LaunchFailed { message: String },
 }
 
 /// Render the modal if `app.update_modal_open` is set.
@@ -54,7 +58,13 @@ pub fn update_modal(ctx: &egui::Context, app: &mut PerfApp) {
         match &*guard {
             UpdateState::Available { release, .. } => release.clone(),
             _ => {
+                // The release evaporated (e.g. a manual re-check) while the
+                // modal was up. Any in-flight download dies with it,
+                // otherwise the orphaned worker would finish and launch the
+                // installer under a closed modal.
+                app.update_download_cancel.store(true, Ordering::SeqCst);
                 app.update_modal_open = false;
+                app.update_modal_phase = ModalPhase::Confirm;
                 return;
             }
         }
@@ -64,13 +74,15 @@ pub fn update_modal(ctx: &egui::Context, app: &mut PerfApp) {
     // bar moves frame-by-frame; the background thread only writes into the
     // progress mutex.
     if matches!(app.update_modal_phase, ModalPhase::Downloading { .. }) {
-        if let Ok(p) = app.update_download_progress.lock() {
-            app.update_modal_phase = ModalPhase::Downloading {
-                progress: p.fraction(),
-                bytes: p.bytes,
-                total: p.total,
-            };
-        }
+        let p = app
+            .update_download_progress
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        app.update_modal_phase = ModalPhase::Downloading {
+            progress: p.fraction(),
+            bytes: p.bytes,
+            total: p.total,
+        };
     }
 
     let theme = app.theme.clone();
@@ -121,13 +133,22 @@ pub fn update_modal(ctx: &egui::Context, app: &mut PerfApp) {
                                 ui, &theme, app, &release, *progress, *bytes, *total,
                             ),
                             ModalPhase::Failed { message } => {
-                                failed_screen(ui, &theme, app, &release, message, &mut close);
+                                failed_screen(
+                                    ui, &theme, app, &release, message, false, &mut close,
+                                );
+                            }
+                            ModalPhase::LaunchFailed { message } => {
+                                failed_screen(ui, &theme, app, &release, message, true, &mut close);
                             }
                         });
                 });
         });
 
     if close {
+        // Closing abandons any in-flight download: without the cancel the
+        // orphaned worker's Ready outcome would launch the installer with no
+        // modal on screen.
+        app.update_download_cancel.store(true, Ordering::SeqCst);
         app.update_modal_open = false;
         app.update_modal_phase = ModalPhase::Confirm;
     }
@@ -296,20 +317,32 @@ fn failed_screen(
     app: &mut PerfApp,
     release: &crate::update::Release,
     message: &str,
+    launch_failure: bool,
     close: &mut bool,
 ) {
+    let (title, intro) = if launch_failure {
+        (
+            "\u{2715} COULD NOT START INSTALLER",
+            "The installer downloaded but could not be started:",
+        )
+    } else {
+        (
+            "\u{2715} DOWNLOAD FAILED",
+            "Could not download the installer:",
+        )
+    };
     ui.vertical(|ui| {
         ui.spacing_mut().item_spacing.y = 12.0;
 
         ui.label(
-            egui::RichText::new(crate::format::letter_spaced("\u{2715} DOWNLOAD FAILED"))
+            egui::RichText::new(crate::format::letter_spaced(title))
                 .family(theme.font_display.egui())
                 .size(13.0)
                 .color(theme.hot),
         );
 
         ui.label(
-            egui::RichText::new(format!("Could not download the installer:\n{message}"))
+            egui::RichText::new(format!("{intro}\n{message}"))
                 .family(theme.font_data.egui())
                 .size(11.0)
                 .color(theme.dim),
@@ -330,7 +363,7 @@ fn failed_screen(
             }
             ui.add_space(8.0);
             if action_button(ui, theme, "Open in browser", false).clicked() {
-                open_in_browser(&release.html_url);
+                crate::ui::shell::open_url(&release.html_url);
                 *close = true;
             }
         });
@@ -341,6 +374,13 @@ fn failed_screen(
 /// Downloading screen. Outcome is written to `app.update_download_outcome`
 /// by the worker thread and applied to the UI by
 /// [`PerfApp::poll_download_outcome`] on the next frame.
+///
+/// Every attempt gets a FRESH cancel flag, FRESH progress, a UNIQUE dest
+/// file and a new generation stamp. Sharing any of these with an orphaned
+/// worker from an earlier attempt corrupts this one: resetting a shared
+/// cancel flag un-cancels the orphan, a shared progress counter masks a
+/// short file, and a shared dest lets two writers interleave into one
+/// installer.
 fn start_update_download(ctx: &egui::Context, app: &mut PerfApp, release: &crate::update::Release) {
     let Some(asset) = release.installer_asset().cloned() else {
         app.update_modal_phase = ModalPhase::Failed {
@@ -348,14 +388,31 @@ fn start_update_download(ctx: &egui::Context, app: &mut PerfApp, release: &crate
         };
         return;
     };
+
+    app.update_download_generation += 1;
+    let generation = app.update_download_generation;
+    app.update_download_cancel = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    app.update_download_progress = std::sync::Arc::new(std::sync::Mutex::new(
+        crate::update::download::DownloadProgress {
+            bytes: 0,
+            total: asset.size,
+        },
+    ));
     let dest = std::env::temp_dir().join(format!(
-        "PerfWindow-Setup-{}.exe",
-        release.tag_name.trim_start_matches('v')
+        "PerfWindow-Setup-{}-{}.exe",
+        release.tag_name.trim_start_matches('v'),
+        generation,
     ));
 
-    app.update_download_cancel.store(false, Ordering::SeqCst);
-    if let Ok(mut g) = app.update_download_outcome.lock() {
-        *g = None;
+    // Drain any unconsumed outcome from an abandoned attempt; a completed
+    // file it left behind is unwanted.
+    if let Some((_, crate::app::DownloadOutcome::Ready(stale))) = app
+        .update_download_outcome
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .take()
+    {
+        let _ = std::fs::remove_file(stale);
     }
     app.update_modal_phase = ModalPhase::Downloading {
         progress: 0.0,
@@ -377,12 +434,16 @@ fn start_update_download(ctx: &egui::Context, app: &mut PerfApp, release: &crate
         cancel,
         move || repaint_ctx.request_repaint(),
         move |result| {
-            if let Ok(mut g) = outcome.lock() {
-                *g = Some(match result {
-                    Ok(path) => crate::app::DownloadOutcome::Ready(path),
-                    Err(e) => crate::app::DownloadOutcome::Failed(e.to_string()),
-                });
-            }
+            let value = match result {
+                Ok(path) => crate::app::DownloadOutcome::Ready(path),
+                Err(crate::update::download::DownloadError::Cancelled) => {
+                    crate::app::DownloadOutcome::Cancelled
+                }
+                Err(e) => crate::app::DownloadOutcome::Failed(e.to_string()),
+            };
+            *outcome
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) = Some((generation, value));
             finish_ctx.request_repaint();
         },
     );
@@ -450,14 +511,4 @@ fn close_button(ui: &mut egui::Ui, theme: &Theme) -> Response {
         ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
     }
     response
-}
-
-/// Shell-execute a URL via the Windows shell so the OS picks the default
-/// browser. Errors are logged and otherwise ignored — the user can copy the
-/// URL manually if the spawn fails.
-fn open_in_browser(url: &str) {
-    use std::process::Command;
-    if let Err(e) = Command::new("cmd").args(["/C", "start", "", url]).spawn() {
-        eprintln!("PerfWindow: failed to open {url} in browser: {e}");
-    }
 }

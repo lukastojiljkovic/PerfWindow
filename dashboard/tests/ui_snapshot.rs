@@ -277,7 +277,7 @@ fn snapshot_loading_phase(scenario: &str, phase: ConnectPhase) {
                 egui::CentralPanel::default()
                     .frame(egui::Frame::NONE.fill(theme.bg))
                     .show(ctx, |ui| {
-                        let _ = loading_screen(ui, &theme, &phase_clone);
+                        let _ = loading_screen(ui, &theme, &phase_clone, None);
                     });
             },
         );
@@ -312,5 +312,41 @@ fn loading_failed_uac_cancelled_matches_baseline() {
     snapshot_loading_phase(
         "loading_failed_uac_cancelled",
         ConnectPhase::Failed(FailedReason::UacCancelled),
+    );
+}
+
+/// Staged-init checklist mid-load: three categories done, one loading, four
+/// pending. One theme is enough — the checklist adds no theme-specific
+/// geometry beyond what the phase scenarios above already cover per theme.
+#[test]
+fn loading_sensors_checklist_matches_baseline() {
+    use perfwindow::ipc::snapshot::ProgressInfo;
+
+    let mut results = SnapshotResults::new();
+    let theme = Theme::for_id(ThemeId::Slate);
+    let progress = ProgressInfo {
+        loading: Some("gpu".into()),
+        done: vec!["cpu".into(), "ram".into(), "motherboard".into()],
+        pending: vec![
+            "storage".into(),
+            "network".into(),
+            "controller".into(),
+            "battery".into(),
+        ],
+    };
+    snapshot_scenario(
+        &mut results,
+        egui::vec2(1180.0, 600.0),
+        ThemeId::Slate,
+        "loading_sensors_checklist",
+        move |ctx| {
+            #[allow(deprecated)]
+            egui::CentralPanel::default()
+                .frame(egui::Frame::NONE.fill(theme.bg))
+                .show(ctx, |ui| {
+                    let _ =
+                        loading_screen(ui, &theme, &ConnectPhase::LoadingSensors, Some(&progress));
+                });
+        },
     );
 }

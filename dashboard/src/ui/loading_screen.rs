@@ -7,6 +7,7 @@
 
 use crate::format::letter_spaced;
 use crate::ipc::connect::{ConnectPhase, FailedReason};
+use crate::ipc::ProgressInfo;
 use crate::theme::Theme;
 use egui::{Align, FontId, Layout, RichText, Sense, Stroke, Vec2};
 
@@ -18,6 +19,13 @@ const BUTTON_GAP: f32 = 24.0;
 const BUTTON_PAD: Vec2 = Vec2::new(20.0, 9.0);
 const SPINNER_GLYPHS: [&str; 4] = ["\u{25d0}", "\u{25d3}", "\u{25d1}", "\u{25d2}"];
 const SPINNER_PERIOD_S: f64 = 1.0;
+/// Width of the staged-init checklist block. Fixed so the left-aligned rows
+/// sit as one centred column instead of each row centring on its own width.
+const CHECKLIST_WIDTH: f32 = 200.0;
+/// Width reserved for a row's status glyph, so the category names line up in
+/// a column regardless of the glyph (✓ / spinner / blank).
+const CHECKLIST_GLYPH_W: f32 = 14.0;
+const CHECKLIST_ROW_FONT: f32 = 11.0;
 /// Below this card width the Retry / Exit buttons stack vertically instead
 /// of going side-by-side — fits roughly one full button (~96 px) plus padding
 /// on either side. Same threshold the egui examples use for narrow-window
@@ -35,7 +43,17 @@ pub enum LoadingAction {
 /// Paint the loading screen for the given `phase`. Returns the button
 /// choice. Caller wires Retry to a fresh `spawn_connect` and Exit to
 /// `want_quit = true`.
-pub fn loading_screen(ui: &mut egui::Ui, theme: &Theme, phase: &ConnectPhase) -> LoadingAction {
+///
+/// `progress` is the latest staged-init progress line from sensord; it only
+/// matters in the `LoadingSensors` phase, where it replaces the static
+/// spinner phrase with a per-category checklist. `None` (old sensord, or no
+/// progress line yet) keeps the spinner fallback.
+pub fn loading_screen(
+    ui: &mut egui::Ui,
+    theme: &Theme,
+    phase: &ConnectPhase,
+    progress: Option<&ProgressInfo>,
+) -> LoadingAction {
     let mut action = LoadingAction::None;
     ui.vertical_centered(|ui| {
         ui.add_space(TOP_GAP);
@@ -59,13 +77,101 @@ pub fn loading_screen(ui: &mut egui::Ui, theme: &Theme, phase: &ConnectPhase) ->
             ConnectPhase::StartingService => {
                 phrase_with_spinner(ui, theme, "Starting sensor service...")
             }
-            ConnectPhase::LoadingSensors => phrase_with_spinner(ui, theme, "Loading sensors..."),
+            ConnectPhase::LoadingSensors => match progress.filter(|p| has_rows(p)) {
+                Some(p) => progress_checklist(ui, theme, p),
+                None => phrase_with_spinner(ui, theme, "Loading sensors..."),
+            },
             ConnectPhase::Failed(reason) => {
                 action = failed(ui, theme, reason);
             }
         }
     });
     action
+}
+
+/// A progress line with every list empty (adversarial / degenerate input)
+/// would paint a blank screen; treat it like absent progress instead.
+fn has_rows(progress: &ProgressInfo) -> bool {
+    progress.loading.is_some() || !progress.done.is_empty() || !progress.pending.is_empty()
+}
+
+/// Render the staged-init checklist: one row per category — done in accent
+/// with a check mark, the in-flight one with the spinner glyph, pending dim.
+///
+/// Rows come straight off the wire in `done` → `loading` → `pending` order:
+/// for a conforming sensord that concatenation IS the canonical category
+/// order (cpu, ram, motherboard, gpu, storage, network, controller, battery),
+/// and an unknown category from a future sensord renders as-is in whatever
+/// slot the service put it — never dropped, never a panic.
+fn progress_checklist(ui: &mut egui::Ui, theme: &Theme, progress: &ProgressInfo) {
+    ui.allocate_ui_with_layout(
+        Vec2::new(CHECKLIST_WIDTH, 0.0),
+        Layout::top_down(Align::Min),
+        |ui| {
+            ui.spacing_mut().item_spacing.y = 5.0;
+            for name in &progress.done {
+                checklist_row(ui, theme, "\u{2713}", theme.accent, name, theme.accent);
+            }
+            if let Some(name) = &progress.loading {
+                let t = ui.input(|i| i.time);
+                let idx = ((t / SPINNER_PERIOD_S * SPINNER_GLYPHS.len() as f64) as usize)
+                    % SPINNER_GLYPHS.len();
+                checklist_row(
+                    ui,
+                    theme,
+                    SPINNER_GLYPHS[idx],
+                    theme.accent,
+                    name,
+                    theme.ink,
+                );
+            }
+            for name in &progress.pending {
+                checklist_row(ui, theme, "", theme.dim, name, theme.dim);
+            }
+        },
+    );
+    // The spinner glyph only animates while frames keep coming; idle connect
+    // threads produce none, so schedule the next one ourselves.
+    if progress.loading.is_some() {
+        ui.ctx()
+            .request_repaint_after(std::time::Duration::from_millis(120));
+    }
+}
+
+/// One checklist row: a fixed-width glyph slot followed by the upper-cased,
+/// letter-spaced category name. The fixed slot keeps the name column aligned
+/// across the ✓ / spinner / blank states.
+fn checklist_row(
+    ui: &mut egui::Ui,
+    theme: &Theme,
+    glyph: &str,
+    glyph_color: egui::Color32,
+    name: &str,
+    name_color: egui::Color32,
+) {
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 6.0;
+        let (rect, _) = ui.allocate_exact_size(
+            Vec2::new(CHECKLIST_GLYPH_W, CHECKLIST_ROW_FONT + 4.0),
+            Sense::hover(),
+        );
+        if !glyph.is_empty() && ui.is_rect_visible(rect) {
+            let painter = ui.painter_at(rect);
+            let font = FontId::new(CHECKLIST_ROW_FONT, theme.font_data.egui());
+            let galley = painter.layout_no_wrap(glyph.to_owned(), font, glyph_color);
+            let pos = egui::Pos2::new(
+                rect.center().x - galley.size().x / 2.0,
+                rect.center().y - galley.size().y / 2.0,
+            );
+            painter.galley(pos, galley, glyph_color);
+        }
+        ui.label(
+            RichText::new(letter_spaced(&name.to_uppercase()))
+                .family(theme.font_data.egui())
+                .size(CHECKLIST_ROW_FONT)
+                .color(name_color),
+        );
+    });
 }
 
 fn phrase(ui: &mut egui::Ui, theme: &Theme, text: &str) {

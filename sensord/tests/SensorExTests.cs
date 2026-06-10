@@ -98,15 +98,29 @@ public class SensorExTests
         {
             SensorsArray = new ISensor[]
             {
-                // float.NaN does not match `is float v`? It does — NaN is a float.
-                // Production code does not special-case NaN. Document the actual behaviour:
-                // Val returns NaN as a double when the sensor value is NaN.
+                // A NaN reading must be treated like an absent one: letting it
+                // through kills JSON serialization of the whole snapshot.
                 new FakeSensor { Name = "CPU Package", SensorType = SensorType.Temperature, Value = float.NaN },
             },
         };
         double? v = hw.Val(SensorType.Temperature, "Package");
+        Assert.Null(v);
+    }
+
+    [Fact]
+    public void Val_skips_non_finite_and_returns_next_finite_match()
+    {
+        var hw = new FakeHardware
+        {
+            SensorsArray = new ISensor[]
+            {
+                new FakeSensor { Name = "CPU Package", SensorType = SensorType.Temperature, Value = float.PositiveInfinity },
+                new FakeSensor { Name = "CPU Package", SensorType = SensorType.Temperature, Value = 47.5f },
+            },
+        };
+        double? v = hw.Val(SensorType.Temperature, "Package");
         Assert.NotNull(v);
-        Assert.True(double.IsNaN(v!.Value));
+        Assert.Equal(47.5, v!.Value, precision: 3);
     }
 
     [Fact]
@@ -178,19 +192,18 @@ public class SensorExTests
     }
 
     [Fact]
-    public void FirstVal_returns_NaN_when_value_is_NaN()
+    public void FirstVal_returns_null_when_value_is_NaN()
     {
         var hw = new FakeHardware
         {
             SensorsArray = new ISensor[]
             {
-                // Same as Val: production code does not special-case NaN.
+                // Same as Val: a non-finite reading is treated as absent.
                 new FakeSensor { Name = "Whatever", SensorType = SensorType.Temperature, Value = float.NaN },
             },
         };
         double? v = hw.FirstVal(SensorType.Temperature);
-        Assert.NotNull(v);
-        Assert.True(double.IsNaN(v!.Value));
+        Assert.Null(v);
     }
 
     [Fact]

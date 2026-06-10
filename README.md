@@ -16,35 +16,42 @@ removed cleanly through Add/Remove Programs.
 ## What it monitors
 
 - **CPU** — load (overall and per-core or per-thread), package and per-core
-  temperatures, current clock, Vcore, RAPL power (Package, plus a Cores / DRAM
-  / Platform breakdown on hover) and distance-to-TjMax for throttling headroom.
-  On Intel hybrid CPUs P-Cores and E-Cores are visually separated in both the
-  default strip view (P at full accent opacity, E dimmer, with a gap between
-  the clusters) and the opt-in per-core heat-map (P / E border colours and
-  corner tags).
+  temperatures, current clock (with bus clock on hover), Vcore, RAPL power
+  (Package, plus a Cores / DRAM / Platform breakdown on hover) and
+  distance-to-TjMax for throttling headroom. On Intel hybrid CPUs P-Cores and
+  E-Cores are visually separated in both the default strip view (P at full
+  accent opacity, E dimmer, with a gap between the clusters) and the opt-in
+  per-core heat-map (P / E border colours and corner tags; hovering a cell
+  shows that core's current clock).
 - **GPU** — discrete (NVIDIA / AMD) and integrated (Intel) on their own cards,
   with load, core temperature, GPU hot spot, GDDR memory junction temperature,
-  current clock, fan RPM, power draw, VRAM split (dedicated vs DXGI-shared
-  on discretes; megabytes-of-system-memory-mapped on iGPUs), PCIe Rx/Tx
-  throughput and core voltage. The integrated-GPU card hides rows the
-  hardware does not populate, so it stays compact instead of showing a wall
-  of em-dashes on machines whose iGPU exposes only a subset of sensors.
+  core and memory clocks, video-engine (encode / decode) load, fan RPM, power
+  draw, VRAM split (dedicated vs DXGI-shared on discretes;
+  megabytes-of-system-memory-mapped on iGPUs), PCIe Rx/Tx throughput and core
+  voltage. The integrated-GPU card hides rows the hardware does not populate,
+  so it stays compact instead of showing a wall of em-dashes on machines
+  whose iGPU exposes only a subset of sensors.
 - **RAM** — used / free / cached, pagefile usage, and per-module DIMM
   temperature when the SPD hub exposes a thermal sensor (every DDR5 SO-DIMM,
   most DDR4 desktop kits). The hottest module shows on the card; hover for
-  per-module breakdown.
-- **Storage** — per-drive temperature, activity, capacity, remaining health.
-  Hover any drive row for SMART lifetime: power-on hours (with year/day
-  breakdown), cold-start cycles and NVMe Available Spare.
+  the per-module breakdown — vendor / part number, capacity, temperature and
+  a DDR timing summary (e.g. "CL40-40-40-80 @ 5602 MT/s").
+- **Storage** — per-drive temperature (coloured against the drive's own
+  warning / critical thresholds when it reports them), activity, capacity,
+  remaining health. Hover any drive row for SMART lifetime: power-on hours
+  (with year/day breakdown), cold-start cycles, NVMe Available Spare, NVMe
+  wear (Percentage Used) and total data written.
 - **Motherboard / sensors** — board and VRM temperatures, fan RPMs, voltage
-  rails when the Super-I/O chip is supported.
-- **Network** — active adapter throughput (down / up) and link utilisation.
+  rails when the Super-I/O chip is supported, plus a hardware-identity
+  caption: motherboard model, BIOS version and date.
+- **Network** — active adapter throughput (down / up) and link utilisation;
+  on Wi-Fi, the connected SSID, signal quality and negotiated PHY rate.
 - **Battery** — charge level, charge / discharge rate with direction arrow,
   estimated time remaining while on battery and battery health (Full / Design
   capacity).
-- **Footer** — system uptime, sensor poll status and a clickable version
-  number that opens an in-app changelog viewer with proper markdown
-  rendering.
+- **Footer** — system uptime, sensor poll status, monitor model names with
+  resolution and refresh rate, and a clickable version number that opens an
+  in-app changelog viewer with proper markdown rendering.
 
 Every stat row has a **hover tooltip** with a one-sentence plain-language
 explanation, so the dashboard is readable even without prior hardware-monitoring
@@ -113,10 +120,16 @@ NDJSON snapshots downstream, control messages upstream). `sensord` is
 published self-contained, so no separate .NET runtime installation is
 needed.
 
-The dashboard shows a phase-aware loading screen during the 5–15 s startup
-window ("Connecting to sensor service" → "Windows will ask for permission"
-→ "Starting sensor service" → "Loading sensors"), with RETRY / EXIT actions
-if the service fails to come up.
+Sensor startup is staged: the service opens CPU and RAM sensors first — the
+first readings reach the dashboard in roughly a second — then enables the
+motherboard, GPU, storage, network, controller and battery categories
+between snapshots, streaming progress messages the loading screen renders
+as a per-category checklist. The phases before that ("Connecting to sensor
+service" → "Windows will ask for permission" → "Starting sensor service")
+keep their own status lines, with RETRY / EXIT actions if the service fails
+to come up. The dashboard renders with OpenGL (glow) by default and falls
+back to wgpu when OpenGL is unavailable at startup; if neither backend can
+initialise, a message box points at the log instead of exiting silently.
 
 `sensord` exposes two non-service modes for development and diagnostics:
 

@@ -23,13 +23,20 @@ pub enum Status {
 /// What a finished download produced.
 pub enum DownloadOutcome {
     /// The installer was downloaded successfully and is at `path`. The UI
-    /// thread launches it and sets `want_quit`.
+    /// thread launches it and sets `want_quit` — but only while the modal
+    /// is still open on its Downloading screen.
     Ready(std::path::PathBuf),
+    /// The user cancelled; the modal has already routed itself back to
+    /// Confirm, so this is consumed silently.
+    Cancelled,
     /// The download failed; the modal transitions to its Failed state.
     Failed(String),
 }
 
-pub type SharedDownloadOutcome = std::sync::Arc<std::sync::Mutex<Option<DownloadOutcome>>>;
+/// Outcome slot shared with the download worker. The `u64` is the attempt
+/// generation stamped by `start_update_download`; results from abandoned
+/// attempts are recognised and discarded by [`PerfApp::poll_download_outcome`].
+pub type SharedDownloadOutcome = std::sync::Arc<std::sync::Mutex<Option<(u64, DownloadOutcome)>>>;
 
 /// The PerfWindow application.
 pub struct PerfApp {
@@ -51,9 +58,16 @@ pub struct PerfApp {
     pub update_banner_dismissed: bool,
     pub update_modal_open: bool,
     pub update_modal_phase: crate::ui::update_modal::ModalPhase,
+    /// Cancel flag of the CURRENT download attempt. Replaced wholesale on
+    /// every attempt: clearing a shared flag would un-cancel an orphaned
+    /// worker from an earlier attempt.
     pub update_download_cancel: Arc<std::sync::atomic::AtomicBool>,
+    /// Progress of the CURRENT download attempt; replaced per attempt so an
+    /// orphaned worker cannot write into the live attempt's counter.
     pub update_download_progress: crate::update::download::SharedProgress,
     pub update_download_outcome: SharedDownloadOutcome,
+    /// Attempt counter; outcomes carrying an older generation are stale.
+    pub update_download_generation: u64,
     pub want_quit: bool,
     pub show_changelog: bool,
     /// Last `WindowLevel` value pushed to the viewport. Used to detect
@@ -72,16 +86,39 @@ pub struct PerfApp {
     /// stall: if a sensord client connects but dies before the first NDJSON
     /// line arrives, the alive flag may not flip cleanly before the OS reaps
     /// the reader thread, leaving the dashboard stuck on the loading screen.
-    /// After 30 s in that state we demote to `SensordDown` so the error
-    /// overlay's RESPAWN button is reachable.
+    /// Demotion to `SensordDown` is silence-based (see [`startup_stalled`]):
+    /// progress lines from a slow staged init keep the session alive, so a
+    /// long hardware enumeration is never mistaken for a dead service.
     pub running_since: Option<std::time::Instant>,
     update_source: Arc<GitHubReleaseSource>,
     os_is_light: bool,
 }
 
-/// Deadline for receiving the first snapshot after the connect machine has
-/// emitted `Ready`. See [`PerfApp::running_since`].
-const FIRST_SNAPSHOT_DEADLINE: std::time::Duration = std::time::Duration::from_secs(30);
+/// How long a `Running` session may go without its first snapshot before the
+/// silence watchdog is allowed to fire at all.
+const STARTUP_WATCHDOG: std::time::Duration = std::time::Duration::from_secs(120);
+/// How long the pipe must have carried no line at all (snapshot or progress)
+/// before the watchdog treats the feed as dead.
+const LINE_SILENCE: std::time::Duration = std::time::Duration::from_secs(20);
+
+/// Decide whether a first-snapshot-pending session has truly stalled. Pure so
+/// the timing matrix is unit-testable with fabricated instants.
+fn startup_stalled(
+    running_since: Option<std::time::Instant>,
+    last_line_at: Option<std::time::Instant>,
+    now: std::time::Instant,
+) -> bool {
+    let Some(started) = running_since else {
+        return false;
+    };
+    if now.saturating_duration_since(started) <= STARTUP_WATCHDOG {
+        return false;
+    }
+    match last_line_at {
+        Some(line) => now.saturating_duration_since(line) > LINE_SILENCE,
+        None => true,
+    }
+}
 
 impl PerfApp {
     pub fn new(cc: &eframe::CreationContext<'_>, dev_mode: bool) -> Self {
@@ -150,6 +187,7 @@ impl PerfApp {
                 crate::update::download::DownloadProgress::default(),
             )),
             update_download_outcome: Arc::new(std::sync::Mutex::new(None)),
+            update_download_generation: 0,
             want_quit: false,
             show_changelog: false,
             applied_on_top: false,
@@ -205,62 +243,70 @@ impl PerfApp {
     }
 
     /// Apply any download outcome the background thread has left for us.
+    ///
+    /// Acting on a result requires the modal to still be open on its
+    /// Downloading screen AND the outcome to carry the current attempt
+    /// generation: a worker orphaned by an X-close, a cancel or a retry must
+    /// neither surprise-launch the installer under a closed modal nor paint
+    /// a stale FAILED screen over a newer attempt.
     fn poll_download_outcome(&mut self) {
+        use crate::ui::update_modal::ModalPhase;
         let outcome = self
             .update_download_outcome
             .lock()
-            .ok()
-            .and_then(|mut g| g.take());
-        let Some(outcome) = outcome else { return };
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .take();
+        let Some((generation, outcome)) = outcome else {
+            return;
+        };
+        let current = generation == self.update_download_generation;
+        let downloading = self.update_modal_open
+            && matches!(self.update_modal_phase, ModalPhase::Downloading { .. });
         match outcome {
-            DownloadOutcome::Ready(path) => match crate::update::install::launch(&path) {
-                Ok(()) => self.want_quit = true,
-                Err(e) => {
-                    self.update_modal_phase = crate::ui::update_modal::ModalPhase::Failed {
-                        message: format!("could not launch installer: {e}"),
-                    };
+            DownloadOutcome::Ready(path) => {
+                if !(current && downloading) {
+                    let _ = std::fs::remove_file(&path);
+                    return;
                 }
-            },
+                match crate::update::install::launch(&path) {
+                    Ok(()) => self.want_quit = true,
+                    Err(e) => {
+                        self.update_modal_phase = ModalPhase::LaunchFailed { message: e };
+                    }
+                }
+            }
+            // A cancel was the user's own action (or a close); never surface
+            // it as a failure.
+            DownloadOutcome::Cancelled => {}
             DownloadOutcome::Failed(message) => {
-                self.update_modal_phase = crate::ui::update_modal::ModalPhase::Failed { message };
+                if current && downloading {
+                    self.update_modal_phase = ModalPhase::Failed { message };
+                }
             }
         }
     }
 
-    /// Restart `sensord` after it has died, re-arming the live feed.
+    /// Dev-mode only: relaunch the sibling `sensord.exe` child after it has
+    /// died. The production path never calls this — the error overlay routes
+    /// non-dev RESPAWN through [`Self::restart_connect`] so the connect state
+    /// machine (with its UAC/service-start step) owns recovery.
     ///
-    /// The old [`SensordKind`] is dropped *first* (`self.sensord = None`): its
-    /// [`Drop`] closes the writer (pipe) or stdin (child), then joins the
-    /// reader thread. Only once the old connection is fully torn down is the
-    /// replacement constructed — in `dev_mode`, that means `Sensord::spawn`
-    /// launches the sibling `sensord.exe`; in the production path it means
-    /// `PipeSensord::connect` re-opens the named pipe exposed by the installed
-    /// service. The strict ordering is for resource cleanup, not file
-    /// contention.
-    ///
-    /// `history` is deliberately kept, so the sparklines carry on uninterrupted
-    /// across the gap. `latest` is cleared (its readings are now stale) and the
-    /// configured refresh interval is re-sent to the fresh feed. `status` ends
-    /// as [`Status::Running`] only if the respawn succeeded; a failed
-    /// spawn/connect is logged and leaves it [`Status::SensordDown`].
-    pub fn respawn_sensord(&mut self, ctx: &egui::Context, dev_mode: bool) {
-        // Drop the old child *before* spawning: its `Drop` waits for the
-        // existing reader thread to finish before we hand a fresh stdout
-        // pipe to the replacement.
+    /// The old child is dropped *first* (`self.sensord = None`): its [`Drop`]
+    /// queues the shutdown message and reaps the process before a fresh
+    /// stdout pipe is handed to the replacement. `history` is deliberately
+    /// kept, so the sparklines carry on uninterrupted across the gap.
+    /// `latest` is cleared (its readings are now stale) and the configured
+    /// refresh interval is re-sent to the fresh feed. `status` ends as
+    /// [`Status::Running`] only if the respawn succeeded; a failed spawn is
+    /// logged and leaves it [`Status::SensordDown`].
+    pub fn respawn_sensord(&mut self, ctx: &egui::Context) {
         self.sensord = None;
 
         let repaint_ctx = ctx.clone();
-        self.sensord = if dev_mode {
-            crate::ipc::process::Sensord::spawn(move || repaint_ctx.request_repaint())
-                .inspect_err(|e| eprintln!("PerfWindow: failed to restart sensord child: {e}"))
-                .ok()
-                .map(crate::ipc::SensordKind::Child)
-        } else {
-            crate::ipc::pipe::PipeSensord::connect(move || repaint_ctx.request_repaint())
-                .inspect_err(|e| eprintln!("PerfWindow: failed to reconnect sensord pipe: {e}"))
-                .ok()
-                .map(crate::ipc::SensordKind::Pipe)
-        };
+        self.sensord = crate::ipc::process::Sensord::spawn(move || repaint_ctx.request_repaint())
+            .inspect_err(|e| eprintln!("PerfWindow: failed to restart sensord child: {e}"))
+            .ok()
+            .map(crate::ipc::SensordKind::Child);
 
         self.status = if self.sensord.is_some() {
             Status::Running
@@ -274,14 +320,23 @@ impl PerfApp {
         }
     }
 
-    /// Re-apply the current `config` after the user changes a setting.
+    /// Re-apply the current `config` after the user changes a visual setting.
     ///
-    /// Recomputes the effective theme (honouring `follow_windows`), pushes it
-    /// into egui's visuals and forwards the refresh interval to `sensord`. The
-    /// caller is responsible for persisting `config` via [`Config::save`].
+    /// Recomputes the effective theme (honouring `follow_windows`) and pushes
+    /// it into egui's visuals. The caller is responsible for persisting
+    /// `config` via [`Config::save`].
     pub fn apply_config_change(&mut self, ctx: &egui::Context) {
         self.theme = Theme::for_id(system::effective_theme_id(&self.config, self.os_is_light));
         self.theme.apply(ctx);
+    }
+
+    /// Forward the configured refresh interval to `sensord`.
+    ///
+    /// Deliberately separate from [`Self::apply_config_change`]: unrelated
+    /// theme/unit/display clicks have no business touching the control
+    /// channel. The send itself is a non-blocking queue onto the sensord
+    /// writer thread.
+    pub fn apply_refresh_change(&mut self) {
         if let Some(sensord) = &mut self.sensord {
             sensord.set_interval(self.config.refresh.as_millis());
         }
@@ -289,59 +344,89 @@ impl PerfApp {
 
     /// Pull the newest snapshot out of the shared state and update history.
     fn ingest(&mut self) {
+        // While a connect machine runs it owns `status`. A stale (or absent)
+        // sensord must not clobber Connecting with SensordDown every frame,
+        // and a leftover dead feed must not be drained into `latest`.
+        if self.connect_rx.is_some() {
+            return;
+        }
         let Some(sensord) = &self.sensord else {
-            // Don't clobber Status::Connecting — the connect state machine
-            // owns that variant and `poll_connect_events` keeps it fresh.
-            // Promoting it to SensordDown here would race every frame and
-            // mask the loading screen with the "feed stopped" overlay
-            // throughout the 5-15 s the service takes to come up.
+            // Don't clobber Status::Connecting — it can outlive the receiver
+            // (a `Failed` phase stays on screen after the worker has exited).
             if !matches!(self.status, Status::Connecting(_)) {
                 self.status = Status::SensordDown;
                 self.running_since = None;
             }
             return;
         };
-        if let Ok(state) = sensord.state().lock() {
+        let mut last_line_at = None;
+        if let Ok(mut state) = sensord.state().lock() {
             if !state.alive {
                 self.status = Status::SensordDown;
                 self.running_since = None;
             }
-            if let Some(snap) = &state.latest {
-                if self.latest.as_ref().map(|p| p.ts) != Some(snap.ts) {
-                    self.history.record(snap);
-                    self.latest = Some(snap.clone());
-                    // First snapshot landed — clear the deadline so future
-                    // gaps don't trip the no-first-snapshot demotion below.
+            last_line_at = state.last_line_at;
+            // The reader thread is the sole writer of `latest`, so presence
+            // means unconsumed: `take()` moves the snapshot out without a
+            // clone, and two snapshots sharing one seconds-resolution `ts`
+            // (sub-second refresh rates) both ingest.
+            if let Some(snap) = state.latest.take() {
+                if state.alive {
+                    // A snapshot from a live feed proves sensord works —
+                    // promote out of SensordDown so a late first snapshot
+                    // (or a recovered feed) clears the error overlay.
+                    self.status = Status::Running;
                     self.running_since = None;
                 }
+                self.history.record(&snap);
+                self.latest = Some(snap);
             }
         }
-        // Demote to SensordDown if we've been Running long past the deadline
-        // without ever seeing a snapshot — covers the race where sensord
-        // accepts the client, dies before sending anything, and the reader
-        // thread's alive flag hasn't been flipped yet.
-        if matches!(self.status, Status::Running) && self.latest.is_none() {
-            if let Some(t) = self.running_since {
-                if t.elapsed() > FIRST_SNAPSHOT_DEADLINE {
-                    eprintln!(
-                        "PerfWindow: no snapshot within {:?} of Running; demoting to SensordDown",
-                        FIRST_SNAPSHOT_DEADLINE
-                    );
-                    self.status = Status::SensordDown;
-                    self.running_since = None;
-                }
-            }
+        // Silence watchdog: a session that never produced a snapshot is
+        // demoted only when the pipe has carried no line at all for a long
+        // time — progress lines during staged sensor init keep it alive.
+        if matches!(self.status, Status::Running)
+            && self.latest.is_none()
+            && startup_stalled(self.running_since, last_line_at, std::time::Instant::now())
+        {
+            eprintln!(
+                "PerfWindow: no snapshot and a silent pipe past the watchdog; \
+                 demoting to SensordDown"
+            );
+            self.status = Status::SensordDown;
+            self.running_since = None;
         }
     }
 
+    /// Latest staged-init progress reported by sensord, if any. The loading
+    /// screen consumes this while the first snapshot is still pending; `None`
+    /// against an old sensord that never emits progress lines.
+    pub fn sensor_progress(&self) -> Option<crate::ipc::ProgressInfo> {
+        self.sensord.as_ref()?.state().lock().ok()?.progress.clone()
+    }
+
     /// Re-arm the connect state machine after the user clicks RETRY on the
-    /// loading screen's failure card. Drops the old receiver, spawns a fresh
-    /// worker, and flips `status` back to `Connecting(OpeningPipe)` so the
-    /// loading screen re-renders immediately.
+    /// loading screen's failure card or RESPAWN on the error overlay (the
+    /// production route). Ignored while a machine is already running:
+    /// repeated clicks would spawn racing workers whose orphaned `Ready`
+    /// would shut down the freshly started service.
     pub fn restart_connect(&mut self, ctx: &egui::Context) {
+        if self.connect_rx.is_some() {
+            return;
+        }
+        self.prepare_reconnect();
         let repaint = ctx.clone();
         let (_phase, rx) = crate::ipc::connect::spawn_connect(move || repaint.request_repaint());
         self.connect_rx = Some(rx);
+    }
+
+    /// Tear down the dead feed BEFORE a fresh connect machine spawns: a stale
+    /// `PipeSensord` keeps handles on the old pipe instance open and would
+    /// feed `ingest` a dead `alive` flag once the machine hands over; stale
+    /// `latest` readings must not be painted under the new session either.
+    fn prepare_reconnect(&mut self) {
+        self.sensord = None;
+        self.latest = None;
         self.status = Status::Connecting(crate::ipc::connect::ConnectPhase::OpeningPipe);
         self.running_since = None;
     }
@@ -416,6 +501,7 @@ impl PerfApp {
             update_download_cancel: Arc::new(AtomicBool::new(false)),
             update_download_progress: Arc::new(Mutex::new(DownloadProgress::default())),
             update_download_outcome: Arc::new(Mutex::new(None)),
+            update_download_generation: 0,
             want_quit: false,
             show_changelog: false,
             applied_on_top: false,
@@ -432,6 +518,12 @@ impl PerfApp {
 impl eframe::App for PerfApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
+        // Follow-Windows must track a live OS light/dark switch; the poll is
+        // registry-backed and throttled inside theme::system (~1 read / 2 s).
+        if let Some(light) = system::os_light_flipped(self.os_is_light) {
+            self.os_is_light = light;
+            self.apply_config_change(&ctx);
+        }
         self.ingest();
         self.poll_connect_events();
         self.poll_download_outcome();
@@ -506,7 +598,7 @@ impl eframe::App for PerfApp {
         }
     }
 
-    fn on_exit(&mut self) {
+    fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
         // Tell the worker to exit (over the pipe) before the dashboard
         // process tears down. Drop alone is unreliable during shutdown —
         // explicit shutdown() while the egui frame is still alive is
@@ -597,5 +689,293 @@ mod tests {
         app.status = Status::Running;
         app.ingest();
         assert!(matches!(app.status, Status::SensordDown));
+    }
+
+    use crate::ipc::{pipe::PipeSensord, SensorState, SensordKind, SharedState, Snapshot};
+    use std::sync::{Arc, Mutex};
+
+    fn test_snapshot(ts: i64, load: f64) -> Snapshot {
+        crate::ipc::parse_snapshot(&format!(
+            r#"{{"v":1,"ts":{ts},"cpu":{{"name":"X","load":{load}}}}}"#
+        ))
+        .expect("test snapshot must parse")
+    }
+
+    /// A `PerfApp` wired to a detached pipe client; tests drive the feed by
+    /// mutating the returned shared state directly.
+    fn app_with_feed(alive: bool) -> (PerfApp, SharedState) {
+        let state: SharedState = Arc::new(Mutex::new(SensorState {
+            alive,
+            ..SensorState::default()
+        }));
+        let mut app = PerfApp::for_tests(Config::default());
+        app.sensord = Some(SensordKind::Pipe(PipeSensord::detached(Arc::clone(&state))));
+        (app, state)
+    }
+
+    #[test]
+    fn two_snapshots_with_identical_ts_both_ingest() {
+        let (mut app, state) = app_with_feed(true);
+        state.lock().unwrap().latest = Some(test_snapshot(7, 10.0));
+        app.ingest();
+        assert_eq!(
+            app.latest.as_ref().unwrap().cpu.as_ref().unwrap().load,
+            Some(10.0)
+        );
+
+        // Same seconds-resolution `ts`: the old dedup dropped this one,
+        // silently capping sub-second refresh rates at 1 Hz.
+        state.lock().unwrap().latest = Some(test_snapshot(7, 20.0));
+        app.ingest();
+        assert_eq!(
+            app.latest.as_ref().unwrap().cpu.as_ref().unwrap().load,
+            Some(20.0)
+        );
+    }
+
+    #[test]
+    fn ingest_consumes_the_shared_snapshot_via_take() {
+        let (mut app, state) = app_with_feed(true);
+        state.lock().unwrap().latest = Some(test_snapshot(1, 1.0));
+        app.ingest();
+        assert!(state.lock().unwrap().latest.is_none());
+        assert!(app.latest.is_some());
+    }
+
+    #[test]
+    fn late_snapshot_promotes_sensord_down_to_running() {
+        let (mut app, state) = app_with_feed(true);
+        app.status = Status::SensordDown;
+        state.lock().unwrap().latest = Some(test_snapshot(1, 1.0));
+        app.ingest();
+        assert!(matches!(app.status, Status::Running));
+    }
+
+    #[test]
+    fn dead_feed_snapshot_is_ingested_but_does_not_promote() {
+        let (mut app, state) = app_with_feed(false);
+        app.status = Status::Running;
+        state.lock().unwrap().latest = Some(test_snapshot(1, 1.0));
+        app.ingest();
+        assert!(matches!(app.status, Status::SensordDown));
+        assert!(app.latest.is_some());
+    }
+
+    #[test]
+    fn watchdog_does_not_fire_before_the_deadline() {
+        let base = std::time::Instant::now();
+        let now = base + std::time::Duration::from_secs(60);
+        assert!(!startup_stalled(Some(base), None, now));
+    }
+
+    #[test]
+    fn line_traffic_prevents_demotion() {
+        let base = std::time::Instant::now();
+        let now = base + std::time::Duration::from_secs(200);
+        // Last progress line 5 s ago: the pipe is talking, keep waiting.
+        let last_line = Some(base + std::time::Duration::from_secs(195));
+        assert!(!startup_stalled(Some(base), last_line, now));
+    }
+
+    #[test]
+    fn true_silence_demotes() {
+        let base = std::time::Instant::now();
+        let now = base + std::time::Duration::from_secs(200);
+        // No line for 50 s, session 200 s old: the feed is dead.
+        let last_line = Some(base + std::time::Duration::from_secs(150));
+        assert!(startup_stalled(Some(base), last_line, now));
+        // Never saw any line at all: equally dead.
+        assert!(startup_stalled(Some(base), None, now));
+    }
+
+    #[test]
+    fn watchdog_is_disarmed_without_a_running_since() {
+        let now = std::time::Instant::now() + std::time::Duration::from_secs(500);
+        assert!(!startup_stalled(None, None, now));
+    }
+
+    #[test]
+    fn ingest_is_inert_while_the_connect_machine_runs() {
+        use crate::ipc::connect::ConnectPhase;
+        let (mut app, state) = app_with_feed(false);
+        let (_tx, rx) = std::sync::mpsc::channel();
+        app.connect_rx = Some(rx);
+        app.status = Status::Connecting(ConnectPhase::OpeningPipe);
+        state.lock().unwrap().latest = Some(test_snapshot(1, 1.0));
+        app.ingest();
+        // The machine owns `status`; the dead feed neither demotes it nor
+        // leaks its stale snapshot into the app.
+        assert!(matches!(app.status, Status::Connecting(_)));
+        assert!(app.latest.is_none());
+        assert!(state.lock().unwrap().latest.is_some());
+    }
+
+    #[test]
+    fn restart_connect_is_ignored_while_a_machine_is_running() {
+        let (mut app, state) = app_with_feed(true);
+        state.lock().unwrap().latest = Some(test_snapshot(1, 1.0));
+        app.ingest();
+        let (_tx, rx) = std::sync::mpsc::channel();
+        app.connect_rx = Some(rx);
+        app.restart_connect(&egui::Context::default());
+        // Neither torn down nor respawned: the running machine keeps both
+        // the feed and the receiver it will replace on `Ready`.
+        assert!(app.sensord.is_some());
+        assert!(app.latest.is_some());
+        assert!(app.connect_rx.is_some());
+    }
+
+    #[test]
+    fn prepare_reconnect_clears_the_stale_feed_first() {
+        let (mut app, state) = app_with_feed(true);
+        state.lock().unwrap().latest = Some(test_snapshot(1, 1.0));
+        app.ingest();
+        assert!(app.sensord.is_some() && app.latest.is_some());
+        app.prepare_reconnect();
+        assert!(app.sensord.is_none());
+        assert!(app.latest.is_none());
+        assert!(matches!(app.status, Status::Connecting(_)));
+        assert!(app.running_since.is_none());
+    }
+
+    use crate::ui::update_modal::ModalPhase;
+
+    fn temp_installer(name: &str) -> std::path::PathBuf {
+        let path = std::env::temp_dir().join(name);
+        std::fs::write(&path, b"not really an installer").expect("test file writes");
+        path
+    }
+
+    fn put_outcome(app: &PerfApp, generation: u64, outcome: DownloadOutcome) {
+        *app.update_download_outcome.lock().unwrap() = Some((generation, outcome));
+    }
+
+    #[test]
+    fn ready_outcome_with_modal_closed_is_discarded_and_file_deleted() {
+        let mut app = PerfApp::for_tests(Config::default());
+        let path = temp_installer("pw-poll-closed-modal.exe");
+        app.update_modal_open = false;
+        put_outcome(
+            &app,
+            app.update_download_generation,
+            DownloadOutcome::Ready(path.clone()),
+        );
+        app.poll_download_outcome();
+        assert!(!app.want_quit, "a closed modal must never launch + quit");
+        assert!(!path.exists(), "the unwanted installer must be deleted");
+        assert!(matches!(app.update_modal_phase, ModalPhase::Confirm));
+    }
+
+    #[test]
+    fn ready_outcome_outside_downloading_phase_is_discarded() {
+        let mut app = PerfApp::for_tests(Config::default());
+        let path = temp_installer("pw-poll-confirm-phase.exe");
+        // Modal open but back on Confirm (user cancelled a beat earlier).
+        app.update_modal_open = true;
+        app.update_modal_phase = ModalPhase::Confirm;
+        put_outcome(
+            &app,
+            app.update_download_generation,
+            DownloadOutcome::Ready(path.clone()),
+        );
+        app.poll_download_outcome();
+        assert!(!app.want_quit);
+        assert!(!path.exists());
+        assert!(matches!(app.update_modal_phase, ModalPhase::Confirm));
+    }
+
+    #[test]
+    fn stale_generation_ready_outcome_is_ignored_and_file_deleted() {
+        let mut app = PerfApp::for_tests(Config::default());
+        let path = temp_installer("pw-poll-stale-gen.exe");
+        app.update_modal_open = true;
+        app.update_modal_phase = ModalPhase::Downloading {
+            progress: 0.5,
+            bytes: 1,
+            total: 2,
+        };
+        app.update_download_generation = 3;
+        put_outcome(&app, 2, DownloadOutcome::Ready(path.clone()));
+        app.poll_download_outcome();
+        assert!(!app.want_quit);
+        assert!(!path.exists());
+        assert!(
+            matches!(app.update_modal_phase, ModalPhase::Downloading { .. }),
+            "the live attempt's screen must survive a stale outcome"
+        );
+    }
+
+    #[test]
+    fn stale_generation_failure_does_not_touch_the_modal() {
+        let mut app = PerfApp::for_tests(Config::default());
+        app.update_modal_open = true;
+        app.update_modal_phase = ModalPhase::Downloading {
+            progress: 0.5,
+            bytes: 1,
+            total: 2,
+        };
+        app.update_download_generation = 3;
+        put_outcome(&app, 2, DownloadOutcome::Failed("orphan died".into()));
+        app.poll_download_outcome();
+        assert!(matches!(
+            app.update_modal_phase,
+            ModalPhase::Downloading { .. }
+        ));
+    }
+
+    #[test]
+    fn cancelled_outcome_never_reaches_the_failed_screen() {
+        let mut app = PerfApp::for_tests(Config::default());
+        // The cancel click already routed the modal back to Confirm.
+        app.update_modal_open = true;
+        app.update_modal_phase = ModalPhase::Confirm;
+        put_outcome(
+            &app,
+            app.update_download_generation,
+            DownloadOutcome::Cancelled,
+        );
+        app.poll_download_outcome();
+        assert!(matches!(app.update_modal_phase, ModalPhase::Confirm));
+        assert!(!app.want_quit);
+    }
+
+    #[test]
+    fn late_failure_with_modal_closed_leaves_no_stale_failed_screen() {
+        let mut app = PerfApp::for_tests(Config::default());
+        app.update_modal_open = false;
+        put_outcome(
+            &app,
+            app.update_download_generation,
+            DownloadOutcome::Failed("network reset".into()),
+        );
+        app.poll_download_outcome();
+        assert!(
+            matches!(app.update_modal_phase, ModalPhase::Confirm),
+            "reopening the modal must land on Confirm, not a stale FAILED screen"
+        );
+    }
+
+    #[test]
+    fn launch_failure_routes_to_the_launch_failed_screen() {
+        let mut app = PerfApp::for_tests(Config::default());
+        let missing = std::env::temp_dir().join("pw-poll-missing-installer.exe");
+        let _ = std::fs::remove_file(&missing);
+        app.update_modal_open = true;
+        app.update_modal_phase = ModalPhase::Downloading {
+            progress: 1.0,
+            bytes: 2,
+            total: 2,
+        };
+        put_outcome(
+            &app,
+            app.update_download_generation,
+            DownloadOutcome::Ready(missing),
+        );
+        app.poll_download_outcome();
+        assert!(!app.want_quit);
+        assert!(matches!(
+            app.update_modal_phase,
+            ModalPhase::LaunchFailed { .. }
+        ));
     }
 }

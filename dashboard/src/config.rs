@@ -112,10 +112,20 @@ impl Config {
     /// Write config to disk, creating the directory. Errors are logged, not fatal.
     pub fn save(&self) {
         let Some(path) = Self::path() else { return };
+        self.save_to(&path);
+    }
+
+    /// Atomic write via a sibling `.tmp` + rename, mirroring the update
+    /// cache: a crash mid-write must leave the previous config intact, not a
+    /// torn file that silently resets every setting on the next load.
+    pub(crate) fn save_to(&self, path: &std::path::Path) {
         if let Some(dir) = path.parent() {
             let _ = std::fs::create_dir_all(dir);
         }
-        if let Err(e) = std::fs::write(&path, self.to_toml_string()) {
+        let tmp = path.with_extension("toml.tmp");
+        let result =
+            std::fs::write(&tmp, self.to_toml_string()).and_then(|()| std::fs::rename(&tmp, path));
+        if let Err(e) = result {
             eprintln!("PerfWindow: failed to save config: {e}");
         }
     }
@@ -211,5 +221,20 @@ mod tests {
         };
         let parsed = Config::from_toml_str(&c.to_toml_string());
         assert!(parsed.always_on_top);
+    }
+
+    #[test]
+    fn save_to_writes_a_parseable_file_and_leaves_no_tmp() {
+        let dir = std::env::temp_dir().join(format!("pw-config-save-test-{}", std::process::id()));
+        let path = dir.join("config.toml");
+        let c = Config {
+            theme: ThemeId::Amber,
+            ..Config::default()
+        };
+        c.save_to(&path);
+        let body = std::fs::read_to_string(&path).expect("config file exists");
+        assert_eq!(Config::from_toml_str(&body).theme, ThemeId::Amber);
+        assert!(!path.with_extension("toml.tmp").exists());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

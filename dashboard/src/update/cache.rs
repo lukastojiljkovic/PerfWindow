@@ -65,11 +65,13 @@ impl Cache {
         serde_json::from_str(s)
     }
 
-    /// `true` if the cache is older than `ttl` relative to `now`.
+    /// `true` if the cache is older than `ttl` relative to `now`. A
+    /// `checked_at` in the future is also stale: a clock that has stepped
+    /// backwards must not freeze the cache as "fresh" indefinitely.
     pub fn is_stale(&self, now: SystemTime, ttl: Duration) -> bool {
         match now.duration_since(self.checked_at) {
             Ok(age) => age > ttl,
-            Err(_) => false,
+            Err(_) => true,
         }
     }
 }
@@ -139,6 +141,13 @@ mod tests {
         let just_over = c.checked_at + Duration::from_secs(6 * 3600 + 1);
         assert!(!c.is_stale(just_under, TTL));
         assert!(c.is_stale(just_over, TTL));
+    }
+
+    #[test]
+    fn future_checked_at_is_stale() {
+        let c = sample();
+        let before_check = c.checked_at - Duration::from_secs(3600);
+        assert!(c.is_stale(before_check, TTL));
     }
 
     #[test]

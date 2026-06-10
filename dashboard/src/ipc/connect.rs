@@ -41,7 +41,11 @@ impl std::fmt::Debug for ConnectEvent {
 pub type SharedPhase = Arc<Mutex<ConnectPhase>>;
 
 const POLL_INTERVAL_MS: u64 = 250;
-const START_DEADLINE_S: u64 = 15;
+/// How long to poll for the pipe after the elevated `sc start`. Generous on
+/// purpose: a cold .NET service on a slow disk can take well over 15 s to
+/// reach `WaitForConnectionAsync`. Public so the failure copy on the loading
+/// screen can quote the real value.
+pub const START_DEADLINE_S: u64 = 30;
 
 /// Spawn the connect state machine on a worker thread. Returns the shared
 /// phase handle (for UI polling) plus an mpsc receiver carrying every
@@ -67,9 +71,19 @@ fn run(phase: SharedPhase, tx: Sender<ConnectEvent>, repaint: Arc<dyn Fn() + Sen
     // Phase 1: try opening the pipe directly. Covers the case where the
     // service is already running from a previous session.
     set_phase(&phase, &tx, &repaint, ConnectPhase::OpeningPipe);
-    if let Ok(p) = PipeSensord::connect_no_elevation(clone_repaint(&repaint)) {
-        emit_ready(&phase, &tx, &repaint, p);
-        return;
+    match PipeSensord::connect_no_elevation(clone_repaint(&repaint)) {
+        Ok(p) => {
+            emit_ready(&phase, &tx, &repaint, p);
+            return;
+        }
+        Err(e) => {
+            if let Some(reason) = unrecoverable_open_failure(&e) {
+                set_phase(&phase, &tx, &repaint, ConnectPhase::Failed(reason));
+                return;
+            }
+            // NotFound / transient I/O: the service is probably not running —
+            // fall through to the elevated start below.
+        }
     }
 
     // Phase 2: request elevation. This blocks on the UAC dialog while it
@@ -115,6 +129,18 @@ fn run(phase: SharedPhase, tx: Sender<ConnectEvent>, repaint: Arc<dyn Fn() + Sen
                 return;
             }
         }
+    }
+}
+
+/// Open errors the elevated `sc start` step can never fix: another client
+/// already holds the single pipe instance, or the ACL refused us. Failing
+/// fast avoids showing a pointless UAC prompt for those.
+fn unrecoverable_open_failure(e: &ConnectError) -> Option<FailedReason> {
+    match e {
+        ConnectError::Busy | ConnectError::AccessDenied => {
+            Some(FailedReason::PipeError(e.to_string()))
+        }
+        ConnectError::NotFound | ConnectError::Io(_) => None,
     }
 }
 
@@ -169,5 +195,20 @@ mod tests {
             ConnectPhase::Failed(FailedReason::UacCancelled),
             ConnectPhase::Failed(FailedReason::UacCancelled)
         );
+    }
+
+    #[test]
+    fn busy_and_access_denied_fail_without_elevation() {
+        let busy = unrecoverable_open_failure(&ConnectError::Busy);
+        assert!(matches!(busy, Some(FailedReason::PipeError(_))));
+        let denied = unrecoverable_open_failure(&ConnectError::AccessDenied);
+        assert!(matches!(denied, Some(FailedReason::PipeError(_))));
+    }
+
+    #[test]
+    fn not_found_and_io_errors_proceed_to_elevation() {
+        assert!(unrecoverable_open_failure(&ConnectError::NotFound).is_none());
+        let io = ConnectError::Io(std::io::Error::other("transient"));
+        assert!(unrecoverable_open_failure(&io).is_none());
     }
 }

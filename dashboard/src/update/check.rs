@@ -5,7 +5,7 @@ use crate::update::release::Release;
 use crate::update::source::{FetchError, ReleaseSource};
 use crate::update::state::{SharedUpdateState, UpdateState};
 use semver::Version;
-use std::sync::Arc;
+use std::sync::{Arc, PoisonError};
 use std::time::SystemTime;
 
 /// How long to wait after process start before firing the first check. Keeps
@@ -29,6 +29,25 @@ pub fn is_newer(current: &str, release_tag: &str) -> Result<bool, String> {
     Ok(release > current)
 }
 
+/// Persistence seam for the check's cache: production hits
+/// `%APPDATA%\PerfWindow\update-cache.json`, tests stay in memory so they
+/// can assert what a check persisted without touching the real file.
+pub(crate) trait CacheStore {
+    fn load(&self) -> Option<Cache>;
+    fn save(&self, cache: &Cache);
+}
+
+pub(crate) struct DiskCacheStore;
+
+impl CacheStore for DiskCacheStore {
+    fn load(&self) -> Option<Cache> {
+        Cache::load()
+    }
+    fn save(&self, cache: &Cache) {
+        cache.save();
+    }
+}
+
 /// Run a check on a background thread, writing results into `state` and
 /// invoking `repaint` after every transition.
 ///
@@ -43,7 +62,13 @@ pub fn spawn_check<S: ReleaseSource>(
     repaint: impl Fn() + Send + 'static,
 ) {
     std::thread::spawn(move || {
-        run_check(source.as_ref(), &state, ignore_cache, true, &repaint);
+        run_check(
+            source.as_ref(),
+            &state,
+            ignore_cache,
+            &DiskCacheStore,
+            &repaint,
+        );
     });
 }
 
@@ -51,13 +76,13 @@ pub(crate) fn run_check<S: ReleaseSource + ?Sized>(
     source: &S,
     state: &SharedUpdateState,
     ignore_cache: bool,
-    persist_cache: bool,
+    cache_store: &dyn CacheStore,
     repaint: &(impl Fn() + ?Sized),
 ) {
     set_state(state, UpdateState::Checking, repaint);
 
     if !ignore_cache {
-        if let Some(cache) = Cache::load() {
+        if let Some(cache) = cache_store.load() {
             if !cache.is_stale(SystemTime::now(), TTL) {
                 publish_cached(state, &cache, repaint);
                 return;
@@ -68,34 +93,21 @@ pub(crate) fn run_check<S: ReleaseSource + ?Sized>(
     let now = SystemTime::now();
     match source.fetch_latest() {
         Ok(release) => match evaluate(&release) {
-            Some(true) => {
-                let cache = Cache {
-                    checked_at: now,
-                    latest_tag: release.tag_name.clone(),
-                    latest_name: release.name.clone(),
-                    latest_body: release.body.clone(),
-                    latest_asset_url: release
-                        .installer_asset()
-                        .map(|a| a.browser_download_url.clone())
-                        .unwrap_or_default(),
-                    latest_asset_size: release
-                        .installer_asset()
-                        .map(|a| a.size)
-                        .unwrap_or_default(),
-                };
-                if persist_cache {
-                    cache.save();
-                }
-                set_state(
-                    state,
+            Some(newer) => {
+                // NoUpdate results are persisted too: without them the TTL
+                // never suppresses the launch check and every start polls
+                // GitHub.
+                cache_store.save(&cache_from(&release, now));
+                let next = if newer {
                     UpdateState::Available {
                         release,
                         checked_at: now,
-                    },
-                    repaint,
-                );
+                    }
+                } else {
+                    UpdateState::NoUpdate { checked_at: now }
+                };
+                set_state(state, next, repaint);
             }
-            Some(false) => set_state(state, UpdateState::NoUpdate { checked_at: now }, repaint),
             None => set_state(
                 state,
                 UpdateState::Failed {
@@ -113,6 +125,23 @@ pub(crate) fn run_check<S: ReleaseSource + ?Sized>(
             },
             repaint,
         ),
+    }
+}
+
+fn cache_from(release: &Release, checked_at: SystemTime) -> Cache {
+    Cache {
+        checked_at,
+        latest_tag: release.tag_name.clone(),
+        latest_name: release.name.clone(),
+        latest_body: release.body.clone(),
+        latest_asset_url: release
+            .installer_asset()
+            .map(|a| a.browser_download_url.clone())
+            .unwrap_or_default(),
+        latest_asset_size: release
+            .installer_asset()
+            .map(|a| a.size)
+            .unwrap_or_default(),
     }
 }
 
@@ -176,9 +205,9 @@ fn failure_reason(e: &FetchError) -> String {
 }
 
 fn set_state(state: &SharedUpdateState, next: UpdateState, repaint: &(impl Fn() + ?Sized)) {
-    if let Ok(mut guard) = state.lock() {
-        *guard = next;
-    }
+    // Recover from poisoning like the UI readers do: a panicked reader must
+    // not silently freeze the update state machine.
+    *state.lock().unwrap_or_else(PoisonError::into_inner) = next;
     repaint();
 }
 
@@ -242,11 +271,29 @@ mod tests {
         )
     }
 
+    /// In-memory store so tests never touch the real
+    /// `%APPDATA%\PerfWindow\update-cache.json`.
+    #[derive(Default)]
+    struct MemCacheStore(std::cell::RefCell<Option<Cache>>);
+
+    impl CacheStore for MemCacheStore {
+        fn load(&self) -> Option<Cache> {
+            self.0.borrow().clone()
+        }
+        fn save(&self, cache: &Cache) {
+            *self.0.borrow_mut() = Some(cache.clone());
+        }
+    }
+
     fn run_sync(source: impl ReleaseSource, ignore_cache: bool) -> UpdateState {
         let state = new_shared();
-        // `persist_cache = false`: unit tests must not touch the real
-        // `%APPDATA%\PerfWindow\update-cache.json`.
-        run_check(&source, &state, ignore_cache, false, &|| {});
+        run_check(
+            &source,
+            &state,
+            ignore_cache,
+            &MemCacheStore::default(),
+            &|| {},
+        );
         let g = state.lock().unwrap();
         g.clone()
     }
@@ -273,5 +320,43 @@ mod tests {
     fn network_error_yields_failed() {
         let s = MockReleaseSource::failing("network unreachable");
         assert!(matches!(run_sync(s, true), UpdateState::Failed { .. }));
+    }
+
+    #[test]
+    fn no_update_result_is_persisted_to_cache() {
+        let tag = format!("v{}", env!("CARGO_PKG_VERSION"));
+        let s = MockReleaseSource::with_release(&release_json(&tag));
+        let state = new_shared();
+        let store = MemCacheStore::default();
+        run_check(&s, &state, true, &store, &|| {});
+        assert!(matches!(
+            *state.lock().unwrap(),
+            UpdateState::NoUpdate { .. }
+        ));
+        let cached = store.load().expect("NoUpdate result must be cached");
+        assert_eq!(cached.latest_tag, tag);
+    }
+
+    #[test]
+    fn fresh_no_update_cache_suppresses_the_network() {
+        let tag = format!("v{}", env!("CARGO_PKG_VERSION"));
+        let store = MemCacheStore::default();
+        store.save(&Cache {
+            checked_at: SystemTime::now(),
+            latest_tag: tag,
+            latest_name: "x".into(),
+            latest_body: String::new(),
+            latest_asset_url: "https://example.com/i.exe".into(),
+            latest_asset_size: 1,
+        });
+        // A failing source proves the cache served the result: any network
+        // attempt would have landed in Failed.
+        let s = MockReleaseSource::failing("must not be called");
+        let state = new_shared();
+        run_check(&s, &state, false, &store, &|| {});
+        assert!(matches!(
+            *state.lock().unwrap(),
+            UpdateState::NoUpdate { .. }
+        ));
     }
 }

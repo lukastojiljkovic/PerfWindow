@@ -4,7 +4,7 @@
 //! is set (toggled by the title-bar gear chip). It is a free-floating
 //! [`egui::Window`] — not a panel — so it takes the [`egui::Context`] directly.
 //! Every control applies live: there is no OK/Cancel. A change writes the new
-//! value into `app.config`, then re-applies and persists it via
+//! value into `app.config`, then re-applies visual config and persists it via
 //! [`PerfApp::apply_config_change`] and [`crate::config::Config::save`].
 //!
 //! The window paints its own chrome (a `chrome` title bar with a `✕` button and
@@ -88,7 +88,8 @@ enum Change {
 /// `chrome` strip with a `✕` button is painted instead. Closing it — via the
 /// `✕` button — clears `app.settings_open`. Any control change is applied live
 /// through [`PerfApp::apply_config_change`] and persisted with
-/// [`crate::config::Config::save`].
+/// [`crate::config::Config::save`]. Refresh changes additionally notify
+/// `sensord`; other settings stay off the pipe control path.
 pub fn settings_modal(ctx: &egui::Context, app: &mut PerfApp) {
     if !app.settings_open {
         return;
@@ -162,6 +163,7 @@ pub fn settings_modal(ctx: &egui::Context, app: &mut PerfApp) {
     // the theme and persisting to disk all happen exactly once per frame.
     if let Some(change) = change {
         let needs_save = !matches!(change, Change::ManualCheck);
+        let refresh_changed = matches!(&change, Change::Refresh(_));
         match change {
             Change::Theme(id) => app.config.theme = id,
             Change::Follow(on) => app.config.follow_windows = on,
@@ -173,6 +175,9 @@ pub fn settings_modal(ctx: &egui::Context, app: &mut PerfApp) {
         }
         if needs_save {
             app.apply_config_change(ctx);
+            if refresh_changed {
+                app.apply_refresh_change();
+            }
             app.config.save();
         }
     }

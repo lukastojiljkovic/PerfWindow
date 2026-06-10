@@ -218,7 +218,10 @@ pub fn changelog_modal(ctx: &egui::Context, theme: &Theme, open: &mut bool) {
         return;
     }
 
-    let nodes = parse_changelog(CHANGELOG_TEXT);
+    // The embedded changelog never changes within a process lifetime, so it
+    // is parsed exactly once — not on every frame the modal stays open.
+    static NODES: std::sync::OnceLock<Vec<ChangelogNode>> = std::sync::OnceLock::new();
+    let nodes = NODES.get_or_init(|| parse_changelog(CHANGELOG_TEXT));
 
     egui::Window::new("Changelog")
         .collapsible(false)
@@ -237,7 +240,7 @@ pub fn changelog_modal(ctx: &egui::Context, theme: &Theme, open: &mut bool) {
                 .auto_shrink([false, true])
                 .show(ui, |ui| {
                     for node in nodes {
-                        render_node(ui, theme, &node);
+                        render_node(ui, theme, node);
                     }
                 });
         });

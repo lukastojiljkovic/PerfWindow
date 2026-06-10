@@ -24,14 +24,16 @@ public record Snapshot(
     [property: JsonPropertyName("atk_fans")] IReadOnlyList<FanInfo>? AtkFans,
     [property: JsonPropertyName("display")] DisplayInfo? Display,
     [property: JsonPropertyName("displays")] IReadOnlyList<DisplayInfo>? Displays,
-    [property: JsonPropertyName("health")] HealthInfo? Health);
+    [property: JsonPropertyName("health")] HealthInfo? Health,
+    [property: JsonPropertyName("ts_ms")] long? TsMs = null);
 
-/// <summary>Active display info — resolution and refresh rate of a monitor.</summary>
+/// <summary>Active display info — resolution and refresh rate of a monitor. <c>model</c> is the EDID friendly name (e.g. "ROG XG27AQ") when the driver exposes one.</summary>
 public record DisplayInfo(
     [property: JsonPropertyName("name")] string Name,
     [property: JsonPropertyName("width")] int Width,
     [property: JsonPropertyName("height")] int Height,
-    [property: JsonPropertyName("refresh_hz")] int RefreshHz);
+    [property: JsonPropertyName("refresh_hz")] int RefreshHz,
+    [property: JsonPropertyName("model")] string? Model = null);
 
 /// <summary>Service-side health summary, attached to every snapshot. <c>pawnio</c>: "ok" | "missing" | "denied". <c>degraded</c>: true if any reading is unavailable. <c>notes</c>: human-readable detail (optional).</summary>
 public record HealthInfo(
@@ -68,7 +70,9 @@ public record CpuInfo(
     [property: JsonPropertyName("power_memory_w")] double? PowerMemoryW,
     [property: JsonPropertyName("power_platform_w")] double? PowerPlatformW,
     [property: JsonPropertyName("p_core_count")] int? PCoreCount,
-    [property: JsonPropertyName("e_core_count")] int? ECoreCount);
+    [property: JsonPropertyName("e_core_count")] int? ECoreCount,
+    [property: JsonPropertyName("bus_clock_mhz")] double? BusClockMhz = null,
+    [property: JsonPropertyName("core_clocks_mhz")] IReadOnlyList<double?>? CoreClocksMhz = null);
 
 /// <summary>
 /// GPU metrics. <c>kind</c>: "discrete" | "integrated"; VRAM sizes in MB;
@@ -101,7 +105,9 @@ public record GpuInfo(
     [property: JsonPropertyName("dedicated_vram_used_mb")] double? DedicatedVramUsedMb,
     [property: JsonPropertyName("shared_vram_used_mb")] double? SharedVramUsedMb,
     [property: JsonPropertyName("voltage_v")] double? VoltageV,
-    [property: JsonPropertyName("d3d_engines")] IReadOnlyList<D3DEngineLoad>? D3DEngines);
+    [property: JsonPropertyName("d3d_engines")] IReadOnlyList<D3DEngineLoad>? D3DEngines,
+    [property: JsonPropertyName("memory_clock_mhz")] double? MemoryClockMhz = null,
+    [property: JsonPropertyName("video_engine_load")] double? VideoEngineLoad = null);
 
 /// <summary>Per-engine GPU utilisation reading (e.g. "3D", "Copy", "Video Encode"). <c>load</c> is 0-100 %.</summary>
 public record D3DEngineLoad(
@@ -117,7 +123,20 @@ public record RamInfo(
     [property: JsonPropertyName("cached_mb")] double? CachedMb,
     [property: JsonPropertyName("pagefile_used_mb")] double? PagefileUsedMb,
     [property: JsonPropertyName("pagefile_total_mb")] double? PagefileTotalMb,
-    [property: JsonPropertyName("dimm_temps")] IReadOnlyList<DimmTemp>? DimmTemps);
+    [property: JsonPropertyName("dimm_temps")] IReadOnlyList<DimmTemp>? DimmTemps,
+    [property: JsonPropertyName("modules")] IReadOnlyList<RamModule>? Modules = null);
+
+/// <summary>
+/// One physical memory module from the LHM SPD reader. <c>label</c> is the
+/// module node name (vendor + part number + slot); <c>capacity_gb</c> in GB;
+/// <c>temp_c</c> in °C; <c>timings</c> is a CL-style summary like
+/// "CL40-39-39-77 @ 5600 MT/s", null when the SPD timing set is incomplete.
+/// </summary>
+public record RamModule(
+    [property: JsonPropertyName("label")] string Label,
+    [property: JsonPropertyName("capacity_gb")] double? CapacityGb,
+    [property: JsonPropertyName("temp_c")] double? TempC,
+    [property: JsonPropertyName("timings")] string? Timings);
 
 /// <summary>One DIMM (memory module) temperature reading. <c>label</c> is the SPD slot label (e.g. "DIMM #0").</summary>
 public record DimmTemp(
@@ -133,6 +152,11 @@ public record DimmTemp(
 /// New in v0.5.0: <c>power_on_hours</c> (drive lifetime usage),
 /// <c>power_on_count</c> (cold-start cycles), and <c>available_spare_pct</c>
 /// (NVMe-spec reserved blocks remaining, 0–100 %).
+///
+/// New in v0.10.0: <c>percentage_used_pct</c> (NVMe-spec wear, 0–100 %,
+/// 0 = new), <c>temp_warn_c</c> / <c>temp_crit_c</c> (the drive's own thermal
+/// thresholds in °C), and <c>data_read_gb</c> / <c>data_written_gb</c>
+/// (lifetime host transfer totals in GB).
 /// </summary>
 public record StorageInfo(
     [property: JsonPropertyName("name")] string Name,
@@ -146,12 +170,20 @@ public record StorageInfo(
     [property: JsonPropertyName("write_bps")] double? WriteBps,
     [property: JsonPropertyName("power_on_hours")] long? PowerOnHours,
     [property: JsonPropertyName("power_on_count")] long? PowerOnCount,
-    [property: JsonPropertyName("available_spare_pct")] double? AvailableSparePct);
+    [property: JsonPropertyName("available_spare_pct")] double? AvailableSparePct,
+    [property: JsonPropertyName("percentage_used_pct")] double? PercentageUsedPct = null,
+    [property: JsonPropertyName("temp_warn_c")] double? TempWarnC = null,
+    [property: JsonPropertyName("temp_crit_c")] double? TempCritC = null,
+    [property: JsonPropertyName("data_read_gb")] double? DataReadGb = null,
+    [property: JsonPropertyName("data_written_gb")] double? DataWrittenGb = null);
 
-/// <summary>Motherboard temperatures in °C.</summary>
+/// <summary>Motherboard temperatures in °C, plus hardware identity: <c>name</c> is the LHM motherboard node name; <c>bios_version</c> / <c>bios_date</c> come from WMI Win32_BIOS (date as yyyy-MM-dd).</summary>
 public record BoardInfo(
     [property: JsonPropertyName("temp")] double? Temp,
-    [property: JsonPropertyName("vrm_temp")] double? VrmTemp);
+    [property: JsonPropertyName("vrm_temp")] double? VrmTemp,
+    [property: JsonPropertyName("name")] string? Name = null,
+    [property: JsonPropertyName("bios_version")] string? BiosVersion = null,
+    [property: JsonPropertyName("bios_date")] string? BiosDate = null);
 
 /// <summary>Individual fan reading. <c>rpm</c> = revolutions per minute.</summary>
 public record FanInfo(
@@ -163,14 +195,22 @@ public record VoltageInfo(
     [property: JsonPropertyName("name")] string Name,
     [property: JsonPropertyName("volts")] double? Volts);
 
-/// <summary>Active network adapter metrics. <c>down_bps</c>/<c>up_bps</c> = bytes/sec; <c>link_bps</c> = bits/sec; <c>down_pct</c>/<c>up_pct</c> = 0–100 % of link capacity (null when link speed is unknown).</summary>
+/// <summary>Active network adapter metrics. <c>down_bps</c>/<c>up_bps</c> = bytes/sec; <c>link_bps</c> = bits/sec; <c>down_pct</c>/<c>up_pct</c> = 0–100 % of link capacity (null when link speed is unknown); <c>wifi</c> present only when the active adapter is a connected 802.11 interface.</summary>
 public record NetInfo(
     [property: JsonPropertyName("adapter")] string Adapter,
     [property: JsonPropertyName("down_bps")] double? DownBps,
     [property: JsonPropertyName("up_bps")] double? UpBps,
     [property: JsonPropertyName("link_bps")] long? LinkBps,
     [property: JsonPropertyName("down_pct")] double? DownPct,
-    [property: JsonPropertyName("up_pct")] double? UpPct);
+    [property: JsonPropertyName("up_pct")] double? UpPct,
+    [property: JsonPropertyName("wifi")] WifiInfo? Wifi = null);
+
+/// <summary>Wireless link details for the active 802.11 adapter. <c>signal_pct</c> = 0–100 %; <c>phy_mbps</c> = negotiated receive PHY rate; <c>band</c> = "2.4 GHz" | "5 GHz" when the channel number is unambiguous, else null.</summary>
+public record WifiInfo(
+    [property: JsonPropertyName("ssid")] string? Ssid,
+    [property: JsonPropertyName("signal_pct")] double? SignalPct,
+    [property: JsonPropertyName("phy_mbps")] double? PhyMbps,
+    [property: JsonPropertyName("band")] string? Band);
 
 /// <summary>Laptop battery metrics. <c>charge_pct</c> = 0–100 %; <c>rate_w</c> &gt; 0 = charging, &lt; 0 = discharging; capacity in mWh; <c>time_remaining_sec</c> only meaningful while discharging.</summary>
 public record BatteryInfo(

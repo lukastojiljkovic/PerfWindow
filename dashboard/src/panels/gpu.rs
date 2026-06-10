@@ -2,7 +2,7 @@
 
 use super::{card, panel_title};
 use crate::format::{finite, format_bytes_per_sec, format_gb_pair, format_temp, TempUnit};
-use crate::history::GpuHistory;
+use crate::history::{samples_or_empty, GpuHistory};
 use crate::ipc::GpuInfo;
 use crate::theme::Theme;
 use crate::ui::capacity::Capacity;
@@ -37,7 +37,13 @@ pub fn gpu_panel(
 
         // Load donut on the left, priority-ranked stat rows on the right.
         ui.horizontal(|ui| {
-            let load_resp = donut(ui, theme, gpu.load.unwrap_or(0.0) as f32, "%", "LOAD");
+            let load_resp = donut(
+                ui,
+                theme,
+                finite(gpu.load).unwrap_or(0.0) as f32,
+                "%",
+                "LOAD",
+            );
             // Default tooltip — overridden below when D3D engine breakdown is
             // available (which gives a much more actionable explanation than
             // a generic blurb about utilisation).
@@ -56,15 +62,17 @@ pub fn gpu_panel(
                 // Discrete GPUs always show TEMP (headline reading) even when
                 // momentarily absent; iGPUs hide it when the hardware does not
                 // expose a reading at all.
-                if !integrated || gpu.temp.is_some() {
-                    let temp_value = format_temp(gpu.temp, unit);
-                    let temp_col = gpu.temp.map(|t| temp_color(t, TempKind::Processor, theme));
+                let temp = finite(gpu.temp);
+                if !integrated || temp.is_some() {
+                    let temp_value = format_temp(temp, unit);
+                    let temp_col = temp.map(|t| temp_color(t, TempKind::Processor, theme));
                     cands.push(StatCandidate {
                         priority: 0,
                         label: "TEMP",
                         value: temp_value,
                         color: temp_col,
                         tooltip_key: "TEMP",
+                        hover_extra: None,
                     });
                 }
 
@@ -81,6 +89,7 @@ pub fn gpu_panel(
                     value: vram_value,
                     color: None,
                     tooltip_key: "VRAM",
+                    hover_extra: None,
                 });
 
                 if !integrated || finite(gpu.power_w).map(|p| p > 0.05).unwrap_or(false) {
@@ -90,6 +99,7 @@ pub fn gpu_panel(
                         value: format_power(gpu.power_w),
                         color: None,
                         tooltip_key: "POWER",
+                        hover_extra: None,
                     });
                 }
 
@@ -100,6 +110,7 @@ pub fn gpu_panel(
                         value: format_clock(gpu.clock_mhz),
                         color: None,
                         tooltip_key: "CLOCK",
+                        hover_extra: None,
                     });
                 }
 
@@ -110,6 +121,7 @@ pub fn gpu_panel(
                         value: format_percent_unit(gpu.memory_load),
                         color: None,
                         tooltip_key: "MEM USE",
+                        hover_extra: None,
                     });
                 }
 
@@ -120,6 +132,7 @@ pub fn gpu_panel(
                         value: format_temp(Some(hot), unit),
                         color: Some(temp_color(hot, TempKind::Processor, theme)),
                         tooltip_key: "HOTSPOT",
+                        hover_extra: None,
                     });
                 }
 
@@ -130,16 +143,19 @@ pub fn gpu_panel(
                         value: format_temp(Some(junction), unit),
                         color: Some(temp_color(junction, TempKind::Processor, theme)),
                         tooltip_key: "JUNCTION",
+                        hover_extra: None,
                     });
                 }
 
-                if let Some(total) = sum_optional(gpu.pcie_rx_bps, gpu.pcie_tx_bps) {
+                if let Some(total) = sum_optional(finite(gpu.pcie_rx_bps), finite(gpu.pcie_tx_bps))
+                {
                     cands.push(StatCandidate {
                         priority: 7,
                         label: "PCIE",
                         value: format_bytes_per_sec(total),
                         color: None,
                         tooltip_key: "PCIE",
+                        hover_extra: None,
                     });
                 }
 
@@ -150,6 +166,32 @@ pub fn gpu_panel(
                         value: format!("{v:.3} V"),
                         color: None,
                         tooltip_key: "V",
+                        hover_extra: None,
+                    });
+                }
+
+                // GDDR memory clock (sensord 0.10.0+); absent on most iGPUs.
+                if finite(gpu.memory_clock_mhz).is_some() {
+                    cands.push(StatCandidate {
+                        priority: 9,
+                        label: "MEM CLK",
+                        value: format_clock(gpu.memory_clock_mhz),
+                        color: None,
+                        tooltip_key: "MEM CLK",
+                        hover_extra: None,
+                    });
+                }
+
+                // Video engine load earns a row only while meaningfully
+                // active — an idle 0 % row is noise on every desktop.
+                if finite(gpu.video_engine_load).is_some_and(|v| v > 0.5) {
+                    cands.push(StatCandidate {
+                        priority: 10,
+                        label: "VIDEO",
+                        value: format_percent_unit(gpu.video_engine_load),
+                        color: None,
+                        tooltip_key: "VIDEO",
+                        hover_extra: None,
                     });
                 }
 
@@ -158,18 +200,20 @@ pub fn gpu_panel(
         });
 
         // Legend strip (only when there is a memory series to label).
-        let memory_samples: Vec<f32> = history
-            .map(|h| h.memory_load.iter_oldest_first().collect())
-            .unwrap_or_default();
-        if memory_samples.iter().any(|&v| v > 0.0) {
+        let has_memory_series =
+            history.is_some_and(|h| h.memory_load.iter_oldest_first().any(|v| v > 0.0));
+        if has_memory_series {
             dual_legend(ui, theme);
         }
 
         // Load + memory-load history.
-        let load_samples: Vec<f32> = history
-            .map(|h| h.load.iter_oldest_first().collect())
-            .unwrap_or_default();
-        crate::widgets::sparkline::dual_sparkline(ui, theme, &load_samples, &memory_samples, 100.0);
+        crate::widgets::sparkline::dual_sparkline(
+            ui,
+            theme,
+            samples_or_empty(history.map(|h| &h.load)),
+            samples_or_empty(history.map(|h| &h.memory_load)),
+            100.0,
+        );
     });
 }
 
@@ -200,7 +244,7 @@ fn d3d_breakdown_tooltip(gpu: &GpuInfo) -> Option<String> {
     out.push_str("\nPer DXGI engine (idle engines hidden):\n");
     let mut shown = 0;
     for e in engines {
-        if e.load < 0.5 {
+        if !e.load.is_finite() || e.load < 0.5 {
             continue;
         }
         out.push_str(&format!("  {:<18} {:>5.1} %\n", e.name, e.load));
@@ -284,10 +328,10 @@ fn format_percent_unit(load: Option<f64>) -> String {
 }
 
 /// MHz rendered as `"4.40 GHz"` once we cross 1 GHz, otherwise `"312 MHz"`.
-/// Returns `"—"` when the reading is absent. Used by both CPU and GPU stat
-/// rows so the format stays consistent across panels.
+/// Returns `"—"` when the reading is absent or non-finite (an infinite
+/// reading would otherwise satisfy the `>= 1000` arm and render `"inf GHz"`).
 fn format_clock(clock_mhz: Option<f64>) -> String {
-    match clock_mhz {
+    match finite(clock_mhz) {
         Some(mhz) if mhz >= 1000.0 => format!("{:.2} GHz", mhz / 1000.0),
         Some(mhz) if mhz > 0.0 => format!("{} MHz", mhz.round() as i64),
         _ => "—".to_string(),
@@ -328,10 +372,42 @@ fn dual_legend(ui: &mut egui::Ui, theme: &Theme) {
     });
 }
 
-/// Power draw rendered as whole watts, `"16 W"`, or `"—"` when absent.
+/// Power draw rendered as whole watts, `"16 W"`, or `"—"` when absent or
+/// non-finite.
 fn format_power(power_w: Option<f64>) -> String {
-    match power_w {
+    match finite(power_w) {
         Some(w) => format!("{} W", w.round() as i64),
         None => "—".to_string(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn formatters_render_em_dash_for_non_finite_input() {
+        for bad in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            assert_eq!(format_clock(Some(bad)), "—");
+            assert_eq!(format_power(Some(bad)), "—");
+            assert_eq!(format_percent_unit(Some(bad)), "—");
+            assert_eq!(format_shared_vram(Some(bad)), "shared");
+        }
+    }
+
+    #[test]
+    fn clock_switches_units_at_one_gigahertz() {
+        assert_eq!(format_clock(Some(2610.0)), "2.61 GHz");
+        assert_eq!(format_clock(Some(312.0)), "312 MHz");
+        assert_eq!(format_clock(Some(0.0)), "—");
+        assert_eq!(format_clock(None), "—");
+    }
+
+    #[test]
+    fn sum_optional_needs_at_least_one_operand() {
+        assert_eq!(sum_optional(Some(1.0), Some(2.0)), Some(3.0));
+        assert_eq!(sum_optional(Some(1.0), None), Some(1.0));
+        assert_eq!(sum_optional(None, Some(2.0)), Some(2.0));
+        assert_eq!(sum_optional(None, None), None);
     }
 }

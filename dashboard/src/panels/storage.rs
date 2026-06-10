@@ -7,7 +7,7 @@ use crate::theme::Theme;
 use crate::ui::capacity::Capacity;
 use crate::widgets::bars::bar_meter;
 use crate::widgets::{health_color, temp_color, TempKind};
-use egui::{FontId, Pos2, Sense, Stroke, Vec2};
+use egui::{Color32, FontId, Pos2, Sense, Stroke, Vec2};
 
 /// Fixed width of the TEMP column.
 const TEMP_COL_W: f32 = 42.0;
@@ -88,6 +88,11 @@ fn column_widths(total_w: f32, show_temp: bool) -> Vec<f32> {
 /// Draw the faint, upper-cased column-header row.
 fn header_row(ui: &mut egui::Ui, theme: &Theme, show_temp: bool) {
     let total_w = ui.available_width();
+    // Reject NaN / non-positive width before it reaches the tessellator (see
+    // widgets/sparkline.rs for the failure mode — abort, not a panic).
+    if !total_w.is_finite() || total_w <= 0.0 {
+        return;
+    }
     let widths = column_widths(total_w, show_temp);
     let (rect, _) = ui.allocate_exact_size(Vec2::new(total_w, 12.0), Sense::hover());
     if !ui.is_rect_visible(rect) {
@@ -131,6 +136,10 @@ fn header_row(ui: &mut egui::Ui, theme: &Theme, show_temp: bool) {
 /// the row itself.
 fn disk_row(ui: &mut egui::Ui, theme: &Theme, disk: &StorageInfo, unit: TempUnit, show_temp: bool) {
     let total_w = ui.available_width();
+    // Same degenerate-width guard as `header_row`.
+    if !total_w.is_finite() || total_w <= 0.0 {
+        return;
+    }
     let widths = column_widths(total_w, show_temp);
     let (rect, response) = ui.allocate_exact_size(Vec2::new(total_w, DISK_ROW_H), Sense::hover());
     if !ui.is_rect_visible(rect) {
@@ -189,7 +198,7 @@ fn disk_row(ui: &mut egui::Ui, theme: &Theme, disk: &StorageInfo, unit: TempUnit
         let temp = finite(disk.temp);
         let temp_str = format_temp(temp, unit);
         let temp_color = temp
-            .map(|t| temp_color(t, TempKind::Disk, theme))
+            .map(|t| disk_temp_color(t, disk.temp_warn_c, disk.temp_crit_c, theme))
             .unwrap_or(theme.dim);
         let temp_font = FontId::new(11.0, theme.font_data.egui());
         let temp_galley = painter.layout_no_wrap(temp_str, temp_font, temp_color);
@@ -253,6 +262,30 @@ fn disk_row(ui: &mut egui::Ui, theme: &Theme, disk: &StorageInfo, unit: TempUnit
     );
 }
 
+/// ok / warn / hot colour for a disk temperature. When the drive publishes
+/// its own thermal thresholds (and they are coherent: warn < crit), classify
+/// against those — ok below warn, warn band up to crit, hot at/after crit.
+/// Otherwise fall back to the fixed [`TempKind::Disk`] bands.
+fn disk_temp_color(
+    celsius: f64,
+    warn_c: Option<f64>,
+    crit_c: Option<f64>,
+    theme: &Theme,
+) -> Color32 {
+    match (finite(warn_c), finite(crit_c)) {
+        (Some(warn), Some(crit)) if warn < crit => {
+            if celsius >= crit {
+                theme.hot
+            } else if celsius >= warn {
+                theme.warn
+            } else {
+                theme.ok
+            }
+        }
+        _ => temp_color(celsius, TempKind::Disk, theme),
+    }
+}
+
 /// Compose a multi-line hover tooltip for a disk row. Returns `None` when no
 /// lifetime metric is present (older `sensord` builds, drives without SMART).
 fn lifetime_tooltip(disk: &StorageInfo) -> Option<String> {
@@ -261,6 +294,8 @@ fn lifetime_tooltip(disk: &StorageInfo) -> Option<String> {
         && disk.available_spare_pct.is_none()
         && disk.read_bps.is_none()
         && disk.write_bps.is_none()
+        && disk.data_written_gb.is_none()
+        && disk.percentage_used_pct.is_none()
     {
         return None;
     }
@@ -281,10 +316,26 @@ fn lifetime_tooltip(disk: &StorageInfo) -> Option<String> {
     if let Some(c) = disk.power_on_count {
         out.push_str(&format!("  Power-on cycles   {}\n", c));
     }
+    if let Some(gb) = finite(disk.data_written_gb) {
+        out.push_str(&format!("  Data written      {}\n", format_data_volume(gb)));
+    }
+    if let Some(p) = finite(disk.percentage_used_pct) {
+        out.push_str(&format!("  NVMe wear         {:.0} %\n", p));
+    }
     if let Some(s) = finite(disk.available_spare_pct) {
         out.push_str(&format!("  NVMe spare        {:.0} %\n", s));
     }
     Some(out.trim_end().to_string())
+}
+
+/// Format a lifetime data volume given in GB: terabytes with one decimal once
+/// the figure crosses 1000 GB, whole gigabytes below.
+fn format_data_volume(gb: f64) -> String {
+    if gb >= 1000.0 {
+        format!("{:.1} TB", gb / 1000.0)
+    } else {
+        format!("{:.0} GB", gb)
+    }
 }
 
 /// Format cumulative power-on hours with a parenthetical year/day breakdown
@@ -368,5 +419,99 @@ impl Align {
             Align::Center => x0 + (cell_w - text_w) / 2.0,
             Align::Right => x0 + cell_w - text_w,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::ThemeId;
+
+    fn theme() -> Theme {
+        Theme::for_id(ThemeId::Slate)
+    }
+
+    #[test]
+    fn disk_temp_color_uses_the_drive_thresholds_when_present() {
+        let t = theme();
+        // NVMe-style thresholds far above the fixed Disk bands (50/60).
+        let warn = Some(82.0);
+        let crit = Some(85.0);
+        assert_eq!(disk_temp_color(70.0, warn, crit, &t), t.ok);
+        assert_eq!(disk_temp_color(82.0, warn, crit, &t), t.warn);
+        assert_eq!(disk_temp_color(84.9, warn, crit, &t), t.warn);
+        assert_eq!(disk_temp_color(85.0, warn, crit, &t), t.hot);
+    }
+
+    #[test]
+    fn disk_temp_color_falls_back_to_fixed_bands() {
+        let t = theme();
+        // Absent, partial, non-finite or incoherent thresholds all fall back.
+        for (warn, crit) in [
+            (None, None),
+            (Some(82.0), None),
+            (None, Some(85.0)),
+            (Some(f64::NAN), Some(85.0)),
+            (Some(85.0), Some(82.0)),
+        ] {
+            assert_eq!(disk_temp_color(45.0, warn, crit, &t), t.ok);
+            assert_eq!(disk_temp_color(55.0, warn, crit, &t), t.warn);
+            assert_eq!(disk_temp_color(65.0, warn, crit, &t), t.hot);
+        }
+    }
+
+    #[test]
+    fn data_volume_switches_to_terabytes_at_1000_gb() {
+        assert_eq!(format_data_volume(20480.0), "20.5 TB");
+        assert_eq!(format_data_volume(1000.0), "1.0 TB");
+        assert_eq!(format_data_volume(999.4), "999 GB");
+        assert_eq!(format_data_volume(0.0), "0 GB");
+    }
+
+    fn bare_disk() -> StorageInfo {
+        StorageInfo {
+            name: "Test SSD".into(),
+            kind: "nvme".into(),
+            temp: None,
+            activity: None,
+            used_gb: None,
+            total_gb: None,
+            health: None,
+            read_bps: None,
+            write_bps: None,
+            power_on_hours: None,
+            power_on_count: None,
+            available_spare_pct: None,
+            percentage_used_pct: None,
+            temp_warn_c: None,
+            temp_crit_c: None,
+            data_read_gb: None,
+            data_written_gb: None,
+        }
+    }
+
+    #[test]
+    fn lifetime_tooltip_includes_written_volume_and_wear() {
+        let disk = StorageInfo {
+            data_written_gb: Some(20480.0),
+            percentage_used_pct: Some(3.4),
+            ..bare_disk()
+        };
+        let tip = lifetime_tooltip(&disk).expect("new lifetime fields summon the tooltip");
+        assert!(tip.contains("Data written      20.5 TB"));
+        assert!(tip.contains("NVMe wear         3 %"));
+    }
+
+    #[test]
+    fn lifetime_tooltip_stays_absent_without_any_metric() {
+        assert!(lifetime_tooltip(&bare_disk()).is_none());
+        // Non-finite new fields count as present for the gate but render no
+        // line — the header alone is still a valid tooltip, never a panic.
+        let nan_disk = StorageInfo {
+            data_written_gb: Some(f64::NAN),
+            ..bare_disk()
+        };
+        let tip = lifetime_tooltip(&nan_disk).expect("field present");
+        assert!(!tip.contains("Data written"));
     }
 }

@@ -23,6 +23,70 @@ fn main() -> eframe::Result {
     // `cargo run` against a freshly built sensord. Default = pipe.
     let dev_mode = std::env::args().any(|a| a == "--dev");
 
+    // Prefer the glow backend for release builds. eframe defaults to wgpu when
+    // both backends are compiled in, but wgpu driver/device creation can fail
+    // before `PerfApp::new` runs. In that case the dashboard exits before it
+    // reaches the service-start path, so the user never sees the UAC prompt.
+    // Glow has been the more forgiving option across mixed Windows machines;
+    // keep wgpu as a logged fallback for systems where OpenGL is the broken
+    // side instead.
+    let glow_started = std::time::Instant::now();
+    match run_app(dev_mode, eframe::Renderer::Glow) {
+        Ok(()) => Ok(()),
+        Err(glow_err) if glow_started.elapsed() > RENDERER_FALLBACK_WINDOW => {
+            // The glow session ran long past startup before erroring — a
+            // mid-session GL loss, not an init failure. Relaunching the whole
+            // app under wgpu would resurrect a window the user may have
+            // dismissed minutes ago, so log and exit instead.
+            write_startup_error("eframe glow runtime failure (no fallback)", &glow_err);
+            Err(glow_err)
+        }
+        Err(glow_err) => {
+            write_startup_error("eframe glow startup failed", &glow_err);
+            match run_app(dev_mode, eframe::Renderer::Wgpu) {
+                Ok(()) => Ok(()),
+                Err(wgpu_err) => {
+                    write_startup_error("eframe wgpu fallback failed", &wgpu_err);
+                    show_fatal_startup_box();
+                    Err(wgpu_err)
+                }
+            }
+        }
+    }
+}
+
+/// Renderer errors after this long are mid-session losses, not startup
+/// failures, and must not trigger the wgpu relaunch.
+const RENDERER_FALLBACK_WINDOW: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// Last-resort visibility: both renderer attempts failed before a window ever
+/// appeared, so without this the app exits silently ("nothing happened"). A
+/// native message box needs no working GPU pipeline.
+fn show_fatal_startup_box() {
+    use std::os::windows::ffi::OsStrExt;
+    const MB_OK: u32 = 0x0000_0000;
+    const MB_ICONERROR: u32 = 0x0000_0010;
+    #[link(name = "user32")]
+    extern "system" {
+        fn MessageBoxW(hwnd: isize, text: *const u16, caption: *const u16, flags: u32) -> i32;
+    }
+    let to_wide = |s: &str| -> Vec<u16> {
+        std::ffi::OsStr::new(s)
+            .encode_wide()
+            .chain(std::iter::once(0))
+            .collect()
+    };
+    let text = to_wide(
+        "PerfWindow could not start: graphics initialization failed.\n\n\
+         Details were written to %APPDATA%\\PerfWindow\\panic.log.",
+    );
+    let caption = to_wide("PerfWindow");
+    unsafe {
+        MessageBoxW(0, text.as_ptr(), caption.as_ptr(), MB_OK | MB_ICONERROR);
+    }
+}
+
+fn run_app(dev_mode: bool, renderer: eframe::Renderer) -> eframe::Result {
     // Read the persisted `always_on_top` preference before the viewport opens
     // so the window starts at the correct Z-level and doesn't briefly flash
     // behind other windows on launch. `PerfApp::new` re-reads the config and
@@ -42,6 +106,7 @@ fn main() -> eframe::Result {
     }
     let options = eframe::NativeOptions {
         viewport,
+        renderer,
         ..Default::default()
     };
     eframe::run_native(
@@ -69,15 +134,7 @@ fn install_panic_log() {
 fn write_panic_entry(info: &std::panic::PanicHookInfo<'_>) {
     use std::io::Write;
 
-    let Some(path) = panic_log_path() else { return };
-    if let Some(parent) = path.parent() {
-        let _ = std::fs::create_dir_all(parent);
-    }
-    let Ok(mut file) = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&path)
-    else {
+    let Some(mut file) = open_panic_log() else {
         return;
     };
 
@@ -118,6 +175,40 @@ fn panic_log_path() -> Option<std::path::PathBuf> {
             .join("PerfWindow")
             .join("panic.log"),
     )
+}
+
+/// Rotation cap for `panic.log`. Startup markers accumulate one line per
+/// launch, so an installed copy would otherwise grow without bound.
+const PANIC_LOG_MAX_BYTES: u64 = 256 * 1024;
+
+/// Open `panic.log` for appending, rotating it to `panic.log.1` first when it
+/// has outgrown the cap. Shared by the startup marker, the panic hook and the
+/// SEH filter so every writer enforces the same bound.
+fn open_panic_log() -> Option<std::fs::File> {
+    let path = panic_log_path()?;
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    rotate_if_oversized(&path);
+    std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+        .ok()
+}
+
+fn rotate_if_oversized(path: &std::path::Path) {
+    let oversized = std::fs::metadata(path).is_ok_and(|m| m.len() > PANIC_LOG_MAX_BYTES);
+    if !oversized {
+        return;
+    }
+    let mut rotated = path.as_os_str().to_owned();
+    rotated.push(".1");
+    let rotated = std::path::PathBuf::from(rotated);
+    // Windows `rename` refuses to replace; clear the previous generation
+    // first so rotation cannot wedge on its own output.
+    let _ = std::fs::remove_file(&rotated);
+    let _ = std::fs::rename(path, &rotated);
 }
 
 /// Seconds since the Unix epoch — robust marker even when the formatted
@@ -164,15 +255,7 @@ fn days_to_ymd(mut days: u64) -> (i32, u32, u32) {
 /// produced it.
 fn write_startup_marker() {
     use std::io::Write;
-    let Some(path) = panic_log_path() else { return };
-    if let Some(parent) = path.parent() {
-        let _ = std::fs::create_dir_all(parent);
-    }
-    let Ok(mut file) = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&path)
-    else {
+    let Some(mut file) = open_panic_log() else {
         return;
     };
     let _ = writeln!(
@@ -182,6 +265,26 @@ fn write_startup_marker() {
         chrono_like_utc(),
         unix_now(),
         std::process::id(),
+    );
+    let _ = file.flush();
+}
+
+fn write_startup_error(context: &str, error: &dyn std::fmt::Display) {
+    use std::io::Write;
+    let Some(mut file) = open_panic_log() else {
+        return;
+    };
+    let _ = writeln!(
+        file,
+        "=== PerfWindow v{} startup error @ {} (UTC unix={}) pid={} ===\n\
+         context: {}\n\
+         error  : {}\n",
+        env!("CARGO_PKG_VERSION"),
+        chrono_like_utc(),
+        unix_now(),
+        std::process::id(),
+        context,
+        error,
     );
     let _ = file.flush();
 }
@@ -259,15 +362,7 @@ unsafe extern "system" fn seh_filter(info: *mut ExceptionPointers) -> LONG {
     // `catch_unwind` to make sure a panic inside this handler does not
     // escape the FFI boundary and abort with no log at all.
     let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        let Some(path) = panic_log_path() else { return };
-        if let Some(parent) = path.parent() {
-            let _ = std::fs::create_dir_all(parent);
-        }
-        let Ok(mut file) = std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&path)
-        else {
+        let Some(mut file) = open_panic_log() else {
             return;
         };
 
@@ -341,5 +436,64 @@ fn seh_code_name(code: DWORD) -> &'static str {
         0xC0000417 => "INVALID_CRUNTIME_PARAMETER",
         0xE06D7363 => "C++ exception (MSVC throw)",
         _ => "<unknown>",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn temp_dir(tag: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("pw_panic_log_{tag}_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn oversized_log_rotates_to_dot_one() {
+        let dir = temp_dir("rotate");
+        let log = dir.join("panic.log");
+        std::fs::write(&log, vec![b'x'; (PANIC_LOG_MAX_BYTES + 1) as usize]).unwrap();
+        rotate_if_oversized(&log);
+        assert!(!log.exists(), "oversized log must be renamed away");
+        assert!(dir.join("panic.log.1").exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn small_log_is_left_in_place() {
+        let dir = temp_dir("keep");
+        let log = dir.join("panic.log");
+        std::fs::write(&log, b"one startup marker").unwrap();
+        rotate_if_oversized(&log);
+        assert!(log.exists());
+        assert!(!dir.join("panic.log.1").exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn rotation_replaces_the_previous_generation() {
+        let dir = temp_dir("replace");
+        let log = dir.join("panic.log");
+        let rotated = dir.join("panic.log.1");
+        std::fs::write(&rotated, b"older generation").unwrap();
+        std::fs::write(&log, vec![b'y'; (PANIC_LOG_MAX_BYTES + 1) as usize]).unwrap();
+        rotate_if_oversized(&log);
+        let kept = std::fs::read(&rotated).unwrap();
+        assert_eq!(
+            kept.len(),
+            (PANIC_LOG_MAX_BYTES + 1) as usize,
+            "panic.log.1 must hold the just-rotated content, not the older generation"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn missing_log_is_a_no_op() {
+        let dir = temp_dir("missing");
+        let log = dir.join("panic.log");
+        rotate_if_oversized(&log);
+        assert!(!log.exists());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

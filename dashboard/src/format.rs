@@ -17,9 +17,10 @@ impl TempUnit {
     }
 }
 
-/// `"58°"`, or `"—"` when the reading is absent. Rounded to a whole degree.
+/// `"58°"`, or `"—"` when the reading is absent or non-finite. Rounded to a
+/// whole degree.
 pub fn format_temp(celsius: Option<f64>, unit: TempUnit) -> String {
-    match celsius {
+    match finite(celsius) {
         Some(c) => format!("{}°", unit.convert(c).round() as i64),
         None => "—".to_string(),
     }
@@ -29,7 +30,7 @@ pub fn format_temp(celsius: Option<f64>, unit: TempUnit) -> String {
 /// choice when the surrounding UI is too small for a unit suffix (the active
 /// unit is already implied by the title-bar °C/°F chip).
 pub fn format_temp_compact(celsius: Option<f64>, unit: TempUnit) -> String {
-    match celsius {
+    match finite(celsius) {
         Some(c) => format!("{}°", unit.convert(c).round() as i64),
         None => "—".to_string(),
     }
@@ -47,12 +48,15 @@ pub fn format_link(bps: Option<i64>) -> String {
 }
 
 /// Human throughput, e.g. `"4.2 MB/s"`. Bytes/sec in; 1024-based KB/MB/GB out
-/// (binary, consistent with `format_gb_from_mb`).
+/// (binary, consistent with `format_gb_from_mb`). A non-finite reading
+/// renders `"—"` rather than a literal `"NaN KB/s"` / `"inf GB/s"`.
 pub fn format_bytes_per_sec(bps: f64) -> String {
     const KB: f64 = 1024.0;
     const MB: f64 = 1024.0 * 1024.0;
     const GB: f64 = 1024.0 * 1024.0 * 1024.0;
-    if bps >= GB {
+    if !bps.is_finite() {
+        "—".to_string()
+    } else if bps >= GB {
         format!("{:.1} GB/s", bps / GB)
     } else if bps >= MB {
         format!("{:.1} MB/s", bps / MB)
@@ -61,18 +65,19 @@ pub fn format_bytes_per_sec(bps: f64) -> String {
     }
 }
 
-/// Megabytes rendered as a GB number string (one decimal), or `"—"`.
+/// Megabytes rendered as a GB number string (one decimal), or `"—"` when
+/// absent or non-finite.
 pub fn format_gb_from_mb(mb: Option<f64>) -> String {
-    match mb {
+    match finite(mb) {
         Some(mb) => format!("{:.1}", mb / 1024.0),
         None => "—".to_string(),
     }
 }
 
 /// A megabytes pair rendered as `"<used> / <total> GB"`, one decimal each, or
-/// `"—"` when either value is absent.
+/// `"—"` when either value is absent or non-finite.
 pub fn format_gb_pair(used_mb: Option<f64>, total_mb: Option<f64>) -> String {
-    match (used_mb, total_mb) {
+    match (finite(used_mb), finite(total_mb)) {
         (Some(u), Some(t)) => format!("{:.1} / {:.1} GB", u / 1024.0, t / 1024.0),
         _ => "—".to_string(),
     }
@@ -178,6 +183,38 @@ mod tests {
         assert_eq!(format_gb_pair(Some(6348.0), Some(12288.0)), "6.2 / 12.0 GB");
         assert_eq!(format_gb_pair(None, Some(12288.0)), "—");
         assert_eq!(format_gb_pair(Some(6348.0), None), "—");
+    }
+
+    #[test]
+    fn non_finite_temperatures_render_as_em_dash() {
+        for bad in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            assert_eq!(format_temp(Some(bad), TempUnit::Celsius), "—");
+            assert_eq!(format_temp(Some(bad), TempUnit::Fahrenheit), "—");
+            assert_eq!(format_temp_compact(Some(bad), TempUnit::Celsius), "—");
+        }
+    }
+
+    #[test]
+    fn non_finite_throughput_renders_as_em_dash() {
+        for bad in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            assert_eq!(format_bytes_per_sec(bad), "—");
+        }
+    }
+
+    #[test]
+    fn non_finite_megabyte_figures_render_as_em_dash() {
+        for bad in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            assert_eq!(format_gb_from_mb(Some(bad)), "—");
+            assert_eq!(format_gb_pair(Some(bad), Some(12288.0)), "—");
+            assert_eq!(format_gb_pair(Some(6348.0), Some(bad)), "—");
+        }
+    }
+
+    #[test]
+    fn non_finite_percentages_render_as_em_dash() {
+        for bad in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            assert_eq!(format_percent(Some(bad)), "—");
+        }
     }
 
     #[test]

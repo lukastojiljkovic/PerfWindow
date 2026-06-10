@@ -26,7 +26,7 @@ pub fn battery_panel(
         panel_title(ui, theme, "BATTERY", None);
 
         ui.horizontal(|ui| {
-            let charge = batt.charge_pct.unwrap_or(0.0) as f32;
+            let charge = finite(batt.charge_pct).unwrap_or(0.0) as f32;
             donut(ui, theme, charge, "%", "CHARGE").on_hover_text(
                 "Battery charge level, 0–100 %. Reading comes from the embedded \
                  controller via the Windows power API.",
@@ -34,13 +34,14 @@ pub fn battery_panel(
             ui.vertical(|ui| {
                 let mut cands: Vec<StatCandidate> = Vec::new();
 
-                if let Some(pct) = batt.charge_pct {
+                if let Some(pct) = finite(batt.charge_pct) {
                     cands.push(StatCandidate {
                         priority: 0,
                         label: "REMAINING",
                         value: format!("{} %", pct.round() as i64),
                         color: None,
                         tooltip_key: "REMAINING",
+                        hover_extra: None,
                     });
                 }
 
@@ -57,22 +58,25 @@ pub fn battery_panel(
                     value: time_value,
                     color: None,
                     tooltip_key: "TIME",
+                    hover_extra: None,
                 });
 
                 // RATE: dedicated row with directional arrow. The arrow +
                 // decimals carry more information than the rounded integer in
-                // the STATE row.
-                if let Some(rate) = batt.rate_w {
+                // the STATE row. A non-finite reading hides both rows rather
+                // than rendering a confident "IDLE" off NaN comparisons.
+                if let Some(rate) = finite(batt.rate_w) {
                     cands.push(StatCandidate {
                         priority: 2,
                         label: "RATE",
                         value: format_rate(Some(rate)),
                         color: None,
                         tooltip_key: "RATE",
+                        hover_extra: None,
                     });
                 }
 
-                if let Some(rate) = batt.rate_w {
+                if let Some(rate) = finite(batt.rate_w) {
                     let (state, col) = if rate > 0.05 {
                         ("CHARGING", Some(theme.ok))
                     } else if rate < -0.05 {
@@ -86,15 +90,17 @@ pub fn battery_panel(
                         value: state.to_string(),
                         color: col,
                         tooltip_key: "STATE",
+                        hover_extra: None,
                     });
                 }
 
                 // HEALTH is reported as remaining life percentage. Wear is
                 // computed internally for the health colour band but the
                 // visible value matches user expectation ("100 % = new").
-                if let (Some(design), Some(full)) =
-                    (batt.design_capacity_mwh, batt.full_capacity_mwh)
-                {
+                if let (Some(design), Some(full)) = (
+                    finite(batt.design_capacity_mwh),
+                    finite(batt.full_capacity_mwh),
+                ) {
                     if design > 0.0 {
                         let health = (full / design * 100.0).clamp(0.0, 100.0);
                         cands.push(StatCandidate {
@@ -103,6 +109,7 @@ pub fn battery_panel(
                             value: format!("{health:.1} %"),
                             color: Some(health_color(health, theme)),
                             tooltip_key: "HEALTH",
+                            hover_extra: None,
                         });
                     }
                 }
