@@ -1,10 +1,11 @@
 ; PerfWindow installer - Inno Setup script.
 ;
-; Produces PerfWindow-Setup.exe: installs PerfWindow.exe + sensord.exe into
-; Program Files, adds a Start Menu shortcut and an Add/Remove Programs entry,
-; bundles the Microsoft Visual C++ runtime and the PawnIO kernel driver, and
-; ships an uninstaller that removes every file and any legacy registry data
-; PerfWindow left behind.
+; Produces PerfWindow-Setup.exe: installs PerfWindow.exe plus the sensord
+; folder publish (sensord.exe and its self-contained .NET runtime as sibling
+; files) into Program Files, adds a Start Menu shortcut and an Add/Remove
+; Programs entry, bundles the Microsoft Visual C++ runtime and the PawnIO
+; kernel driver, and ships an uninstaller that removes every file and any
+; legacy registry data PerfWindow left behind.
 ;
 ; PawnIO replaces WinRing0 (LibreHardwareMonitor 0.9.5+); it is a signed
 ; driver that Microsoft Defender does not flag, so no Defender exclusions are
@@ -16,7 +17,8 @@
 
 #define AppName "PerfWindow"
 #ifndef AppVersion
-  #define AppVersion "0.0.0-dev"
+  ; Plain numeric fallback: VersionInfoVersion rejects suffixed strings.
+  #define AppVersion "0.0.0"
 #endif
 #define AppPublisher "Luka Stojiljkovic"
 
@@ -41,7 +43,8 @@ WizardStyle=modern
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 PrivilegesRequired=admin
-MinVersion=10.0
+; .NET 8 requires Windows 10 1607+ (build 14393).
+MinVersion=10.0.14393
 CloseApplications=force
 RestartApplications=no
 
@@ -53,7 +56,10 @@ Name: "desktopicon"; Description: "Create a &desktop shortcut"; GroupDescription
 
 [Files]
 Source: "..\dashboard\target\release\PerfWindow.exe"; DestDir: "{app}"; Flags: ignoreversion
-Source: "..\dashboard\target\release\sensord.exe";    DestDir: "{app}"; Flags: ignoreversion
+; The entire sensord folder publish: sensord.exe must stay a direct sibling
+; of PerfWindow.exe, with the runtime DLLs beside it (the .NET host resolves
+; the runtime from the directory the exe lives in).
+Source: "..\sensord\src\bin\Release\net8.0-windows\win-x64\publish\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs
 Source: "..\LICENSE";                                 DestDir: "{app}"; Flags: ignoreversion
 Source: "vendor\vc_redist.x64.exe";                                     Flags: dontcopy
 Source: "vendor\PawnIO_setup.exe";                                      Flags: dontcopy
@@ -103,9 +109,12 @@ begin
 end;
 
 { True iff a 14.x (Visual C++ 2015-2022) x64 runtime is registered on this
-  machine. Reads the standard Microsoft-published location. ABI compatibility
-  is preserved across the entire 14.x line, so any 14.x install is sufficient
-  for binaries linked against vcruntime140.dll / msvcp140.dll. }
+  machine. Reads the standard Microsoft-published location. Accepting any
+  14.x version ('Major >= 14') is safe for PerfWindow specifically:
+  PerfWindow.exe imports only vcruntime140.dll, whose exports have been
+  stable across the whole 14.x line. It would NOT be safe in general —
+  msvcp140 split off minor-versioned DLLs (e.g. msvcp140_2.dll) that older
+  14.x installs lack. }
 function IsVcRedistInstalled: Boolean;
 var
   Installed, Major: Cardinal;
@@ -145,11 +154,12 @@ var
   ResultCode: Integer;
   Response: Integer;
 begin
-  Response := MsgBox(
+  { Suppressed default NO: a silent install must not open a browser. }
+  Response := SuppressibleMsgBox(
     'Visual C++ Runtime installation failed (code ' + IntToStr(ExitCode) + ').' + #13#10 +
     'PerfWindow cannot start without it.' + #13#10 + #13#10 +
     'Open the Microsoft download page in your browser?',
-    mbError, MB_YESNO);
+    mbError, MB_YESNO, IDNO);
   if Response = IDYES then
     ShellExec('open',
               'https://aka.ms/vs/17/release/vc_redist.x64.exe',
@@ -210,13 +220,13 @@ begin
     treats a leading '#' as a directive marker and aborts compilation with
     "Unknown preprocessor directive" on the otherwise valid Pascal literal
     `#13#10`. Keep every continuation line opening with the '+' operator. }
-  MsgBox(
+  SuppressibleMsgBox(
     'PawnIO driver installation failed (code ' + IntToStr(ExitCode) + ').'
     + #13#10 + #13#10
     + 'PerfWindow will still install, but CPU temperature, clock and power'
     + ' readings will be unavailable until PawnIO is installed manually from'
     + #13#10 + 'https://pawnio.eu',
-    mbInformation, MB_OK);
+    mbInformation, MB_OK, IDOK);
 end;
 
 { End-to-end PawnIO sequence: extract the bundled installer, run a
@@ -257,25 +267,76 @@ begin
     HandlePawnIoFailure(ExitCode);
 end;
 
+{ Run sc.exe with the given arguments and return its exit code (-1 when the
+  process could not be launched at all). }
+function RunSc(const Args: String): Integer;
+var
+  ResultCode: Integer;
+begin
+  if Exec('sc.exe', Args, '', SW_HIDE, ewWaitUntilTerminated, ResultCode) then
+    Result := ResultCode
+  else
+    Result := -1;
+end;
+
+const
+  ERROR_SERVICE_EXISTS = 1073;
+
 { Install the PerfWindow sensor service as a LocalSystem demand-start
   service. The installer does NOT start it: the dashboard elevates via
   ShellExecuteEx("runas", "sc.exe", "start ...") on each launch and is
   responsible for the entire service lifecycle. The service uses the
-  Windows default ACL (admin-only start/stop) — no SDDL grant needed. }
+  Windows default ACL (admin-only start/stop) — no SDDL grant needed.
+
+  Every sc.exe exit code is checked: a silently unregistered service is the
+  worst failure mode (PerfWindow installs fine, then shows no data on every
+  launch). ERROR_SERVICE_EXISTS is fine on reinstall — binPath points into
+  the unchanged install dir, and the description step still runs. A failure
+  surfaces a suppressible error naming the failed step; the install itself
+  continues so the user keeps the files plus the recovery hint. }
 procedure InstallSensorService;
 var
   Cmd: String;
-  ResultCode: Integer;
+  ExitCode: Integer;
 begin
   WizardForm.StatusLabel.Caption := 'Installing PerfWindow sensor service...';
   Cmd := 'create PerfWindowSensor binPath= "\"' + ExpandConstant('{app}\sensord.exe') + '\" --service"'
        + ' start= demand'
        + ' DisplayName= "PerfWindow Sensor"'
        + ' obj= LocalSystem';
-  Exec('sc.exe', Cmd, '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-  Exec('sc.exe',
-       'description PerfWindowSensor "Provides hardware sensor readings to PerfWindow. Started when PerfWindow launches; exits when PerfWindow closes."',
-       '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  ExitCode := RunSc(Cmd);
+  if (ExitCode <> 0) and (ExitCode <> ERROR_SERVICE_EXISTS) then
+  begin
+    SuppressibleMsgBox(
+      'Sensor service registration failed (sc.exe create exited with code '
+      + IntToStr(ExitCode) + ').'
+      + #13#10 + #13#10
+      + 'PerfWindow will install, but it cannot read hardware sensors until'
+      + ' the service exists. Reinstall PerfWindow to retry.',
+      mbError, MB_OK, IDOK);
+    Exit;
+  end;
+  ExitCode := RunSc(
+    'description PerfWindowSensor "Provides hardware sensor readings to PerfWindow. Started when PerfWindow launches; exits when PerfWindow closes."');
+  if ExitCode <> 0 then
+    SuppressibleMsgBox(
+      'Setting the sensor service description failed (sc.exe description'
+      + ' exited with code ' + IntToStr(ExitCode) + ').'
+      + #13#10 + #13#10
+      + 'The service itself is registered; PerfWindow will work normally.',
+      mbError, MB_OK, IDOK);
+end;
+
+{ Stop any running sensord before the PawnIO chain-install: a live sensord
+  holds the PawnIO device open, which can fail the driver
+  uninstall/reinstall pair. Best-effort — fresh installs have neither the
+  service nor the process. }
+procedure StopRunningSensord;
+var
+  ResultCode: Integer;
+begin
+  Exec('sc.exe', 'stop PerfWindowSensor', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Exec('taskkill.exe', '/IM sensord.exe /F', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
 end;
 
 { Strip the legacy WinRing0 Defender entries written by PerfWindow 0.4.1 and
@@ -330,13 +391,15 @@ var
   Cmd: String;
   ResultCode: Integer;
 begin
-  if MsgBox(
+  { Suppressed default NO: PawnIO may be shared with other monitoring
+    tools, so a silent uninstall must keep the driver. }
+  if SuppressibleMsgBox(
        'PerfWindow installed the PawnIO kernel driver to read hardware sensors.'
        + #13#10 + #13#10
        + 'Other monitoring tools (HWiNFO, LibreHardwareMonitor) may also use it.'
        + #13#10 + #13#10
        + 'Remove PawnIO driver?',
-       mbConfirmation, MB_YESNO) <> IDYES then
+       mbConfirmation, MB_YESNO, IDNO) <> IDYES then
     Exit;
 
   if RegQueryStringValue(HKEY_LOCAL_MACHINE,
@@ -357,14 +420,15 @@ begin
     Exit;
   end;
 
-  MsgBox(
+  SuppressibleMsgBox(
     'PawnIO uninstaller not found in registry. If you want to remove it, use Add/Remove Programs.',
-    mbInformation, MB_OK);
+    mbInformation, MB_OK, IDOK);
 end;
 
 procedure CurStepChanged(CurStep: TSetupStep);
 begin
   if CurStep = ssInstall then begin
+    StopRunningSensord;
     EnsureVcRedist;
     EnsurePawnIo;
     InstallSensorService;

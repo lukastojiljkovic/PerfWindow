@@ -103,18 +103,29 @@ fn sensord_service_emits_snapshots_over_pipe() {
         }
     };
 
+    // Since 0.10.0 the feed starts with `{"progress":...}` staged-init lines;
+    // the first `{"v":...}` snapshot follows once CPU+RAM sensors are open.
     let mut lines = BufReader::new(f).lines();
-    let line = lines
-        .next()
-        .expect("at least one line")
-        .expect("line read ok");
+    let mut saw_progress = false;
+    let snapshot = loop {
+        let line = lines
+            .next()
+            .expect("stream ended before a snapshot arrived")
+            .expect("line read ok");
+        if line.starts_with("{\"progress\":") {
+            saw_progress = true;
+            continue;
+        }
+        break line;
+    };
+    assert!(saw_progress, "no progress line preceded the first snapshot");
     assert!(
-        line.starts_with("{\"v\":"),
-        "snapshot missing version prefix: {line}"
+        snapshot.starts_with("{\"v\":"),
+        "snapshot missing version prefix: {snapshot}"
     );
     assert!(
-        line.contains("\"health\""),
-        "snapshot missing health: {line}"
+        snapshot.contains("\"health\""),
+        "snapshot missing health: {snapshot}"
     );
 
     drop(child);
@@ -162,8 +173,12 @@ fn pipe_sensord_shutdown_terminates_child() {
     // shutdown already wrote the message and closed the writer).
     drop(sensord_client);
 
-    // The worker must exit cleanly within 5 s.
-    let exit_deadline = Instant::now() + Duration::from_secs(5);
+    // The worker must exit cleanly. Worst case is bounded by sensord's
+    // teardown watchdog (3.5 s grace, then forced exit) plus a synchronous
+    // LHM call that was already in flight; 8 s keeps the assertion about
+    // "exits promptly, never lingers" without flaking when the shutdown
+    // lands mid category-enable on a loaded machine.
+    let exit_deadline = Instant::now() + Duration::from_secs(8);
     loop {
         match child.0.try_wait() {
             Ok(Some(status)) => {
@@ -179,7 +194,7 @@ fn pipe_sensord_shutdown_terminates_child() {
             }
             Ok(None) => {
                 let _ = child.0.kill();
-                panic!("sensord did not exit within 5s after shutdown");
+                panic!("sensord did not exit within 8s after shutdown");
             }
             Err(e) => panic!("try_wait failed: {e}"),
         }

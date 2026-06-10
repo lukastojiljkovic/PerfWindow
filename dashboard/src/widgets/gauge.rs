@@ -10,7 +10,9 @@ const OUTER_R: f32 = 43.0;
 const RING_THICK: f32 = 8.0;
 /// Mid-radius where the stroke is centred.
 const MID_R: f32 = OUTER_R - RING_THICK / 2.0;
-/// Number of segments to approximate the arc (smooth enough at this size).
+/// Number of segments to approximate the partial accent arc (smooth enough at
+/// this size). The full-circle track does not use this — it is a single
+/// `circle_stroke` shape.
 const SEGMENTS: usize = 120;
 
 /// Draw a donut-style gauge centred in an 86×86 allocation.
@@ -32,8 +34,8 @@ pub fn donut(ui: &mut egui::Ui, theme: &Theme, value: f32, unit: &str, label: &s
     let painter = ui.painter_at(rect);
     let center = rect.center();
 
-    // --- full-circle track ---
-    draw_arc(&painter, center, MID_R, 0.0, 1.0, RING_THICK, theme.track);
+    // --- full-circle track: one circle shape instead of a 121-point polyline ---
+    painter.circle_stroke(center, MID_R, Stroke::new(RING_THICK, theme.track));
 
     // --- accent arc (clockwise from top) ---
     let fraction = (value / 100.0).clamp(0.0, 1.0);

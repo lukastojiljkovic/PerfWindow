@@ -26,12 +26,14 @@ public class SnapshotSerializationTests
                 ECoreCount: null),
             Gpu: null, Igpu: null, Ram: null, Storage: null, Board: null,
             Fans: null, Voltages: null, Net: null,
-            Battery: null, UptimeSec: null, AtkFans: null, Display: null, Displays: null, Health: null);
+            Battery: null, UptimeSec: null, AtkFans: null, Display: null, Displays: null, Health: null,
+            TsMs: 1747645200123);
 
         string json = JsonSerializer.Serialize(snap, SensordJsonContext.Default.Snapshot);
 
         Assert.Contains("\"v\":1", json);
         Assert.Contains("\"ts\":1747645200", json);
+        Assert.Contains("\"ts_ms\":1747645200123", json);
         Assert.Contains("\"cpu\":", json);
         Assert.Contains("\"clock_mhz\":4400", json);
     }

@@ -42,6 +42,11 @@ pub struct Snapshot {
     /// predate the health probe (pre-0.8.0).
     #[serde(default)]
     pub health: Option<HealthInfo>,
+    /// Snapshot timestamp in Unix milliseconds. Emitted alongside the
+    /// seconds-resolution `ts` by sensord 0.10.0+ so sub-second refresh
+    /// rates carry distinguishable stamps.
+    #[serde(default)]
+    pub ts_ms: Option<i64>,
 }
 
 /// Active display info — one monitor's resolution and refresh rate. The
@@ -54,6 +59,10 @@ pub struct DisplayInfo {
     pub width: i32,
     pub height: i32,
     pub refresh_hz: i32,
+    /// EDID friendly name of the monitor (e.g. "ROG XG27AQ"). `None` when the
+    /// driver exposes no target name or on sensord builds before 0.10.0.
+    #[serde(default)]
+    pub model: Option<String>,
 }
 
 /// Sensord runtime health status. Emitted by sensord 0.8.0+ so the dashboard
@@ -99,6 +108,15 @@ pub struct CpuInfo {
     pub p_core_count: Option<u32>,
     #[serde(default)]
     pub e_core_count: Option<u32>,
+    /// Front-side / base bus clock ("Bus Speed"), MHz. The reference clock
+    /// the per-core multipliers run against.
+    #[serde(default)]
+    pub bus_clock_mhz: Option<f64>,
+    /// Per-core clocks in MHz, parallel to `cores` (P-Cores first on hybrid
+    /// silicon). Individual entries may be `null` when a core's clock sensor
+    /// is missing.
+    #[serde(default)]
+    pub core_clocks_mhz: Option<Vec<Option<f64>>>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -141,6 +159,13 @@ pub struct GpuInfo {
     /// descending — first entry is the busiest engine right now.
     #[serde(default)]
     pub d3d_engines: Option<Vec<D3DEngineLoad>>,
+    /// GDDR/VRAM memory clock ("GPU Memory"), MHz.
+    #[serde(default)]
+    pub memory_clock_mhz: Option<f64>,
+    /// Dedicated video encode/decode engine load ("GPU Video Engine"),
+    /// 0–100 %. Independent of the 3D/compute load.
+    #[serde(default)]
+    pub video_engine_load: Option<f64>,
 }
 
 /// One DXGI engine's utilisation reading, as emitted by sensord.
@@ -164,6 +189,9 @@ pub struct RamInfo {
     /// desktop kits. Older `sensord` builds omit the field.
     #[serde(default)]
     pub dimm_temps: Option<Vec<DimmTemp>>,
+    /// Per-module identity detail from the LHM SPD reader (sensord 0.10.0+).
+    #[serde(default)]
+    pub modules: Option<Vec<RamModule>>,
 }
 
 /// One memory-module temperature reading, as emitted by sensord.
@@ -171,6 +199,20 @@ pub struct RamInfo {
 pub struct DimmTemp {
     pub label: String,
     pub temp_c: f64,
+}
+
+/// One physical memory module: SPD node name, capacity in GB, module
+/// temperature in °C and a CL-style timings summary like
+/// `"CL40-39-39 @ 5600 MT/s"` (null when the SPD timing set is incomplete).
+#[derive(Debug, Clone, Deserialize)]
+pub struct RamModule {
+    pub label: String,
+    #[serde(default)]
+    pub capacity_gb: Option<f64>,
+    #[serde(default)]
+    pub temp_c: Option<f64>,
+    #[serde(default)]
+    pub timings: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -197,6 +239,20 @@ pub struct StorageInfo {
     pub power_on_count: Option<i64>,
     #[serde(default)]
     pub available_spare_pct: Option<f64>,
+    /// NVMe-spec wear figure ("Percentage Used"), 0–100 % where 0 = new.
+    #[serde(default)]
+    pub percentage_used_pct: Option<f64>,
+    /// The drive's own thermal thresholds (°C). When both are present the
+    /// TEMP column is coloured against them instead of the fixed bands.
+    #[serde(default)]
+    pub temp_warn_c: Option<f64>,
+    #[serde(default)]
+    pub temp_crit_c: Option<f64>,
+    /// Lifetime host transfer totals, GB.
+    #[serde(default)]
+    pub data_read_gb: Option<f64>,
+    #[serde(default)]
+    pub data_written_gb: Option<f64>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -214,6 +270,14 @@ pub struct BatteryInfo {
 pub struct BoardInfo {
     pub temp: Option<f64>,
     pub vrm_temp: Option<f64>,
+    /// Motherboard model name from the LHM motherboard node (sensord 0.10.0+).
+    #[serde(default)]
+    pub name: Option<String>,
+    /// BIOS identity from WMI `Win32_BIOS`; `bios_date` is `yyyy-MM-dd`.
+    #[serde(default)]
+    pub bios_version: Option<String>,
+    #[serde(default)]
+    pub bios_date: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -236,6 +300,51 @@ pub struct NetInfo {
     pub link_bps: Option<i64>,
     pub down_pct: Option<f64>,
     pub up_pct: Option<f64>,
+    /// Wireless link detail — present only when the active adapter is a
+    /// connected 802.11 interface (sensord 0.10.0+).
+    #[serde(default)]
+    pub wifi: Option<WifiInfo>,
+}
+
+/// Wireless link details for the active Wi-Fi adapter. `signal_pct` is
+/// 0–100 %; `phy_mbps` is the negotiated PHY rate; `band` is e.g. "5 GHz".
+#[derive(Debug, Clone, Deserialize)]
+pub struct WifiInfo {
+    #[serde(default)]
+    pub ssid: Option<String>,
+    #[serde(default)]
+    pub signal_pct: Option<f64>,
+    #[serde(default)]
+    pub phy_mbps: Option<f64>,
+    #[serde(default)]
+    pub band: Option<String>,
+}
+
+/// Staged-init progress, emitted by sensord 0.10.0+ while sensor categories
+/// are still being enabled. Deliberately not snapshot-shaped (no `v`/`ts`) so
+/// pre-0.10 dashboards drop the line in their snapshot parser.
+#[derive(Debug, Clone, Deserialize)]
+pub struct ProgressInfo {
+    /// Category currently being enabled; `None` once all are done.
+    #[serde(default)]
+    pub loading: Option<String>,
+    pub done: Vec<String>,
+    pub pending: Vec<String>,
+}
+
+/// One recognised NDJSON line off the sensor feed. The snapshot is boxed:
+/// `Snapshot` is two orders of magnitude larger than `ProgressInfo`, and the
+/// value is moved straight into shared state by the reader thread anyway.
+#[derive(Debug, Clone)]
+pub enum Line {
+    Snap(Box<Snapshot>),
+    Progress(ProgressInfo),
+}
+
+/// Wire shape of a progress line: `{"progress":{...}}`.
+#[derive(Deserialize)]
+struct ProgressLine {
+    progress: ProgressInfo,
 }
 
 /// Parse one NDJSON line. Returns `None` for blank or malformed input — a bad
@@ -246,6 +355,18 @@ pub fn parse_snapshot(line: &str) -> Option<Snapshot> {
         return None;
     }
     serde_json::from_str(line).ok()
+}
+
+/// Parse one NDJSON line into a snapshot or a progress message. Unknown or
+/// malformed lines yield `None` so the reader threads survive anything the
+/// pipe carries (forward compatibility with future message types).
+pub fn parse_line(line: &str) -> Option<Line> {
+    if let Some(snap) = parse_snapshot(line) {
+        return Some(Line::Snap(Box::new(snap)));
+    }
+    serde_json::from_str::<ProgressLine>(line.trim())
+        .ok()
+        .map(|p| Line::Progress(p.progress))
 }
 
 #[cfg(test)]
@@ -314,5 +435,145 @@ mod tests {
         .expect("should parse");
         assert!(s.cpu.as_ref().unwrap().core_temps.is_none());
         assert!(s.gpu.as_ref().unwrap()[0].memory_load.is_none());
+    }
+
+    /// Every v0.10.0 schema addition in one line, exactly as sensord emits it.
+    const FULL_V10: &str = r#"{"v":1,"ts":1747645200,"ts_ms":1747645200123,
+      "cpu":{"name":"Test CPU","load":34.2,"cores":[38.1,55.0],"temp":58.0,"clock_mhz":4400,
+             "bus_clock_mhz":99.8,"core_clocks_mhz":[4400.0,null,3900.0]},
+      "gpu":[{"name":"RTX 4070","kind":"discrete","load":51.0,"memory_clock_mhz":8001.0,"video_engine_load":12.5}],
+      "ram":{"used_mb":15462,"total_mb":32768,
+             "modules":[{"label":"Kingston KF556S40 #0","capacity_gb":16.0,"temp_c":44.5,"timings":"CL40-39-39 @ 5600 MT/s"},
+                        {"label":"Kingston KF556S40 #1","capacity_gb":null,"temp_c":null,"timings":null}]},
+      "storage":[{"name":"Samsung 980 Pro","kind":"nvme","temp":48.0,
+                  "percentage_used_pct":3.0,"temp_warn_c":82.0,"temp_crit_c":85.0,
+                  "data_read_gb":15234.5,"data_written_gb":20480.0}],
+      "board":{"temp":38.0,"vrm_temp":61.0,"name":"ASUS FX507VI","bios_version":"16.0302","bios_date":"2023-11-15"},
+      "net":{"adapter":"Wi-Fi","down_bps":4404019,"up_bps":629145,"link_bps":866000000,
+             "wifi":{"ssid":"HomeNet","signal_pct":86.0,"phy_mbps":866.7,"band":"5 GHz"}},
+      "displays":[{"name":"\\\\.\\DISPLAY1","width":2560,"height":1440,"refresh_hz":170,"model":"ROG XG27AQ"}],
+      "display":{"name":"\\\\.\\DISPLAY1","width":2560,"height":1440,"refresh_hz":170,"model":"ROG XG27AQ"}}"#;
+
+    #[test]
+    fn parses_every_v10_schema_addition() {
+        let s = parse_snapshot(FULL_V10).expect("should parse");
+        assert_eq!(s.ts_ms, Some(1_747_645_200_123));
+
+        let cpu = s.cpu.as_ref().unwrap();
+        assert_eq!(cpu.bus_clock_mhz, Some(99.8));
+        let clocks = cpu.core_clocks_mhz.as_ref().unwrap();
+        assert_eq!(clocks.len(), 3);
+        assert_eq!(clocks[0], Some(4400.0));
+        assert_eq!(clocks[1], None);
+
+        let gpu = &s.gpu.as_ref().unwrap()[0];
+        assert_eq!(gpu.memory_clock_mhz, Some(8001.0));
+        assert_eq!(gpu.video_engine_load, Some(12.5));
+
+        let modules = s.ram.as_ref().unwrap().modules.as_ref().unwrap();
+        assert_eq!(modules.len(), 2);
+        assert_eq!(modules[0].label, "Kingston KF556S40 #0");
+        assert_eq!(modules[0].capacity_gb, Some(16.0));
+        assert_eq!(modules[0].temp_c, Some(44.5));
+        assert_eq!(
+            modules[0].timings.as_deref(),
+            Some("CL40-39-39 @ 5600 MT/s")
+        );
+        assert!(modules[1].capacity_gb.is_none());
+        assert!(modules[1].timings.is_none());
+
+        let disk = &s.storage.as_ref().unwrap()[0];
+        assert_eq!(disk.percentage_used_pct, Some(3.0));
+        assert_eq!(disk.temp_warn_c, Some(82.0));
+        assert_eq!(disk.temp_crit_c, Some(85.0));
+        assert_eq!(disk.data_read_gb, Some(15234.5));
+        assert_eq!(disk.data_written_gb, Some(20480.0));
+
+        let board = s.board.as_ref().unwrap();
+        assert_eq!(board.name.as_deref(), Some("ASUS FX507VI"));
+        assert_eq!(board.bios_version.as_deref(), Some("16.0302"));
+        assert_eq!(board.bios_date.as_deref(), Some("2023-11-15"));
+
+        let wifi = s.net.as_ref().unwrap().wifi.as_ref().unwrap();
+        assert_eq!(wifi.ssid.as_deref(), Some("HomeNet"));
+        assert_eq!(wifi.signal_pct, Some(86.0));
+        assert_eq!(wifi.phy_mbps, Some(866.7));
+        assert_eq!(wifi.band.as_deref(), Some("5 GHz"));
+
+        assert_eq!(
+            s.display.as_ref().unwrap().model.as_deref(),
+            Some("ROG XG27AQ")
+        );
+        assert_eq!(
+            s.displays.as_ref().unwrap()[0].model.as_deref(),
+            Some("ROG XG27AQ")
+        );
+    }
+
+    #[test]
+    fn pre_v10_snapshots_default_every_new_field_to_none() {
+        // `FULL` is the 0.9.x-era sample: none of the v0.10.0 fields appear.
+        let s = parse_snapshot(FULL).expect("should parse");
+        assert!(s.ts_ms.is_none());
+        let cpu = s.cpu.as_ref().unwrap();
+        assert!(cpu.bus_clock_mhz.is_none());
+        assert!(cpu.core_clocks_mhz.is_none());
+        let gpu = &s.gpu.as_ref().unwrap()[0];
+        assert!(gpu.memory_clock_mhz.is_none());
+        assert!(gpu.video_engine_load.is_none());
+        assert!(s.ram.as_ref().unwrap().modules.is_none());
+        let disk = &s.storage.as_ref().unwrap()[0];
+        assert!(disk.percentage_used_pct.is_none());
+        assert!(disk.temp_warn_c.is_none());
+        assert!(disk.temp_crit_c.is_none());
+        assert!(disk.data_read_gb.is_none());
+        assert!(disk.data_written_gb.is_none());
+        let board = s.board.as_ref().unwrap();
+        assert!(board.name.is_none());
+        assert!(board.bios_version.is_none());
+        assert!(board.bios_date.is_none());
+        assert!(s.net.as_ref().unwrap().wifi.is_none());
+    }
+
+    #[test]
+    fn parse_line_recognises_the_contract_progress_example() {
+        let line = r#"{"progress":{"loading":"gpu","done":["cpu","ram","motherboard"],"pending":["storage","network","controller","battery"]}}"#;
+        let Some(Line::Progress(p)) = parse_line(line) else {
+            panic!("expected a progress line");
+        };
+        assert_eq!(p.loading.as_deref(), Some("gpu"));
+        assert_eq!(p.done, ["cpu", "ram", "motherboard"]);
+        assert_eq!(p.pending, ["storage", "network", "controller", "battery"]);
+    }
+
+    #[test]
+    fn parse_line_accepts_null_and_absent_loading() {
+        let final_line = r#"{"progress":{"loading":null,"done":["cpu","ram"],"pending":[]}}"#;
+        let Some(Line::Progress(p)) = parse_line(final_line) else {
+            panic!("expected a progress line");
+        };
+        assert!(p.loading.is_none());
+        assert!(p.pending.is_empty());
+
+        let absent = r#"{"progress":{"done":[],"pending":[]}}"#;
+        let Some(Line::Progress(p)) = parse_line(absent) else {
+            panic!("expected a progress line");
+        };
+        assert!(p.loading.is_none());
+    }
+
+    #[test]
+    fn parse_line_still_parses_snapshots() {
+        let Some(Line::Snap(s)) = parse_line(FULL) else {
+            panic!("expected a snapshot line");
+        };
+        assert_eq!(s.v, 1);
+    }
+
+    #[test]
+    fn parse_line_rejects_unknown_input() {
+        assert!(parse_line("not json").is_none());
+        assert!(parse_line("").is_none());
+        assert!(parse_line(r#"{"future_message":42}"#).is_none());
     }
 }

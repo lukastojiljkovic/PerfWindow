@@ -93,10 +93,13 @@ pub fn panel_title(ui: &mut egui::Ui, theme: &Theme, title: &str, sub: Option<&s
 /// readable motherboard sensors, or no active network adapter). It fabricates
 /// nothing and cannot panic.
 pub fn empty_note(ui: &mut egui::Ui, theme: &Theme, text: &str) {
-    let (rect, _) = ui.allocate_exact_size(
-        Vec2::new(ui.available_width(), EMPTY_NOTE_H),
-        Sense::hover(),
-    );
+    let available_w = ui.available_width();
+    // Reject NaN / non-positive width before it reaches the tessellator (see
+    // widgets/sparkline.rs for the failure mode — abort, not a panic).
+    if !available_w.is_finite() || available_w <= 0.0 {
+        return;
+    }
+    let (rect, _) = ui.allocate_exact_size(Vec2::new(available_w, EMPTY_NOTE_H), Sense::hover());
     if !ui.is_rect_visible(rect) {
         return;
     }
@@ -113,11 +116,11 @@ pub fn empty_note(ui: &mut egui::Ui, theme: &Theme, text: &str) {
     job.wrap.max_width = rect.width();
     job.halign = egui::Align::Center;
     let galley = painter.layout_job(job);
+    // With `halign: Center` the galley rows already span -w/2..w/2 around the
+    // anchor, so the anchor must be the centre x itself — subtracting another
+    // half-width would shift the text half a row off to the left.
     painter.galley(
-        Pos2::new(
-            rect.center().x - galley.size().x / 2.0,
-            rect.center().y - galley.size().y / 2.0,
-        ),
+        Pos2::new(rect.center().x, rect.center().y - galley.size().y / 2.0),
         galley,
         theme.dim,
     );

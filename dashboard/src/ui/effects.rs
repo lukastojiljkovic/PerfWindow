@@ -11,7 +11,8 @@
 //! atmosphere — only the faint base grid.
 
 use crate::theme::Theme;
-use egui::{Color32, Id, LayerId, Order, Rect, Stroke, StrokeKind};
+use egui::epaint::Mesh;
+use egui::{Color32, Id, LayerId, Order, Pos2, Rect, Shape, Stroke, StrokeKind};
 
 /// Grid cell size, in pixels.
 const GRID_STEP: f32 = 25.0;
@@ -43,20 +44,33 @@ pub fn paint_grid(ui: &egui::Ui, theme: &Theme) {
     if !rect.is_finite() || rect.width() <= 0.0 || rect.height() <= 0.0 {
         return;
     }
-    let painter = ui.painter();
-    let stroke = Stroke::new(1.0, color);
 
-    // Vertical lines, then horizontal lines, stepping across the body.
+    // One mesh of 1 px quads instead of one line shape per grid line — the
+    // tessellator otherwise rebuilds hundreds of stroked paths per frame.
+    let mut mesh = Mesh::default();
     let mut x = rect.left();
     while x <= rect.right() {
-        painter.vline(x, rect.y_range(), stroke);
+        mesh.add_colored_rect(
+            Rect::from_min_max(
+                Pos2::new(x - 0.5, rect.top()),
+                Pos2::new(x + 0.5, rect.bottom()),
+            ),
+            color,
+        );
         x += GRID_STEP;
     }
     let mut y = rect.top();
     while y <= rect.bottom() {
-        painter.hline(rect.x_range(), y, stroke);
+        mesh.add_colored_rect(
+            Rect::from_min_max(
+                Pos2::new(rect.left(), y - 0.5),
+                Pos2::new(rect.right(), y + 0.5),
+            ),
+            color,
+        );
         y += GRID_STEP;
     }
+    ui.painter().add(Shape::mesh(mesh));
 }
 
 /// Paint the scanline + vignette overlay for `theme` over the whole window.
@@ -82,7 +96,8 @@ pub fn paint_effects(ctx: &egui::Context, theme: &Theme) {
 /// Draw horizontal scanlines every 4 px across the whole window.
 ///
 /// Skipped unless `theme.scanline_opacity > 0` (the Light theme sets it to 0).
-/// Each line is solid black at `scanline_opacity` alpha.
+/// Each line is solid black at `scanline_opacity` alpha; all lines are batched
+/// into one mesh so the per-frame overlay costs a single shape.
 fn scanlines(painter: &egui::Painter, theme: &Theme, screen: Rect) {
     if theme.scanline_opacity <= 0.0 {
         return;
@@ -91,13 +106,21 @@ fn scanlines(painter: &egui::Painter, theme: &Theme, screen: Rect) {
     if alpha == 0 {
         return;
     }
-    let stroke = Stroke::new(1.0, Color32::from_black_alpha(alpha));
+    let color = Color32::from_black_alpha(alpha);
 
+    let mut mesh = Mesh::default();
     let mut y = screen.top();
     while y <= screen.bottom() {
-        painter.hline(screen.x_range(), y, stroke);
+        mesh.add_colored_rect(
+            Rect::from_min_max(
+                Pos2::new(screen.left(), y - 0.5),
+                Pos2::new(screen.right(), y + 0.5),
+            ),
+            color,
+        );
         y += SCANLINE_STEP;
     }
+    painter.add(Shape::mesh(mesh));
 }
 
 /// Draw a soft dark vignette: a short stack of concentric 1 px rectangle

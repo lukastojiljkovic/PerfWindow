@@ -75,20 +75,24 @@ pub fn title_bar(ui: &mut egui::Ui, app: &mut PerfApp) {
 /// trailing `▮` toggles on a ~1.1 s cycle driven by `ui.input(|i| i.time)`, so
 /// it keeps blinking as long as the UI repaints.
 fn wordmark(ui: &mut egui::Ui, theme: &Theme) {
-    let time = ui.input(|i| i.time);
+    let (time, focused) = ui.input(|i| (i.time, i.focused));
     // On for the first half of each period, off for the second.
     let phase = time % CURSOR_BLINK_PERIOD;
     let cursor_visible = phase < CURSOR_BLINK_PERIOD / 2.0;
     // egui's `time` only advances when a frame is drawn, and the refresh-rate
     // watchdog repaints far too slowly for a 1.1 s blink. Schedule a repaint
-    // exactly at the next on/off transition so the cursor keeps proper time.
-    let to_next_edge = if cursor_visible {
-        CURSOR_BLINK_PERIOD / 2.0 - phase
-    } else {
-        CURSOR_BLINK_PERIOD - phase
-    };
-    ui.ctx()
-        .request_repaint_after(std::time::Duration::from_secs_f64(to_next_edge));
+    // exactly at the next on/off transition so the cursor keeps proper time —
+    // but only while the window has focus: a background window must not wake
+    // the compositor ~2x per second for a cursor nobody is looking at.
+    if focused {
+        let to_next_edge = if cursor_visible {
+            CURSOR_BLINK_PERIOD / 2.0 - phase
+        } else {
+            CURSOR_BLINK_PERIOD - phase
+        };
+        ui.ctx()
+            .request_repaint_after(std::time::Duration::from_secs_f64(to_next_edge));
+    }
 
     ui.spacing_mut().item_spacing.x = 0.0;
     ui.label(
@@ -269,7 +273,11 @@ pub fn footer(ui: &mut egui::Ui, app: &mut PerfApp) {
             // Headline snapshot figures.
             if let Some(snap) = &app.latest {
                 if let Some(secs) = snap.uptime_sec {
-                    foot_item(ui, &theme, &format!("UP {}", format_uptime(secs)));
+                    // Keyed "UPTIME" — "UP" belongs to the network panel.
+                    tooltips::tip(
+                        foot_item(ui, &theme, &format!("UP {}", format_uptime(secs))),
+                        "UPTIME",
+                    );
                 }
                 if let Some(cpu) = &snap.cpu {
                     foot_item(ui, &theme, &format!("CPU {}%", format_percent(cpu.load)));
@@ -299,28 +307,30 @@ pub fn footer(ui: &mut egui::Ui, app: &mut PerfApp) {
                         }
                     }
                 }
-                // Active display: resolution + refresh rate. Read once per
-                // snapshot via Win32 EnumDisplaySettings on the sensord side.
+                // Active display: model (EDID, when the driver exposes it) +
+                // resolution + refresh rate, read on the sensord side.
                 if let Some(d) = &snap.display {
-                    foot_item(
-                        ui,
-                        &theme,
-                        &format!("{}x{} @ {}Hz", d.width, d.height, d.refresh_hz),
-                    );
+                    let mode = format!("{}x{} @ {}Hz", d.width, d.height, d.refresh_hz);
+                    let text = match d.model.as_deref().map(str::trim) {
+                        Some(model) if !model.is_empty() => format!("{model} {mode}"),
+                        _ => mode,
+                    };
+                    foot_item(ui, &theme, &text);
                 }
             }
         });
     });
 }
 
-/// One dimmed ~10 px footer figure.
-fn foot_item(ui: &mut egui::Ui, theme: &Theme, text: &str) {
+/// One dimmed ~10 px footer figure. Returns the label's response so a caller
+/// can attach a tooltip; most footer items ignore it.
+fn foot_item(ui: &mut egui::Ui, theme: &Theme, text: &str) -> egui::Response {
     ui.label(
         RichText::new(text)
             .family(theme.font_data.egui())
             .size(10.0)
             .color(theme.dim),
-    );
+    )
 }
 
 /// Render the adaptive card grid into `ui`.
@@ -353,7 +363,11 @@ pub fn card_grid(ui: &mut egui::Ui, app: &mut PerfApp) {
     if let Some(phase) = connecting_phase {
         let theme = app.theme.clone();
         let ctx = ui.ctx().clone();
-        match loading_screen::loading_screen(ui, &theme, &phase) {
+        // Staged-init progress drives the LoadingSensors checklist. Read
+        // fresh from the shared sensor state: the reader thread updates it
+        // between snapshots, while `ingest` only runs once per frame.
+        let progress = app.sensor_progress();
+        match loading_screen::loading_screen(ui, &theme, &phase, progress.as_ref()) {
             loading_screen::LoadingAction::Retry => app.restart_connect(&ctx),
             loading_screen::LoadingAction::Exit => app.want_quit = true,
             loading_screen::LoadingAction::None => {}
@@ -371,21 +385,17 @@ pub fn card_grid(ui: &mut egui::Ui, app: &mut PerfApp) {
         return;
     }
 
-    // Clone the snapshot so the layout can hold a `&mut PerfApp` mutably to
-    // write into `row_heights` without conflicting borrows. Snapshot is small
-    // (a handful of Vecs of primitives); a clone per ~17 ms of UI frame is
-    // negligible compared to the Vec allocations done by serde_json's parser
-    // upstream.
+    // Everything below only reads, so demote to a shared borrow: `snap` can
+    // then alias `app.latest` directly instead of deep-cloning the snapshot
+    // every frame.
     //
     // The `None` arm is a defensive safety net: every `Running`/no-snapshot
     // path is already absorbed by the loading-screen fallback above, so in
     // practice this branch is unreachable.
-    let snap = match &app.latest {
-        Some(s) => s.clone(),
-        None => {
-            waiting_note(ui, &app.theme);
-            return;
-        }
+    let app: &PerfApp = app;
+    let Some(snap) = app.latest.as_ref() else {
+        waiting_note(ui, &app.theme);
+        return;
     };
 
     let frame = egui::Frame::NONE.inner_margin(Margin::same(GRID_BODY_PADDING));
@@ -427,14 +437,16 @@ pub fn card_grid(ui: &mut egui::Ui, app: &mut PerfApp) {
         let col_width = ((avail_w - GRID_GAP * (cols as f32 - 1.0)) / cols as f32).max(1.0);
 
         let spans = layout_spans(&cards, cols);
-        layout_cards(ui, app, &snap, &cards, &spans, cols, col_width);
+        layout_cards(ui, app, snap, &cards, &spans, cols, col_width);
     });
 }
 
 /// Fixed outer height of the "summary" cards in the top row (CPU, GPU, RAM,
-/// Network). Tuned so GPU's five stat rows + legend + sparkline fill the
-/// card with no chin, and every other card in the row pads up to match.
-const ROW_1_CARD_HEIGHT: f32 = 255.0;
+/// Network). Tuned so the GPU card's worst case — six stat rows per column
+/// (11 candidates: the v0.10.0 MEM CLK / VIDEO rows joined the list) plus
+/// legend and sparkline — fits with no chin, and every other card in the row
+/// pads up to match (their sparklines absorb the slack).
+const ROW_1_CARD_HEIGHT: f32 = 287.0;
 /// Baseline for the Storage card (title row + column header + padding).
 const STORAGE_BASE_HEIGHT: f32 = 72.0;
 /// Per-disk row height inside the Storage card.
@@ -625,15 +637,7 @@ fn paint_card(
         }
         Card::Gpu(i) => {
             if let Some(gpu) = snap.gpu.as_ref().and_then(|g| g.get(i)) {
-                panels::gpu::gpu_panel(
-                    ui,
-                    theme,
-                    gpu,
-                    app.history.gpus.get(i),
-                    unit,
-                    capacity,
-                    min_h,
-                );
+                panels::gpu::gpu_panel(ui, theme, gpu, app.history.gpu(i), unit, capacity, min_h);
             }
         }
         Card::Igpu => {
@@ -758,7 +762,11 @@ pub fn error_overlay(ui: &mut egui::Ui, app: &mut PerfApp, ctx: &egui::Context) 
 
     // Applied after the layout closures so `app` is borrowed mutably just once.
     if respawn {
-        app.respawn_sensord(ctx, app.dev_mode);
+        if app.dev_mode {
+            app.respawn_sensord(ctx);
+        } else {
+            app.restart_connect(ctx);
+        }
     }
 }
 

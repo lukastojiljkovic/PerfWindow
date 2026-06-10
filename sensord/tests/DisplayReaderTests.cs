@@ -32,4 +32,13 @@ public class DisplayReaderTests
         var all = DisplayReader.ReadAll();
         Assert.NotNull(all);
     }
+
+    [Theory]
+    [InlineData(null, null)]
+    [InlineData("", null)]
+    [InlineData("   ", null)]
+    [InlineData("ROG XG27AQ", "ROG XG27AQ")]
+    [InlineData("  Dell U2723QE ", "Dell U2723QE")]
+    public void CleanModel_normalises_edid_friendly_names(string? input, string? expected)
+        => Assert.Equal(expected, DisplayReader.CleanModel(input));
 }

@@ -60,8 +60,15 @@ internal static class Program
                 sp.GetRequiredService<IHostApplicationLifetime>(),
                 pipeName));
         builder.Services.AddHostedService(sp => sp.GetRequiredService<SensorPipeWorker>());
-        builder.Build().Run();
-        return 0;
+        var host = builder.Build();
+        // Resolved before Run(): Run() disposes the host (and its service
+        // provider) on the way out, so a later resolve would throw.
+        var worker = host.Services.GetRequiredService<SensorPipeWorker>();
+        host.Run();
+        // SND-10: a broken install (pipe creation / sensor init failure) must
+        // be visible as a non-zero exit code instead of reading as a clean
+        // stop.
+        return worker.FatalInit ? 1 : 0;
     }
 
     /// <summary>Extract the value of <c>--pipe-name X</c> from args, or <c>null</c>.</summary>

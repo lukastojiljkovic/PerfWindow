@@ -6,12 +6,68 @@ on:
       - 'v*'
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
+  # Pre-publish gates: a tag push does not run ci.yml, so the same checks
+  # must pass here before anything is published. These two jobs are copies
+  # of ci.yml's rust-test and dotnet-test — keep them in sync with
+  # .github/workflows/ci.yml.
+  rust-test:
+    name: Rust - build, test, lint
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: dashboard
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '8.0.x'
+      - name: Publish sensord
+        # dashboard/build.rs copies the sensord folder publish next to
+        # PerfWindow.exe, so the .NET self-contained publish must run before
+        # any cargo command that touches build.rs (build, test, clippy all do).
+        run: dotnet publish sensord/src -c Release -r win-x64 --self-contained
+      - name: Build
+        working-directory: dashboard
+        run: cargo build --release
+      - name: Format
+        working-directory: dashboard
+        run: cargo fmt --check
+      - name: Clippy
+        working-directory: dashboard
+        run: cargo clippy --release -- -D warnings
+      - name: Test
+        working-directory: dashboard
+        # --test-threads=1 because the ui_snapshot integration tests
+        # share a wgpu context and crash with STATUS_ACCESS_VIOLATION
+        # when run concurrently. Unit tests are fast enough that the
+        # serial penalty is negligible.
+        run: cargo test --release -- --test-threads=1
+
+  dotnet-test:
+    name: .NET - test
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '8.0.x'
+      - name: Restore
+        run: dotnet restore sensord/tests/Sensord.Tests.csproj
+      - name: Test
+        run: dotnet test sensord/tests/Sensord.Tests.csproj --no-restore
+
   release:
     name: Build and publish
+    needs: [rust-test, dotnet-test]
     runs-on: windows-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v6
         with:
@@ -28,8 +84,12 @@ jobs:
         run: |
           $tag = '${{ github.ref_name }}'.TrimStart('v')
           $manifest = Get-Content dashboard/Cargo.toml -Raw
-          if ($manifest -notmatch "(?m)^version\s*=\s*`"$tag`"") {
-            throw "dashboard/Cargo.toml version does not match tag $tag"
+          # Anchor to the [package] table (a dependency pinned to the same
+          # version string must not satisfy the guard) and escape the tag so
+          # dots cannot match arbitrary characters.
+          $escaped = [regex]::Escape($tag)
+          if ($manifest -notmatch "(?ms)^\[package\][^\[]*?^version\s*=\s*`"$escaped`"") {
+            throw "dashboard/Cargo.toml [package] version does not match tag $tag"
           }
       - name: Install Inno Setup
         run: choco install innosetup -y

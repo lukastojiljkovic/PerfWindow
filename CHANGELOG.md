@@ -7,6 +7,168 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ## [Unreleased]
 
+## [0.10.0] — 2026-06-10
+
+A **stability + startup + performance** release built from a full-codebase
+audit. Every confirmed defect from that audit is fixed here; startup is
+redesigned around staged sensor initialisation with live progress; both
+processes use less memory; and the dashboard reads more of the hardware it
+already sits on.
+
+### Fixed
+
+- **Startup no longer falsely fails on slower machines.** The dashboard used
+  to demote to "SENSOR FEED STOPPED" if the first snapshot took more than
+  30 s — but a cold LibreHardwareMonitor enumeration can legitimately take
+  that long, and the demotion was one-way: when the late first snapshot then
+  arrived, nothing ever restored the live grid. The deadline is now
+  silence-based (the dashboard waits as long as the service keeps talking —
+  progress lines count) and `ingest()` self-heals back to the live grid
+  whenever a snapshot arrives over a healthy feed.
+- **A single NaN/Infinity sensor reading no longer blanks the entire feed.**
+  `System.Text.Json` (strict number handling) throws on non-finite values, so
+  one glitched sensor — a known LibreHardwareMonitor behaviour on some
+  hardware — made *every* snapshot fail to serialize: the service emitted
+  nothing and the dashboard sat on "Loading sensors…" forever. Non-finite
+  readings are now treated as absent at the collection boundary.
+- **The dashboard now starts on machines where wgpu cannot create a device.**
+  0.9.5 shipped a wgpu-only renderer; on machines with broken D3D12/Vulkan
+  paths (old GPUs, VMs, RDP sessions) `eframe::run_native` returned an error
+  before any window existed and the process exited with zero visible feedback
+  — the "installed it and nothing happens" report. The renderer is now glow
+  (OpenGL) first with a wgpu fallback gated to startup failures, every
+  renderer error is written to `panic.log`, and if both backends fail a
+  native message box says so instead of silent death.
+- **RESPAWN actually works now.** The 0.9.5 error-overlay button ran a
+  blocking service-start loop on the UI thread (the window greyed out for
+  ~5 s) that could never succeed — the unelevated `sc start` it relied on is
+  denied by the service's admin-only ACL. RESPAWN now re-runs the background
+  connect state machine (with its UAC elevation step), tears down the dead
+  session first, and ignores re-clicks while a connect is already running.
+- **Sensor-service shutdown is honoured during initialisation.** The control
+  reader previously started only after hardware enumeration, so closing the
+  dashboard during "Loading sensors" left sensord initialising for up to
+  ~30 s. The control channel now starts the moment the client connects;
+  the previously-failing shutdown integration test passes unmodified.
+- **Sensor-service exit is now hard-bounded once the dashboard leaves.**
+  Synchronous LibreHardwareMonitor calls (a category enable, `Computer.Close`)
+  cannot observe cancellation and can run for seconds; a teardown watchdog
+  now forces process exit 3.5 s after the session ends if the wind-down has
+  not finished, so no LocalSystem process ever lingers behind a closed
+  dashboard.
+- **One throwing sensor no longer kills the service silently during load.**
+  The initial topology refresh ran outside all exception isolation; a single
+  driver glitch stopped the service with no health snapshot. Init failures
+  now surface as a degraded-health snapshot (the dashboard's health banner),
+  and fatal init paths exit with a non-zero exit code for the Event Log.
+- **The 0.5 s refresh setting was a silent no-op** — snapshots were
+  deduplicated on a seconds-resolution timestamp, capping ingest at 1 Hz.
+  Snapshots are now consumed by presence (and carry a millisecond
+  `ts_ms` alongside the legacy `ts`).
+- **Settings and title-bar clicks no longer perform pipe I/O on the UI
+  thread.** Refresh-rate changes (the only control that talks to the
+  service) go through a dedicated writer thread; a wedged control channel
+  can no longer freeze the window.
+- **The in-app updater can now actually install an update.** The downloaded
+  installer requests administrator rights, but it was spawned with
+  `CreateProcess`, which cannot elevate — error 740 on every attempt,
+  mislabelled as a download failure. The installer is launched via
+  `ShellExecuteEx` (UAC prompt) now. The download lifecycle was rebuilt
+  alongside: closing the modal cancels the download (previously it kept
+  running and then silently launched the installer and exited the app),
+  cancel returns to the confirm screen instead of a fake "DOWNLOAD FAILED",
+  every attempt gets its own cancel flag, progress state and unique
+  destination file (a cancel+retry race could previously assemble a corrupt
+  installer that passed the size check), and partial files are cleaned up.
+- **Non-finite sensor values no longer render as garbage** — "inf GB",
+  "NaN KB/s" and a DIMM row reading "-9223372036854775808°" (all-NaN
+  module temperatures folded through `f64::MIN`) now render as "—" or hide
+  the row.
+- **"Update available" checks no longer hit GitHub on every launch** — a
+  "no update" result is now cached under the same 6-hour TTL that cached
+  positive results, and a cache stamped in the future (clock skew) is
+  treated as stale.
+- **Config saves are atomic** (write-temp-then-rename); a crash mid-save can
+  no longer truncate `config.toml` and silently reset every setting.
+- **The per-core heat-map can no longer overflow its card** on
+  high-core-count machines; cells shrink and cap with a "+N" marker.
+- **A transient GPU-count flicker no longer wipes sparkline history** —
+  per-GPU history is keyed by adapter name, not array position.
+- **"Follow Windows" theme now reacts to a live OS theme change** (checked
+  at most every 2 s) instead of only at launch.
+
+### Added
+
+- **Staged sensor startup with a live progress checklist.** sensord opens
+  CPU + RAM sensors first — the first readings arrive in roughly a second —
+  then enables motherboard, GPU, storage, network, controller and battery
+  categories between snapshots, streaming `{"progress": …}` lines the
+  loading screen renders as a per-category checklist. A category that fails
+  to initialise is skipped (logged) instead of failing the service. Old
+  dashboards ignore the new lines; the new dashboard falls back to the
+  plain spinner against an old service.
+- **RAM module detail on hover**: per-DIMM vendor/part label, capacity,
+  temperature and a DDR timing summary (e.g. "CL40-40-40-80 @ 5602 MT/s")
+  sourced from the SPD timing sensors.
+- **Storage lifetime detail**: drive temperature is coloured against the
+  drive's own warning/critical thresholds when it reports them; the
+  lifetime hover line gains total data written and NVMe wear
+  ("Percentage Used").
+- **GPU MEM CLK and VIDEO rows**: GDDR memory clock and the dedicated video
+  engine (encode/decode) load.
+- **Per-core clocks in the heat-map hover** and bus clock in the CPU CLOCK
+  tooltip.
+- **Wi-Fi link details** in the Network panel when the active adapter is
+  wireless: SSID, signal quality and negotiated PHY rate, read via the
+  native WLAN API.
+- **Hardware identity caption** on the Sensors card: motherboard model plus
+  BIOS version and date (WMI, read once per session).
+- **Monitor model names** (EDID) next to resolution and refresh rate in the
+  footer.
+- **`panic.log` rotation** at 256 KiB (previous log kept as `panic.log.1`).
+
+### Changed
+
+- **sensord ships as a folder publish instead of a compressed single-file
+  bundle.** The single-file self-extraction (re-scanned by Defender on
+  every service start) could blow the SCM start window on slow machines,
+  and its compressed assemblies loaded as private memory instead of
+  shareable file mappings. Folder publish starts faster and uses less RAM;
+  the installer size grows, which is a deliberate trade.
+- **sensord's heap is trimmed after startup and kept tight.** A one-time
+  aggressive collection after the last sensor category comes up returns the
+  staged-init enumeration garbage (WMI/COM/SPD) to the OS, and the runtime
+  runs with `System.GC.ConserveMemory` so a one-snapshot-per-second
+  streamer never sizes its heap like a throughput server.
+- **Dashboard rendering allocates dramatically less per frame**: sparkline
+  fills and the CRT grid/scanline effects are single meshes now (was
+  hundreds of individually boxed shapes per frame), gauges use a circle
+  primitive for the track, panels read history without per-frame copies,
+  and the changelog viewer parses its document once instead of every frame.
+- The service-start deadline rose from 15 s to 30 s (cold .NET service
+  starts), and pipe-busy / access-denied errors during connect fail
+  immediately with a precise message instead of triggering a pointless UAC
+  prompt first.
+- Topology re-detection requires the change to be observed on two
+  consecutive checks before rebuilding the monitor, so a one-tick
+  enumeration glitch no longer triggers a full re-enumeration.
+- The ASUS ATK fan probe caches a negative result — non-ASUS machines no
+  longer pay a WMI exception on every poll tick.
+- The PawnIO health probe reports "ok" only when CPU temperatures are
+  actually readable, not when any temperature sensor exists.
+- Installer hardening: service registration exit codes are checked, a
+  running sensord is stopped before the PawnIO chain-install, message boxes
+  are suppressible for silent installs (PawnIO removal defaults to "keep"),
+  the VC++ redistributable download is version-pinned and SHA-256-verified,
+  and the minimum OS is Windows 10 1607 (the .NET 8 floor).
+- Release pipeline: tag builds now run the full test gates before
+  publishing.
+
+### Dependencies
+
+- eframe/egui 0.34.2 → 0.34.3 (dashboard); Microsoft.Extensions.Hosting
+  8.0.1 → 10.0.8 (sensord); Microsoft.NET.Test.Sdk 18.5.1 → 18.6.0 (tests).
+
 ## [0.9.5] — 2026-05-30
 
 The release that **identifies and fixes** the startup crash 0.9.1–0.9.4 chased
@@ -840,7 +1002,8 @@ User-facing application behaviour is unchanged.
   matching uninstaller that removes the exclusions, the `R0sensord` driver
   service, the install directory and the per-user data directory.
 
-[Unreleased]: https://github.com/lukastojiljkovic/PerfWindow/compare/v0.9.5...HEAD
+[Unreleased]: https://github.com/lukastojiljkovic/PerfWindow/compare/v0.10.0...HEAD
+[0.10.0]: https://github.com/lukastojiljkovic/PerfWindow/releases/tag/v0.10.0
 [0.9.5]: https://github.com/lukastojiljkovic/PerfWindow/releases/tag/v0.9.5
 [0.9.4]: https://github.com/lukastojiljkovic/PerfWindow/releases/tag/v0.9.4
 [0.9.3]: https://github.com/lukastojiljkovic/PerfWindow/releases/tag/v0.9.3
