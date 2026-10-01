@@ -19,8 +19,8 @@
 
     <link rel="icon" type="image/png" href="icon.png">
     <link rel="apple-touch-icon" href="icon.png">
-    <link rel="preload" href="fonts/geist.woff2" as="font" type="font/woff2" crossorigin>
-    <link rel="stylesheet" href="site.css">
+    <link rel="preload" href="fonts/ls-sans.woff2" as="font" type="font/woff2" crossorigin>
+    <link rel="stylesheet" href="site.css?v=2">
     <style>:root { --app: #0a756c; --app-dark: #34e0d0; }</style>
 
     <script>
@@ -88,28 +88,26 @@
 
 <main id="main">
     <section class="wrap hero" id="top">
-        <div class="hero-copy">
-            <p class="eyebrow">Hardware monitor for <b>Windows</b></p>
+        <div class="hero-head">
             <h1>Every sensor, one window.</h1>
-            <p class="lede">PerfWindow shows usage, temperatures, clocks, power and drive health for every part of your PC in one real-time dashboard, and leaves nothing running when you close it.</p>
-            <div class="actions">
-                <a class="btn btn-primary" href="https://github.com/lukastojiljkovic/PerfWindow/releases/latest/download/PerfWindow-Setup.exe">Download for Windows</a>
-                <a class="btn" href="https://github.com/lukastojiljkovic/PerfWindow">View the source</a>
+            <div class="hero-copy">
+                <p class="lede">PerfWindow shows usage, temperatures, clocks, power and drive health for every part of your PC in one real-time dashboard, and leaves nothing running when you close it.</p>
+                <div class="actions">
+                    <a class="btn btn-primary" href="https://github.com/lukastojiljkovic/PerfWindow/releases/latest/download/PerfWindow-Setup.exe">Download for Windows</a>
+                    <a class="btn" href="https://github.com/lukastojiljkovic/PerfWindow">View the source</a>
+                </div>
+                <p class="fine">Free and open source (MIT). Windows 11, or Windows 10 1607+, x64.</p>
             </div>
-            <p class="fine">Free and open source (MIT) · Windows 11, or Windows 10 1607+ · x64</p>
         </div>
-        <div class="hero-media">
-            <figure class="frame frame-shot">
-                <div class="frame-bar"><span>PerfWindow</span><span>Cyber Slate</span></div>
-                <img src="images/dashboard.png" width="1386" height="738" alt="The PerfWindow dashboard in the Cyber Slate theme, with CPU, GPU, memory, storage, motherboard and network cards" fetchpriority="high">
-            </figure>
-            <dl class="frame readout">
-                <div class="row"><dt>Hardware</dt><dd>Every major component</dd></div>
-                <div class="row"><dt>Refresh</dt><dd>Every 0.5, 1, 2 or 5 s</dd></div>
-                <div class="row"><dt>When closed</dt><dd>Nothing left running</dd></div>
-                <div class="row"><dt>Telemetry</dt><dd><b>None</b></dd></div>
-            </dl>
+        <div class="desk desk-hero">
+            <img class="win" src="images/dashboard.png" width="1386" height="738" alt="The PerfWindow dashboard in the Cyber Slate theme, with CPU, GPU, memory, storage, motherboard and network cards" fetchpriority="high">
         </div>
+        <dl class="readout">
+            <div class="row"><dt>Hardware</dt><dd>Every major component</dd></div>
+            <div class="row"><dt>Refresh</dt><dd>Every 0.5, 1, 2 or 5 s</dd></div>
+            <div class="row"><dt>When closed</dt><dd>Nothing left running</dd></div>
+            <div class="row"><dt>Telemetry</dt><dd><b>None</b></dd></div>
+        </dl>
     </section>
 
     <section class="wrap section" id="features">
@@ -117,44 +115,42 @@
         <p class="section-lede">Built on LibreHardwareMonitor, the open-source sensor library behind many Windows monitoring tools. Every row has a tooltip that explains it in one plain sentence.</p>
         <div class="cells">
             <article class="cell">
-                <p class="cell-n">01</p>
                 <h3>CPU</h3>
                 <p>Load per core or thread, package and core temperatures, clocks, Vcore, RAPL power and headroom to TjMax. Intel P-cores and E-cores are shown apart.</p>
             </article>
             <article class="cell">
-                <p class="cell-n">02</p>
                 <h3>GPU</h3>
                 <p>Discrete NVIDIA and AMD cards and Intel integrated graphics: load, core, hot spot and memory junction temperatures, clocks, encoder load, fan, power and VRAM.</p>
             </article>
             <article class="cell">
-                <p class="cell-n">03</p>
                 <h3>Memory</h3>
                 <p>Used, cached and pagefile, plus per-module DIMM temperatures where the modules report them, with vendor, part number and timings on hover.</p>
             </article>
             <article class="cell">
-                <p class="cell-n">04</p>
                 <h3>Storage</h3>
                 <p>Temperature against each drive's own limits, activity, capacity and health, and SMART lifetime on hover: power-on hours, NVMe wear and data written.</p>
             </article>
             <article class="cell">
-                <p class="cell-n">05</p>
                 <h3>Board, fans and power</h3>
                 <p>Motherboard and VRM temperatures, fan speeds and voltage rails, battery charge rate and health, and the board model and BIOS version.</p>
             </article>
             <article class="cell">
-                <p class="cell-n">06</p>
                 <h3>Network and themes</h3>
                 <p>Throughput and link use, with SSID and signal on Wi-Fi. Six themes, from CRT amber to a plain light one, can follow Windows' light and dark setting.</p>
             </article>
         </div>
         <div class="screens">
             <figure>
-                <img class="frame" src="images/light.png" width="1386" height="738" alt="The PerfWindow dashboard in the Light theme" loading="lazy">
-                <figcaption><span>Fig. 1</span>The same dashboard in the Light theme, one of six.</figcaption>
+                <div class="desk">
+                    <img class="win" src="images/light.png" width="1386" height="738" alt="The PerfWindow dashboard in the Light theme" loading="lazy">
+                </div>
+                <figcaption>The same dashboard in the Light theme, one of six.</figcaption>
             </figure>
             <figure>
-                <img class="frame" src="images/smart.png" width="1386" height="738" alt="A drive's SMART lifetime on hover: power-on hours, power cycles, data written, NVMe wear and spare" loading="lazy">
-                <figcaption><span>Fig. 2</span>Hover a drive for its SMART lifetime: hours, data written and wear.</figcaption>
+                <div class="desk">
+                    <img class="win" src="images/smart.png" width="1386" height="738" alt="A drive's SMART lifetime on hover: power-on hours, power cycles, data written, NVMe wear and spare" loading="lazy">
+                </div>
+                <figcaption>Hover a drive for its SMART lifetime: hours, data written and wear.</figcaption>
             </figure>
         </div>
     </section>

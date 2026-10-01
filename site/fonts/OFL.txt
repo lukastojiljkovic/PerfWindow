@@ -1,4 +1,7 @@
-Copyright 2024 The Geist Project Authors (https://github.com/vercel/geist-font)
+ls-sans.woff2: a subset of Mona Sans 2.027, limited to widths 100-125 and weights 400-800.
+Copyright 2022 The Mona Sans Project Authors (https://github.com/github/mona-sans), with Reserved Font Name "Mona".
+As a Modified Version it does not use the Reserved Font Name and is renamed "LS Sans".
+
 
 This Font Software is licensed under the SIL Open Font License, Version 1.1.
 This license is copied below, and is also available with a FAQ at:
