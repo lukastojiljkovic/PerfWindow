@@ -158,7 +158,7 @@ fn disk_row(ui: &mut egui::Ui, theme: &Theme, disk: &StorageInfo, unit: TempUnit
             Pos2::new(rect.min.x, rect.min.y),
             Pos2::new(rect.max.x, rect.min.y),
         ],
-        Stroke::new(1.0, theme.border),
+        Stroke::new(1.0_f32, theme.border),
     ));
 
     let center_y = rect.center().y;

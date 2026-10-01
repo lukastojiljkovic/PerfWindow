@@ -101,7 +101,7 @@ pub fn health_banner(ui: &mut egui::Ui, app: &mut PerfApp) {
     let rect = ui.min_rect();
     ui.painter().add(egui::Shape::line_segment(
         [rect.left_bottom(), rect.right_bottom()],
-        Stroke::new(1.0, theme.border),
+        Stroke::new(1.0_f32, theme.border),
     ));
 
     if install_clicked {
@@ -134,7 +134,7 @@ fn banner_chip(ui: &mut egui::Ui, theme: &Theme, label: &str, primary: bool) -> 
         painter.rect_stroke(
             rect,
             0.0,
-            Stroke::new(1.0, stroke_color),
+            Stroke::new(1.0_f32, stroke_color),
             StrokeKind::Inside,
         );
         painter.galley(rect.min + pad, galley, text_color);

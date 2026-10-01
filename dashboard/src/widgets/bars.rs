@@ -293,7 +293,7 @@ pub fn core_grid(
         painter.rect_stroke(
             cell_rect,
             0.0,
-            egui::Stroke::new(1.0, border_color),
+            egui::Stroke::new(1.0_f32, border_color),
             egui::StrokeKind::Inside,
         );
 
@@ -336,7 +336,7 @@ pub fn core_grid(
         painter.rect_stroke(
             cell_rect,
             0.0,
-            egui::Stroke::new(1.0, theme.border),
+            egui::Stroke::new(1.0_f32, theme.border),
             egui::StrokeKind::Inside,
         );
         let galley =

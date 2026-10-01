@@ -198,7 +198,7 @@ fn chip(ui: &mut egui::Ui, theme: &Theme, label: &str, on: bool) -> egui::Respon
         painter.rect_stroke(
             rect,
             0.0,
-            Stroke::new(1.0, stroke_color),
+            Stroke::new(1.0_f32, stroke_color),
             egui::StrokeKind::Inside,
         );
         let text_pos = rect.min + pad;
@@ -222,6 +222,10 @@ pub fn footer(ui: &mut egui::Ui, app: &mut PerfApp) {
         .inner_margin(Margin::symmetric(STRIP_PADDING_X, STRIP_PADDING_Y_FOOT));
 
     frame.show(ui, |ui| {
+        // Nothing in the row expands (the title bar's right-aligned chips do),
+        // so without this the fill stops at the last figure and the window's
+        // clear colour shows through on the right.
+        ui.set_min_width(ui.available_width());
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 15.0;
 
@@ -796,7 +800,7 @@ fn respawn_button(ui: &mut egui::Ui, theme: &Theme) -> egui::Response {
         painter.rect_stroke(
             rect,
             0.0,
-            Stroke::new(1.0, theme.accent),
+            Stroke::new(1.0_f32, theme.accent),
             egui::StrokeKind::Inside,
         );
         // The galley's glyphs are `PLACEHOLDER`, so this `text_color` is the

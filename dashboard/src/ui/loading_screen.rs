@@ -282,7 +282,7 @@ fn action_button(ui: &mut egui::Ui, theme: &Theme, label: &str) -> egui::Respons
         painter.rect_stroke(
             rect,
             0.0,
-            Stroke::new(1.0, theme.accent),
+            Stroke::new(1.0_f32, theme.accent),
             egui::StrokeKind::Inside,
         );
         painter.galley(rect.min + BUTTON_PAD, galley, text_color);

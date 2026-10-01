@@ -33,7 +33,7 @@ pub fn sparkline(
     let points = map_points(samples, rect, scale_of(max));
 
     painter.add(area_fill_mesh(&points, rect.max.y, fill_color(theme)));
-    painter.add(Shape::line(points, Stroke::new(1.8, theme.accent)));
+    painter.add(Shape::line(points, Stroke::new(1.8_f32, theme.accent)));
 }
 
 /// Like [`sparkline`], but renders a second `secondary` series on top of the
@@ -67,7 +67,10 @@ pub fn dual_sparkline(
         rect.max.y,
         fill_color(theme),
     ));
-    painter.add(Shape::line(primary_points, Stroke::new(1.8, theme.accent)));
+    painter.add(Shape::line(
+        primary_points,
+        Stroke::new(1.8_f32, theme.accent),
+    ));
 
     // Secondary: stroke only, lower opacity, no fill. Drawn after primary so
     // it remains visible when the two lines cross.
@@ -76,7 +79,7 @@ pub fn dual_sparkline(
         let secondary_color = theme.accent.gamma_multiply(0.45);
         painter.add(Shape::line(
             secondary_points,
-            Stroke::new(1.4, secondary_color),
+            Stroke::new(1.4_f32, secondary_color),
         ));
     }
 }

@@ -148,7 +148,7 @@ fn vignette(painter: &egui::Painter, theme: &Theme, screen: Rect) {
         painter.rect_stroke(
             rect,
             0.0,
-            Stroke::new(1.0, Color32::from_black_alpha(alpha)),
+            Stroke::new(1.0_f32, Color32::from_black_alpha(alpha)),
             StrokeKind::Inside,
         );
     }

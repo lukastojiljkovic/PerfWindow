@@ -4,12 +4,29 @@ use egui::{Color32, FontId, Pos2, Response, Sense, Stroke, Vec2};
 /// Row height for the stat widget (label + value on one line, plus a 4 px gap
 /// at the bottom for the border rule).
 const ROW_H: f32 = 22.0;
+/// Natural value size, and the smallest a long value shrinks to.
+const VALUE_SIZE: f32 = 14.0;
+const MIN_VALUE_SIZE: f32 = 9.0;
+/// Space kept between the label and a value that had to shrink.
+const LABEL_GAP: f32 = 6.0;
+
+/// The value font size that fits `room` px, given the value's width at
+/// `VALUE_SIZE`. The data fonts are monospaced, so width scales linearly with
+/// size; a value that would run over its label ("1.0 / 8.0 GB" in a narrow
+/// column) shrinks instead, down to `MIN_VALUE_SIZE`.
+fn fitted_value_size(natural_w: f32, room: f32) -> f32 {
+    if natural_w <= room || natural_w <= 0.0 {
+        return VALUE_SIZE;
+    }
+    (VALUE_SIZE * room / natural_w).floor().max(MIN_VALUE_SIZE)
+}
 
 /// Draw a single labelled stat row.
 ///
 /// Left side: `label` in ~9 px dim data-font, uppercase. Right side: `value`
-/// in ~14 px bold data-font, coloured `value_color` if `Some`, else
-/// `theme.ink`. A 1 px rule in `theme.border` is drawn across the bottom.
+/// in ~14 px bold data-font (smaller when it would run into the label),
+/// coloured `value_color` if `Some`, else `theme.ink`. A 1 px rule in
+/// `theme.border` is drawn across the bottom.
 ///
 /// Returns the row's egui [`Response`] so callers can chain
 /// [`Response::on_hover_text`] (or [`crate::ui::tooltips::tip`]) to attach an
@@ -45,6 +62,7 @@ pub fn stat_row(
     // Vertically centre in the usable row area (above the 4 px rule margin).
     let text_area_h = ROW_H - 4.0;
     let label_y = rect.min.y + (text_area_h - label_galley.size().y) / 2.0;
+    let label_w = label_galley.size().x;
     painter.galley(Pos2::new(rect.min.x, label_y), label_galley, theme.dim);
 
     // --- value (right-aligned, 14 px, bold data font) ---
@@ -52,9 +70,20 @@ pub fn stat_row(
         FontFamily::PlexMono => FontFamily::PlexMonoBold,
         other => other,
     };
-    let value_font = FontId::new(14.0, value_family.egui());
     let color = value_color.unwrap_or(theme.ink);
-    let value_galley = painter.layout_no_wrap(value.to_owned(), value_font, color);
+    let layout_value = |size: f32| {
+        painter.layout_no_wrap(
+            value.to_owned(),
+            FontId::new(size, value_family.egui()),
+            color,
+        )
+    };
+    let mut value_galley = layout_value(VALUE_SIZE);
+    let room = available_w - label_w - LABEL_GAP;
+    let size = fitted_value_size(value_galley.size().x, room);
+    if size < VALUE_SIZE {
+        value_galley = layout_value(size);
+    }
 
     let value_x = rect.max.x - value_galley.size().x;
     let value_y = rect.min.y + (text_area_h - value_galley.size().y) / 2.0;
@@ -64,8 +93,31 @@ pub fn stat_row(
     let rule_y = rect.max.y - 1.0;
     painter.add(egui::Shape::line_segment(
         [Pos2::new(rect.min.x, rule_y), Pos2::new(rect.max.x, rule_y)],
-        Stroke::new(1.0, theme.border),
+        Stroke::new(1.0_f32, theme.border),
     ));
 
     response
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_value_that_fits_keeps_its_size() {
+        assert_eq!(fitted_value_size(60.0, 80.0), VALUE_SIZE);
+        assert_eq!(fitted_value_size(80.0, 80.0), VALUE_SIZE);
+    }
+
+    #[test]
+    fn a_long_value_shrinks_to_its_room() {
+        // 100 px at 14 px into 84 px of room: 14 * 0.84 = 11.76, floored.
+        assert_eq!(fitted_value_size(100.0, 84.0), 11.0);
+    }
+
+    #[test]
+    fn shrinking_stops_at_the_floor() {
+        assert_eq!(fitted_value_size(200.0, 20.0), MIN_VALUE_SIZE);
+        assert_eq!(fitted_value_size(200.0, -5.0), MIN_VALUE_SIZE);
+    }
 }

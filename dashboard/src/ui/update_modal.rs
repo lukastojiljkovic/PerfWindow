@@ -88,7 +88,7 @@ pub fn update_modal(ctx: &egui::Context, app: &mut PerfApp) {
     let theme = app.theme.clone();
     let frame = egui::Frame::NONE
         .fill(theme.bg)
-        .stroke(Stroke::new(1.0, theme.border))
+        .stroke(Stroke::new(1.0_f32, theme.border))
         .shadow(egui::epaint::Shadow {
             offset: [0, 18],
             blur: 48,
@@ -177,7 +177,7 @@ fn modal_title_bar(ui: &mut egui::Ui, theme: &Theme) -> Response {
     let rect = inner.response.rect;
     ui.painter().add(egui::Shape::line_segment(
         [rect.left_bottom(), rect.right_bottom()],
-        Stroke::new(1.0, theme.border),
+        Stroke::new(1.0_f32, theme.border),
     ));
     inner.inner
 }
@@ -306,7 +306,7 @@ fn progress_bar(ui: &mut egui::Ui, theme: &Theme, fraction: f32) {
     painter.rect_stroke(
         rect,
         0.0,
-        Stroke::new(1.0, theme.border),
+        Stroke::new(1.0_f32, theme.border),
         StrokeKind::Inside,
     );
 }
@@ -468,7 +468,7 @@ fn action_button(ui: &mut egui::Ui, theme: &Theme, label: &str, primary: bool) -
         painter.rect_stroke(
             rect,
             0.0,
-            Stroke::new(1.0, stroke_color),
+            Stroke::new(1.0_f32, stroke_color),
             StrokeKind::Inside,
         );
         painter.galley(rect.min + BTN_PAD, galley, text_color);
@@ -502,7 +502,7 @@ fn close_button(ui: &mut egui::Ui, theme: &Theme) -> Response {
         painter.rect_stroke(
             rect,
             0.0,
-            Stroke::new(1.0, stroke_color),
+            Stroke::new(1.0_f32, stroke_color),
             StrokeKind::Inside,
         );
         painter.galley(rect.min + pad, galley, text_color);

@@ -101,7 +101,7 @@ pub fn settings_modal(ctx: &egui::Context, app: &mut PerfApp) {
     // set their own padding.
     let frame = egui::Frame::NONE
         .fill(theme.bg)
-        .stroke(Stroke::new(1.0, theme.border))
+        .stroke(Stroke::new(1.0_f32, theme.border))
         .shadow(egui::epaint::Shadow {
             offset: [0, 18],
             blur: 48,
@@ -213,7 +213,7 @@ fn title_bar(ui: &mut egui::Ui, theme: &Theme) -> Response {
     let rect = inner.response.rect;
     ui.painter().add(egui::Shape::line_segment(
         [rect.left_bottom(), rect.right_bottom()],
-        Stroke::new(1.0, theme.border),
+        Stroke::new(1.0_f32, theme.border),
     ));
     inner.inner
 }
@@ -245,7 +245,7 @@ fn close_button(ui: &mut egui::Ui, theme: &Theme) -> Response {
         painter.rect_stroke(
             rect,
             0.0,
-            Stroke::new(1.0, stroke_color),
+            Stroke::new(1.0_f32, stroke_color),
             StrokeKind::Inside,
         );
         painter.galley(rect.min + pad, galley, text_color);
@@ -345,7 +345,7 @@ fn theme_card(
     let frame = egui::Frame::NONE
         .fill(theme.panel)
         .stroke(Stroke::new(
-            1.0,
+            1.0_f32,
             if selected { theme.accent } else { theme.border },
         ))
         .inner_margin(Margin::same(THEME_CARD_PADDING));
@@ -376,7 +376,7 @@ fn theme_card(
         ui.painter().rect_stroke(
             rect.shrink(1.0),
             0.0,
-            Stroke::new(1.0, theme.accent),
+            Stroke::new(1.0_f32, theme.accent),
             StrokeKind::Inside,
         );
     }
@@ -479,7 +479,7 @@ fn follow_toggle(ui: &mut egui::Ui, theme: &Theme, on: bool, change: &mut Option
             painter.rect_stroke(
                 track_rect,
                 0.0,
-                Stroke::new(1.0, track_stroke),
+                Stroke::new(1.0_f32, track_stroke),
                 StrokeKind::Inside,
             );
             // Knob: 2 px inset, slid to the right edge when on.
@@ -634,7 +634,7 @@ fn segmented(ui: &mut egui::Ui, theme: &Theme, segments: &[(&str, bool)]) -> Opt
                         Pos2::new(seg_rect.max.x, seg_rect.min.y),
                         Pos2::new(seg_rect.max.x, seg_rect.max.y),
                     ],
-                    Stroke::new(1.0, theme.border),
+                    Stroke::new(1.0_f32, theme.border),
                 ));
             }
 
@@ -659,7 +659,7 @@ fn segmented(ui: &mut egui::Ui, theme: &Theme, segments: &[(&str, bool)]) -> Opt
         painter.rect_stroke(
             rect,
             0.0,
-            Stroke::new(1.0, theme.border),
+            Stroke::new(1.0_f32, theme.border),
             StrokeKind::Inside,
         );
     }
@@ -679,7 +679,7 @@ fn footer(ui: &mut egui::Ui, theme: &Theme) {
             let rect = ui.max_rect();
             ui.painter().add(egui::Shape::line_segment(
                 [rect.left_top(), rect.right_top()],
-                Stroke::new(1.0, theme.border),
+                Stroke::new(1.0_f32, theme.border),
             ));
             ui.label(
                 egui::RichText::new(format!(
@@ -718,7 +718,7 @@ fn display_section(ui: &mut egui::Ui, theme: &Theme, on: bool, change: &mut Opti
                 painter.rect_stroke(
                     track_rect,
                     0.0,
-                    Stroke::new(1.0, track_stroke),
+                    Stroke::new(1.0_f32, track_stroke),
                     StrokeKind::Inside,
                 );
                 let knob_x = if on {
@@ -797,7 +797,7 @@ fn updates_section(ui: &mut egui::Ui, theme: &Theme, app: &PerfApp, change: &mut
                 painter.rect_stroke(
                     track_rect,
                     0.0,
-                    Stroke::new(1.0, track_stroke),
+                    Stroke::new(1.0_f32, track_stroke),
                     StrokeKind::Inside,
                 );
                 let knob_x = if on {
@@ -873,7 +873,7 @@ fn check_now_button(ui: &mut egui::Ui, theme: &Theme) -> egui::Response {
         painter.rect_stroke(
             rect,
             0.0,
-            Stroke::new(1.0, stroke_color),
+            Stroke::new(1.0_f32, stroke_color),
             StrokeKind::Inside,
         );
         painter.galley(rect.min + pad, galley, text_color);

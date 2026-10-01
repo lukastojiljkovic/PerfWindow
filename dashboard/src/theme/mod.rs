@@ -294,7 +294,7 @@ impl Theme {
         visuals.window_fill = self.panel;
         visuals.extreme_bg_color = self.track;
         visuals.override_text_color = Some(self.ink);
-        visuals.widgets.noninteractive.bg_stroke = egui::Stroke::new(1.0, self.border);
+        visuals.widgets.noninteractive.bg_stroke = egui::Stroke::new(1.0_f32, self.border);
         ctx.set_visuals(visuals);
     }
 }

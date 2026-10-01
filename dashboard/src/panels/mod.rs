@@ -37,7 +37,7 @@ const EMPTY_NOTE_H: f32 = 22.0;
 pub fn card(ui: &mut egui::Ui, theme: &Theme, min_h: f32, contents: impl FnOnce(&mut egui::Ui)) {
     let frame = Frame::NONE
         .fill(theme.panel)
-        .stroke(Stroke::new(1.0, theme.border))
+        .stroke(Stroke::new(1.0_f32, theme.border))
         .inner_margin(Margin::same(CARD_PADDING));
 
     let inner = frame.show(ui, |ui| {
