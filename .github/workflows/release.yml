@@ -91,6 +91,11 @@ jobs:
           if ($manifest -notmatch "(?ms)^\[package\][^\[]*?^version\s*=\s*`"$escaped`"") {
             throw "dashboard/Cargo.toml [package] version does not match tag $tag"
           }
+      - name: Install cargo-about
+        # build.ps1 renders the Rust crate licenses shipped in {app}\licenses.
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-about
       - name: Install Inno Setup
         run: choco install innosetup -y
       - name: Build

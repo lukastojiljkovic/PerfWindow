@@ -1,0 +1,30 @@
+# PerfWindow
+
+> PerfWindow is a free, open-source (MIT) Windows hardware monitor by Luka Stojiljković. It shows real-time usage, temperatures, clocks, power and SMART drive health for the CPU, GPU, RAM, storage, motherboard, fans, voltages, battery and network in one dashboard, built on LibreHardwareMonitor. Nothing stays running while it's closed: no tray icon, no startup entry.
+
+Key facts:
+
+- CPU: load per core or thread, package and core temperatures, clocks, Vcore, RAPL power and headroom to TjMax, with Intel P-cores and E-cores shown apart.
+- GPU: discrete NVIDIA and AMD cards and Intel integrated graphics, with hot spot and memory junction temperatures, clocks, encoder load, fan, power and VRAM.
+- Memory and storage: per-module DIMM temperatures where reported, drive temperatures against each drive's own limits, and SMART lifetime (power-on hours, NVMe wear, data written).
+- Six themes (Amber Mainframe, Cyber Slate, Phosphor Tactical, Synthwave Neon, Crimson Terminal and Light) that can follow Windows' light and dark setting. Refresh every 0.5, 1, 2 or 5 seconds, in °C or °F.
+- Architecture: a Rust and egui dashboard that runs as the user, and a .NET sensor service running as LocalSystem that starts on demand (one UAC prompt per launch) and exits when the dashboard closes. They talk over a named pipe.
+- The installer adds the signed PawnIO driver for CPU temperature, clock and power registers, and the Visual C++ runtime when missing.
+- Reads sensors only: no overclocking, undervolting or fan control. No telemetry; the only network request is an optional, anonymous update check against GitHub at most once every six hours.
+- Requires Windows 11, or Windows 10 version 1607 or later, x64.
+
+## Download
+
+- [Installer](https://github.com/lukastojiljkovic/PerfWindow/releases/latest/download/PerfWindow-Setup.exe): `PerfWindow-Setup.exe` from the latest release, with its SHA-256 alongside
+
+## Documentation
+
+- [README](https://raw.githubusercontent.com/lukastojiljkovic/PerfWindow/main/README.md): what it monitors, installing, architecture, themes and building from source
+- [Changelog](https://raw.githubusercontent.com/lukastojiljkovic/PerfWindow/main/CHANGELOG.md)
+- [Privacy statement](https://raw.githubusercontent.com/lukastojiljkovic/PerfWindow/main/PRIVACY.md)
+- [Terms of use](https://raw.githubusercontent.com/lukastojiljkovic/PerfWindow/main/TERMS.md)
+
+## Optional
+
+- [Source code](https://github.com/lukastojiljkovic/PerfWindow)
+- [Author's portfolio](https://lukastojiljkovic.github.io/CV/)

@@ -13,6 +13,8 @@ PerfWindow has no resident background process while its window is closed and
 no system tray. It is installed by a standard Windows setup program and
 removed cleanly through Add/Remove Programs.
 
+![The PerfWindow dashboard in the Cyber Slate theme, with CPU, GPU, iGPU, RAM, network, battery and storage cards](docs/images/dashboard.png)
+
 ## What it monitors
 
 - **CPU** — load (overall and per-core or per-thread), package and per-core
@@ -57,6 +59,8 @@ Every stat row has a **hover tooltip** with a one-sentence plain-language
 explanation, so the dashboard is readable even without prior hardware-monitoring
 vocabulary.
 
+![A drive's SMART lifetime on hover: power-on hours, power cycles, data written, NVMe wear and spare](docs/images/smart.png)
+
 ## Installing
 
 Download `PerfWindow-Setup.exe` from the [latest
@@ -81,6 +85,11 @@ silently:
 If PawnIO installation fails for any reason, PerfWindow still installs and
 launches — only the CPU temperature, clock and power readings will be
 unavailable until PawnIO is installed by other means.
+
+The installer isn't code-signed yet, so Microsoft Defender SmartScreen may
+warn on first run: choose **More info**, then **Run anyway**. Each release
+publishes `PerfWindow-Setup.exe.sha256`; compare it with
+`Get-FileHash PerfWindow-Setup.exe` before running the installer.
 
 To remove PerfWindow, use **Add/Remove Programs** or the Start Menu uninstall
 shortcut. The uninstaller deletes every installed file and the per-user
@@ -155,6 +164,9 @@ Prerequisites:
   compiler are required to embed the manifest and icon).
 - [Inno Setup 6](https://jrsoftware.org/isdl.php) for the installer
   (`winget install -e --id JRSoftware.InnoSetup`).
+- [cargo-about](https://github.com/EmbarkStudios/cargo-about), which lists the
+  licenses of the bundled Rust crates
+  (`cargo install cargo-about --locked --features cli`).
 
 Build everything with the orchestration script:
 
@@ -165,7 +177,8 @@ Build everything with the orchestration script:
 It publishes `sensord` (self-contained, `win-x64`), runs `cargo build
 --release` for the dashboard, downloads the pinned PawnIO and Visual C++
 Redistributable installers into `build/vendor/` (skipped if already
-cached and SHA-256-checked), then compiles the installer with Inno Setup.
+cached and SHA-256-checked), collects the third-party license texts into
+`build/out/licenses/`, then compiles the installer with Inno Setup.
 Run it from a developer command prompt, or otherwise ensure the MSVC
 environment is on `PATH` (for example by sourcing `vcvars64.bat`).
 
@@ -196,9 +209,11 @@ PerfWindow ships six themes, picked from **Settings → Theme**:
 - **Amber Mainframe** — amber-on-black, heavy CRT styling.
 - **Cyber Slate** — teal accent on dark slate, subtle effects.
 - **Phosphor Tactical** — green phosphor, heavy CRT styling.
-- **Synthwave** — magenta / cyan on indigo, neon glow.
-- **Crimson** — red accent on near-black, restrained effects.
+- **Synthwave Neon** — magenta / cyan on indigo, neon glow.
+- **Crimson Terminal** — red accent on near-black, restrained effects.
 - **Light** — a clean light theme with no CRT effects.
+
+![The same dashboard in the Light theme](docs/images/light.png)
 
 An optional "follow Windows" mode pairs a light theme with a dark theme and
 switches between them with the system setting.
@@ -206,20 +221,17 @@ switches between them with the system setting.
 A **pushpin chip** in the title bar (also exposed in Settings) toggles
 *always on top*, so the dashboard can stay above other windows when desired.
 
+## Legal
+
+[Terms of use](TERMS.md) · [Privacy](PRIVACY.md) · [Third-party notices](THIRD-PARTY-NOTICES.md)
+
+PerfWindow builds on [LibreHardwareMonitorLib](https://github.com/LibreHardwareMonitor/LibreHardwareMonitor)
+(MPL-2.0) and installs the [PawnIO](https://pawnio.eu) driver (GPL-2.0). The license texts of every bundled
+component are installed in the `licenses` folder next to `PerfWindow.exe`.
+
+Windows is a trademark of the Microsoft group of companies. PerfWindow isn't
+affiliated with or endorsed by Microsoft.
+
 ## License
 
 PerfWindow is released under the [MIT License](LICENSE).
-
-Third-party components:
-
-- **[LibreHardwareMonitorLib](https://github.com/LibreHardwareMonitor/LibreHardwareMonitor)**
-  — hardware sensing, under the Mozilla Public License 2.0 (MPL-2.0).
-- **[PawnIO](https://pawnio.eu)** — kernel driver bundled by the installer,
-  digitally signed by namazso. Source available under an open-source
-  licence (see the upstream project).
-- **Bundled fonts** — IBM Plex Mono, Chakra Petch and Space Mono, each under
-  the SIL Open Font License 1.1 (OFL-1.1). The license texts are in
-  `dashboard/assets/fonts/`.
-
-Code signing of the released PerfWindow binaries themselves is a pending
-final step.

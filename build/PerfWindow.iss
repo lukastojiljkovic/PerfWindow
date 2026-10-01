@@ -34,6 +34,8 @@ DefaultGroupName={#AppName}
 DisableProgramGroupPage=yes
 UninstallDisplayName={#AppName}
 UninstallDisplayIcon={app}\PerfWindow.exe
+AppPublisherURL=https://github.com/lukastojiljkovic/PerfWindow
+LicenseFile=..\TERMS.md
 OutputDir=..\dist
 OutputBaseFilename={#AppName}-Setup
 SetupIconFile=..\dashboard\assets\PerfWindow.ico
@@ -60,7 +62,12 @@ Source: "..\dashboard\target\release\PerfWindow.exe"; DestDir: "{app}"; Flags: i
 ; of PerfWindow.exe, with the runtime DLLs beside it (the .NET host resolves
 ; the runtime from the directory the exe lives in).
 Source: "..\sensord\src\bin\Release\net8.0-windows\win-x64\publish\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs
-Source: "..\LICENSE";                                 DestDir: "{app}"; Flags: ignoreversion
+Source: "..\LICENSE";                                 DestDir: "{app}"; DestName: "LICENSE.txt"; Flags: ignoreversion
+Source: "..\TERMS.md";                                DestDir: "{app}"; Flags: ignoreversion
+Source: "..\PRIVACY.md";                              DestDir: "{app}"; Flags: ignoreversion
+Source: "..\THIRD-PARTY-NOTICES.md";                  DestDir: "{app}"; Flags: ignoreversion
+; Collected by build.ps1: license texts of every redistributed component.
+Source: "out\licenses\*";                             DestDir: "{app}\licenses"; Flags: ignoreversion
 Source: "vendor\vc_redist.x64.exe";                                     Flags: dontcopy
 Source: "vendor\PawnIO_setup.exe";                                      Flags: dontcopy
 

@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ## [Unreleased]
 
+### Added
+
+- **Terms of use, privacy statement and third-party notices.** `TERMS.md`,
+  `PRIVACY.md` and `THIRD-PARTY-NOTICES.md` ship with the app; the installer
+  shows the terms before installing.
+- **Third-party licenses are installed with the app.** The installer puts the
+  license texts of the .NET runtime, LibreHardwareMonitorLib and its
+  libraries, PawnIO, the fonts and every Rust crate (generated with
+  cargo-about) in the `licenses` folder next to `PerfWindow.exe`.
+
+### Fixed
+
+- **CI builds with the current stable Rust toolchain.** Float literals that
+  the new `float_literal_f32_fallback` lint rejects now carry an explicit
+  `f32` suffix, and the lockfile picks up the patched `rustls-webpki`,
+  `crossbeam-epoch` and `quick-xml` releases flagged by `cargo audit`.
+- **Long values no longer run over their label.** A value wider than its
+  column, such as GPU VRAM "1.0 / 8.0 GB" or an iGPU's shared memory, now
+  shrinks to fit instead of being drawn on top of the label.
+- **The footer strip spans the whole window.** Its background stopped after
+  the last figure, so the window's clear colour showed through on the right,
+  most visibly in the Light theme.
+
 ## [0.10.0] — 2026-06-10
 
 A **stability + startup + performance** release built from a full-codebase

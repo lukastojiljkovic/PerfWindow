@@ -148,6 +148,25 @@ foreach ($f in @($perfExe, $sensordExe, $sensordDll)) {
     if (-not (Test-Path $f)) { throw "expected build output missing: $f" }
 }
 
+# The installer redistributes the .NET runtime, the sensor libraries, PawnIO,
+# the fonts and the Rust crates; their license texts ship in {app}\licenses.
+Write-Host '== Collecting third-party licenses =='
+$licenseDir = "$root\build\out\licenses"
+if (Test-Path $licenseDir) { Remove-Item -Recurse -Force $licenseDir }
+New-Item -ItemType Directory -Force $licenseDir | Out-Null
+Copy-Item "$root\build\licenses\*", "$root\dashboard\assets\fonts\*-OFL.txt" $licenseDir
+$packages = (dotnet nuget locals global-packages --list) -replace '^global-packages:\s*', ''
+$libraries = (Get-Content "$publishDir\sensord.deps.json" -Raw | ConvertFrom-Json).libraries.PSObject.Properties.Name
+foreach ($library in $libraries -match '^(runtimepack\.Microsoft\.NETCore\.App\.Runtime\.|HidSharp/)') {
+    $name, $libraryVersion = ($library -replace '^runtimepack\.', '') -split '/'
+    Get-ChildItem "$packages\$($name.ToLowerInvariant())\$libraryVersion" -File |
+        Where-Object Name -match '^(license|third-party-notices)\.txt$' |
+        ForEach-Object { Copy-Item $_.FullName "$licenseDir\$($name -replace '\.Runtime\..+$').$($_.Name.ToUpperInvariant())" }
+}
+if (-not (Test-Path "$licenseDir\Microsoft.NETCore.App.LICENSE.TXT")) { throw '.NET runtime license not found in the NuGet package cache' }
+cargo about generate --manifest-path "$root\dashboard\Cargo.toml" -c "$root\dashboard\about.toml" "$root\dashboard\about.hbs" -o "$licenseDir\rust-crates.txt"
+if ($LASTEXITCODE -ne 0) { throw 'cargo about failed. Install it with: cargo install cargo-about --locked --features cli' }
+
 Write-Host '== Building installer =='
 Ensure-VendorFile 'vc_redist.x64.exe' $VcRedistUrl $VcRedistSha256 | Out-Null
 Ensure-VendorFile 'PawnIO_setup.exe' $PawnIoUrl $PawnIoSha256 | Out-Null

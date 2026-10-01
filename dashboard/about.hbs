@@ -1,0 +1,12 @@
+Rust crates included in PerfWindow.exe
+
+Each entry lists a license text and the crates it covers.
+{{#each licenses}}
+
+================================================================================
+{{{name}}} ({{id}})
+Used by: {{#each used_by}}{{crate.name}} {{crate.version}}{{#unless @last}}, {{/unless}}{{/each}}
+--------------------------------------------------------------------------------
+
+{{{text}}}
+{{/each}}
