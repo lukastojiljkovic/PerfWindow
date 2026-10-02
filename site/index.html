@@ -19,8 +19,8 @@
 
     <link rel="icon" type="image/png" href="icon.png">
     <link rel="apple-touch-icon" href="icon.png">
-    <link rel="preload" href="fonts/ls-sans.woff2" as="font" type="font/woff2" crossorigin>
-    <link rel="stylesheet" href="site.css?v=2">
+    <link rel="preload" href="fonts/archivo-latin.woff2" as="font" type="font/woff2" crossorigin>
+    <link rel="stylesheet" href="site.css?v=3">
     <style>:root { --app: #0a756c; --app-dark: #34e0d0; }</style>
 
     <script>
@@ -69,38 +69,44 @@
 <body>
 <a class="skip" href="#main">Skip to content</a>
 
-<header class="bar">
-    <div class="bar-inner">
-        <a class="mark" href="#top"><img src="icon.png" alt="" width="24" height="24">PerfWindow</a>
-        <nav class="nav" aria-label="Sections">
-            <a href="#features">Features</a>
-            <a href="#how">How it works</a>
-            <a href="#limits">Limits</a>
-            <a href="#faq">FAQ</a>
-        </nav>
-        <div class="bar-actions">
-            <button class="theme" id="theme" type="button"><span class="theme-light">Dark</span><span class="theme-dark">Light</span></button>
-            <a class="btn btn-small" href="https://github.com/lukastojiljkovic/PerfWindow">GitHub</a>
-            <a class="btn btn-small btn-primary" href="#download">Download</a>
+<!-- The title band: what the app does, and the download -->
+<header class="band" id="top">
+    <div class="wrap band-grid">
+        <div class="topline">
+            <a class="mark" href="#top"><img src="icon.png" alt="" width="24" height="24">PerfWindow</a>
+            <nav class="nav" aria-label="Sections">
+                <a href="#features">Features</a>
+                <a href="#how">How it works</a>
+                <a href="#limits">Limits</a>
+                <a href="#faq">FAQ</a>
+            </nav>
+            <div class="topline-actions">
+                <a href="https://github.com/lukastojiljkovic/PerfWindow">GitHub</a>
+                <button type="button" id="theme"><span class="theme-light">Dark</span><span class="theme-dark">Light</span></button>
+            </div>
+        </div>
+
+        <div class="title">
+            <h1>Every sensor, one window.</h1>
+            <p class="sub">PerfWindow shows usage, temperatures, clocks, power and drive health for every part of your PC in one real-time dashboard, and leaves nothing running when you close it.</p>
+        </div>
+
+        <div class="get-it">
+            <p class="free">Free and open source</p>
+            <p class="where">MIT License. Windows 11, or Windows 10 1607+, x64.</p>
+            <div class="band-actions">
+                <a class="btn btn-app" href="https://github.com/lukastojiljkovic/PerfWindow/releases/latest/download/PerfWindow-Setup.exe">Download for Windows</a>
+                <a class="btn btn-line" href="https://github.com/lukastojiljkovic/PerfWindow">View the source</a>
+            </div>
         </div>
     </div>
 </header>
 
 <main id="main">
-    <section class="wrap hero" id="top">
-        <div class="hero-head">
-            <h1>Every sensor, one window.</h1>
-            <div class="hero-copy">
-                <p class="lede">PerfWindow shows usage, temperatures, clocks, power and drive health for every part of your PC in one real-time dashboard, and leaves nothing running when you close it.</p>
-                <div class="actions">
-                    <a class="btn btn-primary" href="https://github.com/lukastojiljkovic/PerfWindow/releases/latest/download/PerfWindow-Setup.exe">Download for Windows</a>
-                    <a class="btn" href="https://github.com/lukastojiljkovic/PerfWindow">View the source</a>
-                </div>
-                <p class="fine">Free and open source (MIT). Windows 11, or Windows 10 1607+, x64.</p>
-            </div>
-        </div>
-        <div class="desk desk-hero">
-            <img class="win" src="images/dashboard.png" width="1386" height="738" alt="The PerfWindow dashboard in the Cyber Slate theme, with CPU, GPU, memory, storage, motherboard and network cards" fetchpriority="high">
+    <!-- The app on a plate of its colour, beside what it does at a glance -->
+    <section class="wrap grid lead">
+        <div class="plate plate-hero">
+            <img src="images/dashboard.png" width="1386" height="738" alt="The PerfWindow dashboard in the Cyber Slate theme, with CPU, GPU, memory, storage, motherboard and network cards" fetchpriority="high">
         </div>
         <dl class="readout">
             <div class="row"><dt>Hardware</dt><dd>Every major component</dd></div>
@@ -110,7 +116,7 @@
         </dl>
     </section>
 
-    <section class="wrap section" id="features">
+    <section class="wrap grid section" id="features">
         <h2 class="section-title">What it monitors</h2>
         <p class="section-lede">Built on LibreHardwareMonitor, the open-source sensor library behind many Windows monitoring tools. Every row has a tooltip that explains it in one plain sentence.</p>
         <div class="cells">
@@ -141,21 +147,21 @@
         </div>
         <div class="screens">
             <figure>
-                <div class="desk">
-                    <img class="win" src="images/light.png" width="1386" height="738" alt="The PerfWindow dashboard in the Light theme" loading="lazy">
+                <div class="plate">
+                    <img src="images/light.png" width="1386" height="738" alt="The PerfWindow dashboard in the Light theme" loading="lazy">
                 </div>
                 <figcaption>The same dashboard in the Light theme, one of six.</figcaption>
             </figure>
             <figure>
-                <div class="desk">
-                    <img class="win" src="images/smart.png" width="1386" height="738" alt="A drive's SMART lifetime on hover: power-on hours, power cycles, data written, NVMe wear and spare" loading="lazy">
+                <div class="plate">
+                    <img src="images/smart.png" width="1386" height="738" alt="A drive's SMART lifetime on hover: power-on hours, power cycles, data written, NVMe wear and spare" loading="lazy">
                 </div>
                 <figcaption>Hover a drive for its SMART lifetime: hours, data written and wear.</figcaption>
             </figure>
         </div>
     </section>
 
-    <section class="wrap section" id="how">
+    <section class="wrap grid section" id="how">
         <h2 class="section-title">How it works</h2>
         <p class="section-lede">Two programs, one installer: a dashboard that runs as you, and a sensor service that runs only while the dashboard is open.</p>
         <ol class="steps">
@@ -166,7 +172,7 @@
         </ol>
     </section>
 
-    <section class="wrap section" id="limits">
+    <section class="wrap grid section" id="limits">
         <h2 class="section-title">Tested, and honest about limits</h2>
         <div class="split">
             <div>
@@ -188,7 +194,7 @@
         </div>
     </section>
 
-    <section class="wrap section" id="faq">
+    <section class="wrap grid section" id="faq">
         <h2 class="section-title">Questions</h2>
         <div class="faq">
             <details><summary>Is PerfWindow free?</summary><p>Yes. PerfWindow is free and open source under the <a href="https://github.com/lukastojiljkovic/PerfWindow/blob/main/LICENSE">MIT License</a>. It has no ads, accounts or telemetry.</p></details>
@@ -199,34 +205,34 @@
             <details><summary>Does PerfWindow collect any data?</summary><p>No. Its only connection is an anonymous update check against GitHub's public Releases API, at most once every six hours, which you can turn off in Settings. See the <a href="https://github.com/lukastojiljkovic/PerfWindow/blob/main/PRIVACY.md">privacy statement</a>.</p></details>
         </div>
     </section>
+</main>
 
-    <section class="wrap get" id="download">
+<!-- The closing band mirrors the title band: the download, then the small print -->
+<footer class="band band-close" id="download">
+    <div class="wrap band-grid">
         <div class="get-copy">
-            <h2>Get PerfWindow</h2>
-            <p class="lede">One installer adds PerfWindow, its sensor service and, when needed, PawnIO and the Visual C++ runtime. Uninstall it from Settings, Apps.</p>
-            <div class="actions">
-                <a class="btn btn-primary" href="https://github.com/lukastojiljkovic/PerfWindow/releases/latest/download/PerfWindow-Setup.exe">Download the installer</a>
-                <a class="btn" href="https://github.com/lukastojiljkovic/PerfWindow#readme">Read the docs</a>
+            <h2 class="close-title">Get PerfWindow</h2>
+            <p class="sub">One installer adds PerfWindow, its sensor service and, when needed, PawnIO and the Visual C++ runtime. Uninstall it from Settings, Apps.</p>
+            <div class="band-actions">
+                <a class="btn btn-app" href="https://github.com/lukastojiljkovic/PerfWindow/releases/latest/download/PerfWindow-Setup.exe">Download the installer</a>
+                <a class="btn btn-line" href="https://github.com/lukastojiljkovic/PerfWindow#readme">Read the docs</a>
             </div>
         </div>
-        <dl>
+        <dl class="get-facts">
             <div><dt>Requires</dt><dd>Windows 11, or Windows 10 version 1607 or later, x64</dd></div>
             <div><dt>Language</dt><dd>English</dd></div>
             <div><dt>License</dt><dd>MIT, source on GitHub</dd></div>
             <div><dt>Verify</dt><dd>SHA-256 published with every release</dd></div>
         </dl>
-    </section>
-</main>
-
-<footer class="wrap">
-    <div class="foot">
-        <span>© 2026 <a href="https://lukastojiljkovic.github.io/CV/">Luka Stojiljković</a></span>
-        <nav aria-label="Legal">
-            <a href="https://github.com/lukastojiljkovic/PerfWindow/blob/main/TERMS.md">Terms</a>
-            <a href="https://github.com/lukastojiljkovic/PerfWindow/blob/main/PRIVACY.md">Privacy</a>
-            <a href="https://github.com/lukastojiljkovic/PerfWindow/blob/main/THIRD-PARTY-NOTICES.md">Third-party notices</a>
-        </nav>
-        <p>Windows is a trademark of the Microsoft group of companies. PerfWindow isn't affiliated with or endorsed by Microsoft.</p>
+        <div class="foot">
+            <span>© 2026 <a href="https://lukastojiljkovic.github.io/CV/">Luka Stojiljković</a></span>
+            <nav aria-label="Legal">
+                <a href="https://github.com/lukastojiljkovic/PerfWindow/blob/main/TERMS.md">Terms</a>
+                <a href="https://github.com/lukastojiljkovic/PerfWindow/blob/main/PRIVACY.md">Privacy</a>
+                <a href="https://github.com/lukastojiljkovic/PerfWindow/blob/main/THIRD-PARTY-NOTICES.md">Third-party notices</a>
+            </nav>
+            <p>Windows is a trademark of the Microsoft group of companies. PerfWindow isn't affiliated with or endorsed by Microsoft.</p>
+        </div>
     </div>
 </footer>
 

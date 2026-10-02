@@ -1,11 +1,11 @@
-ls-sans.woff2: a subset of Mona Sans 2.027, limited to widths 100-125 and weights 400-800.
-Copyright 2022 The Mona Sans Project Authors (https://github.com/github/mona-sans), with Reserved Font Name "Mona".
-As a Modified Version it does not use the Reserved Font Name and is renamed "LS Sans".
+archivo-latin.woff2 and archivo-latin-ext.woff2: Archivo, the variable font (widths 62-125, weights 100-900),
+in the latin and latin-ext subsets that Google Fonts serves. Unmodified.
 
+Copyright 2020 The Archivo Project Authors (https://github.com/Omnibus-Type/Archivo)
 
 This Font Software is licensed under the SIL Open Font License, Version 1.1.
 This license is copied below, and is also available with a FAQ at:
-https://openfontlicense.org
+http://scripts.sil.org/OFL
 
 
 -----------------------------------------------------------
