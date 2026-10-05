@@ -311,16 +311,14 @@ pub fn footer(ui: &mut egui::Ui, app: &mut PerfApp) {
                         }
                     }
                 }
-                // Active display: model (EDID, when the driver exposes it) +
-                // resolution + refresh rate, read on the sensord side.
-                if let Some(d) = &snap.display {
-                    let mode = format!("{}x{} @ {}Hz", d.width, d.height, d.refresh_hz);
-                    let text = match d.model.as_deref().map(str::trim) {
-                        Some(model) if !model.is_empty() => format!("{model} {mode}"),
-                        _ => mode,
-                    };
-                    foot_item(ui, &theme, &text);
-                }
+            }
+
+            // Active displays. Enumerated in this process — the interactive
+            // session — so the modes are the real ones; `sensord` runs in
+            // session 0 and only sees a virtualised 1024x768 desktop. The
+            // cache re-reads on a slow cadence in `PerfApp::ui`.
+            for chip in crate::displays::footer_chips(app.display_cache.displays()) {
+                foot_item(ui, &theme, &chip.text).on_hover_text(&chip.tooltip);
             }
         });
     });
