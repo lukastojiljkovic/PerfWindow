@@ -24,6 +24,9 @@ ureq = { version = "2.10", default-features = false, features = ["tls"] }
 semver = "1"
 thiserror = "2"
 webbrowser = "1"
+# SHA-256 for the installer download. `ring` is already in the dependency
+# graph through rustls (`ureq`'s TLS backend), so this only names it directly.
+ring = "0.17"
 
 [build-dependencies]
 winresource = "0.1.31"

@@ -25,12 +25,46 @@ pub struct Asset {
 /// The asset filename the installer downloader looks for.
 pub const INSTALLER_ASSET_NAME: &str = "PerfWindow-Setup.exe";
 
+/// The checksum sidecar `release.yml` publishes next to the installer:
+/// `"<UPPERCASE HEX>  PerfWindow-Setup.exe"` in ASCII.
+pub const SIDECAR_ASSET_NAME: &str = "PerfWindow-Setup.exe.sha256";
+
 impl Release {
     /// Return the installer asset for this release, or `None` if it is
     /// missing (which the caller treats as a malformed release).
     pub fn installer_asset(&self) -> Option<&Asset> {
         self.assets.iter().find(|a| a.name == INSTALLER_ASSET_NAME)
     }
+
+    /// Return the checksum sidecar for this release, or `None` when the
+    /// release predates it (published before the sidecar was added).
+    pub fn sidecar_asset(&self) -> Option<&Asset> {
+        self.assets.iter().find(|a| a.name == SIDECAR_ASSET_NAME)
+    }
+}
+
+/// Only `https` asset URLs on `github.com` under this repository's release
+/// download path are followed. GitHub redirects those to its asset CDN; the
+/// checksum covers what actually arrives.
+pub fn is_acceptable_asset_url(url: &str) -> bool {
+    url.strip_prefix("https://github.com/")
+        .is_some_and(|rest| rest.starts_with("lukastojiljkovic/PerfWindow/releases/download/"))
+}
+
+/// Parse a sidecar body: 64 hex digits, whitespace, then the installer file
+/// name. Returns the hash lowercased. Anything else — empty, truncated,
+/// non-hex, naming another file — is rejected.
+pub fn parse_sidecar(body: &str) -> Option<String> {
+    let mut fields = body.split_whitespace();
+    let hash = fields.next()?;
+    let name = fields.next()?;
+    if fields.next().is_some() || name != INSTALLER_ASSET_NAME {
+        return None;
+    }
+    if hash.len() != 64 || !hash.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return None;
+    }
+    Some(hash.to_ascii_lowercase())
 }
 
 /// Parse the JSON body of `GET /repos/{owner}/{repo}/releases/latest`.
@@ -103,5 +137,89 @@ mod tests {
     #[test]
     fn malformed_json_returns_err() {
         assert!(parse_release("not json").is_err());
+    }
+
+    #[test]
+    fn installer_and_sidecar_assets_are_found_by_exact_name() {
+        let with_sidecar = r#"{
+            "tag_name": "v0.2.0",
+            "name": "x",
+            "body": "",
+            "html_url": "https://example.com",
+            "assets": [
+                {
+                    "name": "PerfWindow-Setup.exe.sha256",
+                    "browser_download_url": "https://github.com/lukastojiljkovic/PerfWindow/releases/download/v0.2.0/PerfWindow-Setup.exe.sha256",
+                    "size": 96
+                },
+                {
+                    "name": "PerfWindow-Setup.exe",
+                    "browser_download_url": "https://github.com/lukastojiljkovic/PerfWindow/releases/download/v0.2.0/PerfWindow-Setup.exe",
+                    "size": 35840000
+                }
+            ]
+        }"#;
+        let r = parse_release(with_sidecar).expect("parses");
+        assert_eq!(r.installer_asset().unwrap().size, 35_840_000);
+        assert!(r.sidecar_asset().is_some());
+    }
+
+    #[test]
+    fn a_release_without_the_sidecar_has_no_sidecar_asset() {
+        let r = parse_release(VALID).expect("parses");
+        assert!(r.sidecar_asset().is_none());
+    }
+
+    #[test]
+    fn only_our_https_release_download_urls_are_accepted() {
+        assert!(is_acceptable_asset_url(
+            "https://github.com/lukastojiljkovic/PerfWindow/releases/download/v0.2.0/PerfWindow-Setup.exe"
+        ));
+        assert!(!is_acceptable_asset_url(
+            "http://github.com/lukastojiljkovic/PerfWindow/releases/download/v0.2.0/PerfWindow-Setup.exe"
+        ));
+        assert!(!is_acceptable_asset_url(
+            "https://github.com/lukastojiljkovic/Other/releases/download/v0.2.0/PerfWindow-Setup.exe"
+        ));
+        assert!(!is_acceptable_asset_url(
+            "https://github.com/lukastojiljkovic/PerfWindow/releases/tag/v0.2.0"
+        ));
+        assert!(!is_acceptable_asset_url(
+            "https://github.com.evil.example/PerfWindow-Setup.exe"
+        ));
+        assert!(!is_acceptable_asset_url(
+            "https://objects.githubusercontent.com/whatever"
+        ));
+        assert!(!is_acceptable_asset_url("not a url"));
+    }
+
+    const HASH: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+
+    #[test]
+    fn sidecar_accepts_get_filehash_output() {
+        let body = format!("{}  PerfWindow-Setup.exe\r\n", HASH.to_uppercase());
+        assert_eq!(parse_sidecar(&body).as_deref(), Some(HASH));
+    }
+
+    #[test]
+    fn sidecar_accepts_a_single_space_and_no_trailing_newline() {
+        let body = format!("{HASH} PerfWindow-Setup.exe");
+        assert_eq!(parse_sidecar(&body).as_deref(), Some(HASH));
+    }
+
+    #[test]
+    fn sidecar_is_rejected_when_malformed() {
+        assert!(parse_sidecar("").is_none());
+        assert!(parse_sidecar("   \n").is_none());
+        assert!(parse_sidecar(&format!("{HASH}  Other.exe")).is_none());
+        assert!(parse_sidecar(&format!("{HASH}  PerfWindow-Setup.exe extra")).is_none());
+        assert!(
+            parse_sidecar("00ff  PerfWindow-Setup.exe").is_none(),
+            "too short"
+        );
+        assert!(
+            parse_sidecar(&format!("{}  PerfWindow-Setup.exe", "z".repeat(64))).is_none(),
+            "not hex"
+        );
     }
 }

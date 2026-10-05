@@ -19,6 +19,10 @@ pub struct Cache {
     pub latest_body: String,
     pub latest_asset_url: String,
     pub latest_asset_size: u64,
+    /// URL of the `.sha256` sidecar published with the installer. Empty for
+    /// caches written before the sidecar existed.
+    #[serde(default)]
+    pub latest_sidecar_url: String,
 }
 
 impl Cache {
@@ -121,6 +125,7 @@ mod tests {
             latest_body: "* x\n* y".into(),
             latest_asset_url: "https://example.com/PerfWindow-Setup.exe".into(),
             latest_asset_size: 1234,
+            latest_sidecar_url: "https://example.com/PerfWindow-Setup.exe.sha256".into(),
         }
     }
 
@@ -132,6 +137,20 @@ mod tests {
         assert_eq!(parsed.latest_tag, original.latest_tag);
         assert_eq!(parsed.latest_asset_size, original.latest_asset_size);
         assert_eq!(parsed.checked_at, original.checked_at);
+    }
+
+    #[test]
+    fn a_cache_without_the_sidecar_field_still_loads() {
+        let json = r#"{
+            "checked_at": 1700000000,
+            "latest_tag": "v0.2.0",
+            "latest_name": "PerfWindow 0.2.0",
+            "latest_body": "",
+            "latest_asset_url": "https://example.com/i.exe",
+            "latest_asset_size": 12
+        }"#;
+        let parsed = Cache::from_json(json).expect("older cache loads");
+        assert!(parsed.latest_sidecar_url.is_empty());
     }
 
     #[test]
