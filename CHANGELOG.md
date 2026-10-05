@@ -30,6 +30,16 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   the last figure, so the window's clear colour showed through on the right,
   most visibly in the Light theme.
 
+### Security
+
+- **The updater verifies the installer before it runs it.** The download is
+  checked against the `PerfWindow-Setup.exe.sha256` file published with each
+  release: hashed while it streams and again right before launch. A missing,
+  malformed or mismatched checksum refuses the update, deletes the file and
+  offers the release page. Only this repository's release download URLs are
+  followed, the installer is kept under `%LOCALAPPDATA%\PerfWindow`, and a
+  GitHub rate limit on the automatic check no longer shows an error.
+
 ## [0.10.0] — 2026-06-10
 
 A **stability + startup + performance** release built from a full-codebase
