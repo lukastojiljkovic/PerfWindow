@@ -22,10 +22,11 @@ pub enum Status {
 
 /// What a finished download produced.
 pub enum DownloadOutcome {
-    /// The installer was downloaded successfully and is at `path`. The UI
-    /// thread launches it and sets `want_quit` — but only while the modal
-    /// is still open on its Downloading screen.
-    Ready(std::path::PathBuf),
+    /// The installer was downloaded successfully and is at `path`, with the
+    /// SHA-256 it had when the download verified it. The UI thread re-reads
+    /// and re-checks the file, then launches it and sets `want_quit` — but only
+    /// while the modal is still open on its Downloading screen.
+    Ready(std::path::PathBuf, String),
     /// The user cancelled; the modal has already routed itself back to
     /// Confirm, so this is consumed silently.
     Cancelled,
@@ -268,9 +269,19 @@ impl PerfApp {
         let downloading = self.update_modal_open
             && matches!(self.update_modal_phase, ModalPhase::Downloading { .. });
         match outcome {
-            DownloadOutcome::Ready(path) => {
+            DownloadOutcome::Ready(path, hash) => {
                 if !(current && downloading) {
                     let _ = std::fs::remove_file(&path);
+                    return;
+                }
+                // Re-verify immediately before the hand-off: the file lives in
+                // a user-writable directory and may have been replaced since
+                // the download's own check.
+                if !crate::update::install::verify(&path, &hash) {
+                    let _ = std::fs::remove_file(&path);
+                    self.update_modal_phase = ModalPhase::Failed {
+                        message: "the installer changed after it was verified".into(),
+                    };
                     return;
                 }
                 match crate::update::install::launch(&path) {
@@ -865,7 +876,7 @@ mod tests {
         put_outcome(
             &app,
             app.update_download_generation,
-            DownloadOutcome::Ready(path.clone()),
+            DownloadOutcome::Ready(path.clone(), String::new()),
         );
         app.poll_download_outcome();
         assert!(!app.want_quit, "a closed modal must never launch + quit");
@@ -883,7 +894,7 @@ mod tests {
         put_outcome(
             &app,
             app.update_download_generation,
-            DownloadOutcome::Ready(path.clone()),
+            DownloadOutcome::Ready(path.clone(), String::new()),
         );
         app.poll_download_outcome();
         assert!(!app.want_quit);
@@ -902,7 +913,7 @@ mod tests {
             total: 2,
         };
         app.update_download_generation = 3;
-        put_outcome(&app, 2, DownloadOutcome::Ready(path.clone()));
+        put_outcome(&app, 2, DownloadOutcome::Ready(path.clone(), String::new()));
         app.poll_download_outcome();
         assert!(!app.want_quit);
         assert!(!path.exists());
@@ -965,8 +976,16 @@ mod tests {
     #[test]
     fn launch_failure_routes_to_the_launch_failed_screen() {
         let mut app = PerfApp::for_tests(Config::default());
-        let missing = std::env::temp_dir().join("pw-poll-missing-installer.exe");
-        let _ = std::fs::remove_file(&missing);
+        // A real file whose hash matches, but whose bytes are not a Windows
+        // executable: verification passes and the launch itself fails.
+        let path = std::env::temp_dir().join("pw-poll-unlaunchable-installer.exe");
+        std::fs::write(&path, b"not really an installer").expect("test file writes");
+        let digest = ring::digest::digest(&ring::digest::SHA256, b"not really an installer");
+        let hash = digest
+            .as_ref()
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect::<String>();
         app.update_modal_open = true;
         app.update_modal_phase = ModalPhase::Downloading {
             progress: 1.0,
@@ -976,7 +995,7 @@ mod tests {
         put_outcome(
             &app,
             app.update_download_generation,
-            DownloadOutcome::Ready(missing),
+            DownloadOutcome::Ready(path, hash),
         );
         app.poll_download_outcome();
         assert!(!app.want_quit);
@@ -984,5 +1003,26 @@ mod tests {
             app.update_modal_phase,
             ModalPhase::LaunchFailed { .. }
         ));
+    }
+
+    #[test]
+    fn a_file_that_changed_after_verification_is_refused() {
+        let mut app = PerfApp::for_tests(Config::default());
+        let path = temp_installer("pw-poll-tampered-installer.exe");
+        app.update_modal_open = true;
+        app.update_modal_phase = ModalPhase::Downloading {
+            progress: 1.0,
+            bytes: 2,
+            total: 2,
+        };
+        put_outcome(
+            &app,
+            app.update_download_generation,
+            DownloadOutcome::Ready(path.clone(), "0".repeat(64)),
+        );
+        app.poll_download_outcome();
+        assert!(!app.want_quit);
+        assert!(!path.exists(), "a mismatched installer must be deleted");
+        assert!(matches!(app.update_modal_phase, ModalPhase::Failed { .. }));
     }
 }

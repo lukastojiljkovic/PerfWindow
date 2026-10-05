@@ -10,7 +10,7 @@ pub trait ReleaseSource: Send + Sync + 'static {
 }
 
 /// Why a fetch failed, in user-facing terms.
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, Clone, thiserror::Error)]
 pub enum FetchError {
     #[error("no network connection")]
     Network,
@@ -26,7 +26,8 @@ pub enum FetchError {
 
 /// Production source. Calls
 /// `https://api.github.com/repos/<owner>/<repo>/releases/latest` once per
-/// invocation, with a 10-second total timeout and a custom User-Agent.
+/// invocation, with a 10-second total timeout, a custom User-Agent and the
+/// GitHub API media type + version headers.
 pub struct GitHubReleaseSource {
     pub owner: &'static str,
     pub repo: &'static str,
@@ -57,14 +58,11 @@ impl ReleaseSource for GitHubReleaseSource {
         let response = match agent
             .get(&url)
             .set("Accept", "application/vnd.github+json")
+            .set("X-GitHub-Api-Version", "2022-11-28")
             .call()
         {
             Ok(r) => r,
-            Err(ureq::Error::Status(403, ref r))
-                if r.header("x-ratelimit-remaining") == Some("0") =>
-            {
-                return Err(FetchError::RateLimited);
-            }
+            Err(ureq::Error::Status(403 | 429, _)) => return Err(FetchError::RateLimited),
             Err(ureq::Error::Status(code, _)) => return Err(FetchError::HttpStatus(code)),
             Err(ureq::Error::Transport(_)) => return Err(FetchError::Network),
         };
@@ -77,7 +75,7 @@ impl ReleaseSource for GitHubReleaseSource {
 /// In-memory source for tests: either returns a pre-baked release or a
 /// pre-baked error.
 pub struct MockReleaseSource {
-    outcome: Result<String, String>,
+    outcome: Result<String, FetchError>,
 }
 
 impl MockReleaseSource {
@@ -89,7 +87,14 @@ impl MockReleaseSource {
 
     pub fn failing(reason: &str) -> Self {
         Self {
-            outcome: Err(reason.to_owned()),
+            outcome: Err(FetchError::Other(reason.to_owned())),
+        }
+    }
+
+    /// Simulate GitHub answering 403/429 with the rate-limit error.
+    pub fn rate_limited() -> Self {
+        Self {
+            outcome: Err(FetchError::RateLimited),
         }
     }
 }
@@ -98,7 +103,7 @@ impl ReleaseSource for MockReleaseSource {
     fn fetch_latest(&self) -> Result<Release, FetchError> {
         match &self.outcome {
             Ok(json) => parse_release(json).map_err(|_| FetchError::Malformed),
-            Err(reason) => Err(FetchError::Other(reason.clone())),
+            Err(e) => Err(e.clone()),
         }
     }
 }
@@ -130,5 +135,14 @@ mod tests {
         let source = MockReleaseSource::failing("network unreachable");
         let err = source.fetch_latest().unwrap_err();
         assert!(err.to_string().contains("network unreachable"));
+    }
+
+    #[test]
+    fn mock_can_simulate_a_rate_limit() {
+        let source = MockReleaseSource::rate_limited();
+        assert!(matches!(
+            source.fetch_latest().unwrap_err(),
+            FetchError::RateLimited
+        ));
     }
 }

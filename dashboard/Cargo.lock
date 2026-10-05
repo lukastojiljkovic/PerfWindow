@@ -2411,6 +2411,7 @@ dependencies = [
  "egui",
  "egui_kittest",
  "perfwindow",
+ "ring",
  "semver",
  "serde",
  "serde_json",
