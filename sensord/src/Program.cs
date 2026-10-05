@@ -1,5 +1,4 @@
 using System.Net.NetworkInformation;
-using System.Runtime.InteropServices;
 using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -17,14 +16,8 @@ internal static class Program
     private static volatile bool _running = true;
     private static readonly ManualResetEventSlim _shutdown = new(false);
 
-    private static readonly IntPtr DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2 = new(-4);
-
-    [DllImport("user32.dll", SetLastError = true)]
-    private static extern bool SetProcessDpiAwarenessContext(IntPtr value);
-
     private static int Main(string[] args)
     {
-        MakeProcessDpiAware();
         RedirectDriverTempDir();
 
         if (args.Contains("--probe"))
@@ -104,21 +97,6 @@ internal static class Program
             }
             _shutdown.Wait(_intervalMs);
         } while (_running);
-    }
-
-    /// <summary>
-    /// Declares the process Per-Monitor-Aware (V2). Without this, Win32 returns
-    /// virtualised display modes to <c>EnumDisplaySettings</c> on high-DPI panels
-    /// (e.g. 1024x768@60Hz for a 1920x1080@75Hz screen), and those bogus values
-    /// flow into <c>Snapshot.Displays</c> and onto the dashboard footer. The
-    /// dashboard's own manifest only fixes the dashboard process; sensord must
-    /// opt in separately because it is the one calling the display APIs.
-    /// </summary>
-    private static void MakeProcessDpiAware()
-    {
-        try { SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2); }
-        catch (DllNotFoundException) { /* pre-Win10 1703 — display values may be virtualised */ }
-        catch (EntryPointNotFoundException) { /* same */ }
     }
 
     /// <summary>

@@ -24,7 +24,7 @@ use egui::{Pos2, Vec2};
 use perfwindow::app::{PerfApp, Status};
 use perfwindow::config::{Config, RefreshRate, ThemeId};
 use perfwindow::format::TempUnit;
-use perfwindow::ipc::snapshot::{D3DEngineLoad, DimmTemp, DisplayInfo};
+use perfwindow::ipc::snapshot::{D3DEngineLoad, DimmTemp};
 use perfwindow::ipc::*;
 use perfwindow::theme::{self, Theme};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -406,14 +406,6 @@ fn base(cpu: Option<CpuInfo>, gpu: Option<Vec<GpuInfo>>) -> Snapshot {
             name: "CPU Fan".into(),
             rpm: Some(3200.0),
         }]),
-        display: Some(DisplayInfo {
-            name: "\\\\.\\DISPLAY1".into(),
-            width: 2560,
-            height: 1600,
-            refresh_hz: 240,
-            model: Some("ROG NEBULA".into()),
-        }),
-        displays: None,
         health: Some(HealthInfo {
             pawnio: "ok".into(),
             degraded: false,

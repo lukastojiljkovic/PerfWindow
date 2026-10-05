@@ -19,6 +19,15 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ### Fixed
 
+- **The footer shows every monitor, with its real mode.** Display info used to
+  be read by `sensord`, which runs as a session-0 service and therefore only
+  saw a virtualised 1024x768@60 desktop; the footer then rendered that single
+  bogus entry. The dashboard now enumerates the active displays itself with the
+  Windows CCD API and shows each one's resolution and refresh rate, with the
+  monitor model, GDI name, desktop position and primary/secondary role in a
+  hover tooltip. The list is re-read every few seconds, so plugging a monitor
+  or changing a mode shows up without a restart. `sensord` no longer emits the
+  `display`/`displays` snapshot fields.
 - **CI builds with the current stable Rust toolchain.** Float literals that
   the new `float_literal_f32_fallback` lint rejects now carry an explicit
   `f32` suffix, and the lockfile picks up the patched `rustls-webpki`,
