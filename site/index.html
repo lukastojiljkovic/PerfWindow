@@ -13,8 +13,8 @@
     <meta property="og:title" content="PerfWindow: every sensor, one window">
     <meta property="og:description" content="Real-time usage, temperatures, power and drive health for every part of your PC, in one Windows dashboard that leaves nothing running when closed. Free and open source.">
     <meta property="og:url" content="https://lukastojiljkovic.github.io/PerfWindow/">
-    <meta property="og:image" content="https://lukastojiljkovic.github.io/PerfWindow/images/dashboard.png">
-    <meta property="og:image:alt" content="The PerfWindow dashboard in the Cyber Slate theme">
+    <meta property="og:image" content="https://lukastojiljkovic.github.io/PerfWindow/images/dashboard-light.png">
+    <meta property="og:image:alt" content="The PerfWindow dashboard">
     <meta name="twitter:card" content="summary_large_image">
 
     <link rel="icon" type="image/png" href="icon.png">
@@ -44,7 +44,7 @@
                 "operatingSystem": "Windows 11, Windows 10 version 1607 or later",
                 "url": "https://lukastojiljkovic.github.io/PerfWindow/",
                 "downloadUrl": "https://github.com/lukastojiljkovic/PerfWindow/releases/latest",
-                "screenshot": "https://lukastojiljkovic.github.io/PerfWindow/images/dashboard.png",
+                "screenshot": "https://lukastojiljkovic.github.io/PerfWindow/images/dashboard-light.png",
                 "license": "https://github.com/lukastojiljkovic/PerfWindow/blob/main/LICENSE",
                 "isAccessibleForFree": true,
                 "offers": { "@type": "Offer", "price": "0", "priceCurrency": "EUR" },
@@ -106,7 +106,8 @@
     <!-- The app on a plate of its colour, beside what it does at a glance -->
     <section class="wrap grid lead">
         <div class="plate plate-hero">
-            <img src="images/dashboard.png" width="1386" height="738" alt="The PerfWindow dashboard in the Cyber Slate theme, with CPU, GPU, memory, storage, motherboard and network cards" fetchpriority="high">
+            <img class="shot-light" src="images/dashboard-light.png" width="1386" height="738" alt="The PerfWindow dashboard, with CPU, GPU, integrated graphics, memory, network, battery and storage cards" fetchpriority="high">
+            <img class="shot-dark" src="images/dashboard-dark.png" width="1386" height="738" alt="The PerfWindow dashboard, with CPU, GPU, integrated graphics, memory, network, battery and storage cards">
         </div>
         <dl class="readout">
             <div class="row"><dt>Hardware</dt><dd>Every major component</dd></div>
@@ -148,13 +149,15 @@
         <div class="screens">
             <figure>
                 <div class="plate">
-                    <img src="images/light.png" width="1386" height="738" alt="The PerfWindow dashboard in the Light theme" loading="lazy">
+                    <img class="shot-light" src="images/settings-light.png" width="1386" height="738" alt="PerfWindow's settings: six themes, following Windows' light and dark setting, temperature unit and refresh rate" loading="lazy">
+                    <img class="shot-dark" src="images/settings-dark.png" width="1386" height="738" alt="PerfWindow's settings: six themes, following Windows' light and dark setting, temperature unit and refresh rate" loading="lazy">
                 </div>
-                <figcaption>The same dashboard in the Light theme, one of six.</figcaption>
+                <figcaption>Six themes in Settings, one of them light, and an option to follow Windows.</figcaption>
             </figure>
             <figure>
                 <div class="plate">
-                    <img src="images/smart.png" width="1386" height="738" alt="A drive's SMART lifetime on hover: power-on hours, power cycles, data written, NVMe wear and spare" loading="lazy">
+                    <img class="shot-light" src="images/smart-light.png" width="1386" height="738" alt="A drive's SMART lifetime on hover: power-on hours, power cycles, data written, NVMe wear and spare" loading="lazy">
+                    <img class="shot-dark" src="images/smart-dark.png" width="1386" height="738" alt="A drive's SMART lifetime on hover: power-on hours, power cycles, data written, NVMe wear and spare" loading="lazy">
                 </div>
                 <figcaption>Hover a drive for its SMART lifetime: hours, data written and wear.</figcaption>
             </figure>

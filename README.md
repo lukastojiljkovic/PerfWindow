@@ -13,7 +13,10 @@ PerfWindow has no resident background process while its window is closed and
 no system tray. It is installed by a standard Windows setup program and
 removed cleanly through Add/Remove Programs.
 
-![The PerfWindow dashboard in the Cyber Slate theme, with CPU, GPU, iGPU, RAM, network, battery and storage cards](docs/images/dashboard.png)
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/dashboard-dark.png">
+  <img src="docs/images/dashboard-light.png" alt="The PerfWindow dashboard, with CPU, GPU, iGPU, RAM, network, battery and storage cards">
+</picture>
 
 ## What it monitors
 
@@ -59,7 +62,10 @@ Every stat row has a **hover tooltip** with a one-sentence plain-language
 explanation, so the dashboard is readable even without prior hardware-monitoring
 vocabulary.
 
-![A drive's SMART lifetime on hover: power-on hours, power cycles, data written, NVMe wear and spare](docs/images/smart.png)
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/smart-dark.png">
+  <img src="docs/images/smart-light.png" alt="A drive's SMART lifetime on hover: power-on hours, power cycles, data written, NVMe wear and spare">
+</picture>
 
 ## Installing
 
@@ -213,7 +219,10 @@ PerfWindow ships six themes, picked from **Settings → Theme**:
 - **Crimson Terminal** — red accent on near-black, restrained effects.
 - **Light** — a clean light theme with no CRT effects.
 
-![The same dashboard in the Light theme](docs/images/light.png)
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/settings-dark.png">
+  <img src="docs/images/settings-light.png" alt="PerfWindow's settings: six themes, following Windows' light and dark setting, temperature unit and refresh rate">
+</picture>
 
 An optional "follow Windows" mode pairs a light theme with a dark theme and
 switches between them with the system setting.
