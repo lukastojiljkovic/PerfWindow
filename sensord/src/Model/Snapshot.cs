@@ -22,18 +22,8 @@ public record Snapshot(
     [property: JsonPropertyName("battery")] BatteryInfo? Battery,
     [property: JsonPropertyName("uptime_sec")] long? UptimeSec,
     [property: JsonPropertyName("atk_fans")] IReadOnlyList<FanInfo>? AtkFans,
-    [property: JsonPropertyName("display")] DisplayInfo? Display,
-    [property: JsonPropertyName("displays")] IReadOnlyList<DisplayInfo>? Displays,
     [property: JsonPropertyName("health")] HealthInfo? Health,
     [property: JsonPropertyName("ts_ms")] long? TsMs = null);
-
-/// <summary>Active display info — resolution and refresh rate of a monitor. <c>model</c> is the EDID friendly name (e.g. "ROG XG27AQ") when the driver exposes one.</summary>
-public record DisplayInfo(
-    [property: JsonPropertyName("name")] string Name,
-    [property: JsonPropertyName("width")] int Width,
-    [property: JsonPropertyName("height")] int Height,
-    [property: JsonPropertyName("refresh_hz")] int RefreshHz,
-    [property: JsonPropertyName("model")] string? Model = null);
 
 /// <summary>Service-side health summary, attached to every snapshot. <c>pawnio</c>: "ok" | "missing" | "denied". <c>degraded</c>: true if any reading is unavailable. <c>notes</c>: human-readable detail (optional).</summary>
 public record HealthInfo(
