@@ -398,15 +398,15 @@ fn start_update_download(ctx: &egui::Context, app: &mut PerfApp, release: &crate
             total: asset.size,
         },
     ));
-    let dest = std::env::temp_dir().join(format!(
-        "PerfWindow-Setup-{}-{}.exe",
+    let dest = download_dir().join(format!(
+        "PerfWindow-Setup-{}-{generation}.exe",
         release.tag_name.trim_start_matches('v'),
-        generation,
     ));
+    remove_stale_downloads(&dest);
 
     // Drain any unconsumed outcome from an abandoned attempt; a completed
     // file it left behind is unwanted.
-    if let Some((_, crate::app::DownloadOutcome::Ready(stale))) = app
+    if let Some((_, crate::app::DownloadOutcome::Ready(stale, _))) = app
         .update_download_outcome
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -427,15 +427,20 @@ fn start_update_download(ctx: &egui::Context, app: &mut PerfApp, release: &crate
     let finish_ctx = ctx.clone();
 
     crate::update::download::start_download(
-        asset.browser_download_url,
-        dest,
-        asset.size,
+        crate::update::download::DownloadRequest {
+            url: asset.browser_download_url.clone(),
+            sidecar_url: release
+                .sidecar_asset()
+                .map(|sidecar| sidecar.browser_download_url.clone()),
+            dest,
+            expected_size: asset.size,
+        },
         progress,
         cancel,
         move || repaint_ctx.request_repaint(),
         move |result| {
             let value = match result {
-                Ok(path) => crate::app::DownloadOutcome::Ready(path),
+                Ok((path, hash)) => crate::app::DownloadOutcome::Ready(path, hash),
                 Err(crate::update::download::DownloadError::Cancelled) => {
                     crate::app::DownloadOutcome::Cancelled
                 }
@@ -447,6 +452,39 @@ fn start_update_download(ctx: &egui::Context, app: &mut PerfApp, release: &crate
             finish_ctx.request_repaint();
         },
     );
+}
+
+/// `%LOCALAPPDATA%\PerfWindow\` — a per-user directory, so no other account
+/// (and no service) can swap the installer between the checksum check and the
+/// launch. Falls back to the temp directory on systems without the variable.
+fn download_dir() -> std::path::PathBuf {
+    let base = std::env::var_os("LOCALAPPDATA")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(std::env::temp_dir);
+    let dir = base.join("PerfWindow");
+    let _ = std::fs::create_dir_all(&dir);
+    dir
+}
+
+/// Remove installers left by earlier attempts; only the file about to be
+/// written survives.
+fn remove_stale_downloads(keep: &std::path::Path) {
+    let Some(dir) = keep.parent() else {
+        return;
+    };
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path == keep {
+            continue;
+        }
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if name.starts_with("PerfWindow-Setup-") && name.ends_with(".exe") {
+            let _ = std::fs::remove_file(&path);
+        }
+    }
 }
 
 /// Standard primary/secondary button styled like the banner chip.

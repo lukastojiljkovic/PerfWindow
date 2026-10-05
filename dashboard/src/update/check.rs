@@ -111,11 +111,18 @@ pub(crate) fn run_check<S: ReleaseSource + ?Sized>(
             None => set_state(
                 state,
                 UpdateState::Failed {
-                    reason: "malformed release tag or missing installer asset".into(),
+                    reason: "malformed release tag or unusable installer asset".into(),
                     checked_at: now,
                 },
                 repaint,
             ),
+        },
+        // A rate limit on the automatic check is not worth a banner: keep
+        // whatever the last good answer was, and stay quiet when there is no
+        // cached answer at all. A manual check reports the limit plainly.
+        Err(FetchError::RateLimited) if !ignore_cache => match cache_store.load() {
+            Some(cache) => publish_cached(state, &cache, repaint),
+            None => set_state(state, UpdateState::Idle, repaint),
         },
         Err(e) => set_state(
             state,
@@ -142,6 +149,10 @@ fn cache_from(release: &Release, checked_at: SystemTime) -> Cache {
             .installer_asset()
             .map(|a| a.size)
             .unwrap_or_default(),
+        latest_sidecar_url: release
+            .sidecar_asset()
+            .map(|a| a.browser_download_url.clone())
+            .unwrap_or_default(),
     }
 }
 
@@ -150,6 +161,18 @@ fn cache_from(release: &Release, checked_at: SystemTime) -> Cache {
 fn publish_cached(state: &SharedUpdateState, cache: &Cache, repaint: &(impl Fn() + ?Sized)) {
     match is_newer(env!("CARGO_PKG_VERSION"), &cache.latest_tag) {
         Ok(true) => {
+            let mut assets = vec![crate::update::release::Asset {
+                name: crate::update::release::INSTALLER_ASSET_NAME.into(),
+                browser_download_url: cache.latest_asset_url.clone(),
+                size: cache.latest_asset_size,
+            }];
+            if !cache.latest_sidecar_url.is_empty() {
+                assets.push(crate::update::release::Asset {
+                    name: crate::update::release::SIDECAR_ASSET_NAME.into(),
+                    browser_download_url: cache.latest_sidecar_url.clone(),
+                    size: 0,
+                });
+            }
             let release = Release {
                 tag_name: cache.latest_tag.clone(),
                 name: cache.latest_name.clone(),
@@ -160,11 +183,7 @@ fn publish_cached(state: &SharedUpdateState, cache: &Cache, repaint: &(impl Fn()
                     crate::update::REPO,
                     cache.latest_tag,
                 ),
-                assets: vec![crate::update::release::Asset {
-                    name: crate::update::release::INSTALLER_ASSET_NAME.into(),
-                    browser_download_url: cache.latest_asset_url.clone(),
-                    size: cache.latest_asset_size,
-                }],
+                assets,
             };
             set_state(
                 state,
@@ -196,7 +215,12 @@ fn publish_cached(state: &SharedUpdateState, cache: &Cache, repaint: &(impl Fn()
 /// `Some(true)` if `release` is newer, `Some(false)` if not, `None` if the
 /// release is structurally invalid (missing installer or bad tag).
 fn evaluate(release: &Release) -> Option<bool> {
-    release.installer_asset()?;
+    let asset = release.installer_asset()?;
+    // A release whose installer URL is not ours to download is unusable: the
+    // downloader must never follow an arbitrary URL.
+    if !crate::update::release::is_acceptable_asset_url(&asset.browser_download_url) {
+        return None;
+    }
     is_newer(env!("CARGO_PKG_VERSION"), &release.tag_name).ok()
 }
 
@@ -264,7 +288,7 @@ mod tests {
                 "html_url": "https://example.com",
                 "assets": [{{
                     "name": "PerfWindow-Setup.exe",
-                    "browser_download_url": "https://example.com/i.exe",
+                    "browser_download_url": "https://github.com/lukastojiljkovic/PerfWindow/releases/download/{tag}/PerfWindow-Setup.exe",
                     "size": 1
                 }}]
             }}"#
@@ -346,8 +370,11 @@ mod tests {
             latest_tag: tag,
             latest_name: "x".into(),
             latest_body: String::new(),
-            latest_asset_url: "https://example.com/i.exe".into(),
+            latest_asset_url:
+                "https://github.com/lukastojiljkovic/PerfWindow/releases/download/v0.0.1/PerfWindow-Setup.exe"
+                    .into(),
             latest_asset_size: 1,
+            latest_sidecar_url: String::new(),
         });
         // A failing source proves the cache served the result: any network
         // attempt would have landed in Failed.
@@ -358,5 +385,84 @@ mod tests {
             *state.lock().unwrap(),
             UpdateState::NoUpdate { .. }
         ));
+    }
+
+    #[test]
+    fn an_unusable_installer_url_is_a_failed_check() {
+        let json = r#"{
+            "tag_name": "v999.0.0",
+            "name": "x",
+            "body": "",
+            "html_url": "https://example.com",
+            "assets": [{
+                "name": "PerfWindow-Setup.exe",
+                "browser_download_url": "https://evil.example/PerfWindow-Setup.exe",
+                "size": 1
+            }]
+        }"#;
+        let s = MockReleaseSource::with_release(json);
+        assert!(matches!(run_sync(s, true), UpdateState::Failed { .. }));
+    }
+
+    #[test]
+    fn automatic_rate_limit_republishes_the_cache() {
+        let tag = format!("v{}", env!("CARGO_PKG_VERSION"));
+        let store = MemCacheStore::default();
+        store.save(&Cache {
+            checked_at: SystemTime::now() - std::time::Duration::from_secs(48 * 3600),
+            latest_tag: tag.clone(),
+            latest_name: "x".into(),
+            latest_body: String::new(),
+            latest_asset_url:
+                "https://github.com/lukastojiljkovic/PerfWindow/releases/download/x/PerfWindow-Setup.exe"
+                    .into(),
+            latest_asset_size: 1,
+            latest_sidecar_url: String::new(),
+        });
+
+        let state = new_shared();
+        run_check(
+            &MockReleaseSource::rate_limited(),
+            &state,
+            false,
+            &store,
+            &|| {},
+        );
+
+        // The stale cached answer survives, and the failure is silent.
+        assert!(matches!(
+            *state.lock().unwrap(),
+            UpdateState::NoUpdate { .. }
+        ));
+    }
+
+    #[test]
+    fn automatic_rate_limit_without_a_cache_stays_quiet() {
+        let state = new_shared();
+        run_check(
+            &MockReleaseSource::rate_limited(),
+            &state,
+            false,
+            &MemCacheStore::default(),
+            &|| {},
+        );
+        assert!(matches!(*state.lock().unwrap(), UpdateState::Idle));
+    }
+
+    #[test]
+    fn manual_rate_limit_is_reported() {
+        let state = new_shared();
+        run_check(
+            &MockReleaseSource::rate_limited(),
+            &state,
+            true,
+            &MemCacheStore::default(),
+            &|| {},
+        );
+        let guard = state.lock().unwrap();
+        match &*guard {
+            UpdateState::Failed { reason, .. } => assert!(reason.contains("rate")),
+            other => panic!("expected a reported failure, got {other:?}"),
+        }
     }
 }
