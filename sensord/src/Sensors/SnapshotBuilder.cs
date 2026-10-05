@@ -640,12 +640,6 @@ public static class SnapshotBuilder
         // can't report either flavour) without disturbing the other sections.
         var allGpus = TryBuild(() => BuildAllGpus(hardware));
 
-        // Enumerate monitors once so the happy path does not call
-        // EnumDisplayMonitors twice. Both the single-display compat field
-        // (Display = primary = displays[0]) and the multi-display field
-        // (Displays = full list) derive from this single call.
-        var displays = TryBuild(() => (IReadOnlyList<DisplayInfo>?)DisplayReader.ReadAll());
-
         // ts (seconds, back-compat) and ts_ms derive from one instant so a
         // consumer can mix the two fields without seeing them disagree.
         var now = DateTimeOffset.UtcNow;
@@ -674,8 +668,6 @@ public static class SnapshotBuilder
             Battery: TryBuild(() => BuildBattery(hardware)),
             UptimeSec: TryBuildValue(() => Environment.TickCount64 / 1000),
             AtkFans: TryBuild(() => (IReadOnlyList<FanInfo>?)AtkReader.Read()),
-            Display: displays is { Count: > 0 } ? displays[0] : null,
-            Displays: displays,
             Health: null,
             TsMs: now.ToUnixTimeMilliseconds());
     }

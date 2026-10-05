@@ -2419,6 +2419,7 @@ dependencies = [
  "toml",
  "ureq",
  "webbrowser",
+ "windows",
  "winreg",
  "winresource",
 ]

@@ -5,6 +5,7 @@
 
 pub mod app;
 pub mod config;
+pub mod displays;
 pub mod format;
 pub mod history;
 pub mod ipc;

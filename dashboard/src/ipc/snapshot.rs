@@ -30,14 +30,6 @@ pub struct Snapshot {
     /// dashboard can surface them independently in the footer.
     #[serde(default)]
     pub atk_fans: Option<Vec<FanInfo>>,
-    /// Current resolution + refresh rate of the primary monitor, read via
-    /// Win32 `EnumDisplaySettings`. Absent only on headless systems.
-    #[serde(default)]
-    pub display: Option<DisplayInfo>,
-    /// Every attached monitor's current mode, primary first. Added in 0.9.0;
-    /// older sensord builds omit this field (serde-default keeps them parsable).
-    #[serde(default)]
-    pub displays: Option<Vec<DisplayInfo>>,
     /// Sensord self-health summary. Absent on older sensord builds that
     /// predate the health probe (pre-0.8.0).
     #[serde(default)]
@@ -47,22 +39,6 @@ pub struct Snapshot {
     /// rates carry distinguishable stamps.
     #[serde(default)]
     pub ts_ms: Option<i64>,
-}
-
-/// Active display info — one monitor's resolution and refresh rate. The
-/// `name` field carries the Win32 device name (e.g. `\\.\DISPLAY1`) when
-/// sensord >= 0.9.0; older builds default it to the empty string.
-#[derive(Debug, Clone, Deserialize)]
-pub struct DisplayInfo {
-    #[serde(default)]
-    pub name: String,
-    pub width: i32,
-    pub height: i32,
-    pub refresh_hz: i32,
-    /// EDID friendly name of the monitor (e.g. "ROG XG27AQ"). `None` when the
-    /// driver exposes no target name or on sensord builds before 0.10.0.
-    #[serde(default)]
-    pub model: Option<String>,
 }
 
 /// Sensord runtime health status. Emitted by sensord 0.8.0+ so the dashboard
@@ -450,9 +426,7 @@ mod tests {
                   "data_read_gb":15234.5,"data_written_gb":20480.0}],
       "board":{"temp":38.0,"vrm_temp":61.0,"name":"ASUS FX507VI","bios_version":"16.0302","bios_date":"2023-11-15"},
       "net":{"adapter":"Wi-Fi","down_bps":4404019,"up_bps":629145,"link_bps":866000000,
-             "wifi":{"ssid":"HomeNet","signal_pct":86.0,"phy_mbps":866.7,"band":"5 GHz"}},
-      "displays":[{"name":"\\\\.\\DISPLAY1","width":2560,"height":1440,"refresh_hz":170,"model":"ROG XG27AQ"}],
-      "display":{"name":"\\\\.\\DISPLAY1","width":2560,"height":1440,"refresh_hz":170,"model":"ROG XG27AQ"}}"#;
+             "wifi":{"ssid":"HomeNet","signal_pct":86.0,"phy_mbps":866.7,"band":"5 GHz"}}}"#;
 
     #[test]
     fn parses_every_v10_schema_addition() {
@@ -499,15 +473,21 @@ mod tests {
         assert_eq!(wifi.signal_pct, Some(86.0));
         assert_eq!(wifi.phy_mbps, Some(866.7));
         assert_eq!(wifi.band.as_deref(), Some("5 GHz"));
+    }
 
-        assert_eq!(
-            s.display.as_ref().unwrap().model.as_deref(),
-            Some("ROG XG27AQ")
-        );
-        assert_eq!(
-            s.displays.as_ref().unwrap()[0].model.as_deref(),
-            Some("ROG XG27AQ")
-        );
+    /// Older `sensord` builds still emit the `display`/`displays` fields for a
+    /// short while after the dashboard stops reading them. They must parse and
+    /// be ignored, not fail the whole line.
+    #[test]
+    fn ignores_legacy_display_fields() {
+        let s = parse_snapshot(
+            r#"{"v":1,"ts":1,
+                "display":{"name":"\\\\.\\DISPLAY1","width":2560,"height":1440,"refresh_hz":170,"model":"ROG XG27AQ"},
+                "displays":[{"name":"\\\\.\\DISPLAY1","width":2560,"height":1440,"refresh_hz":170,"model":"ROG XG27AQ"}]}"#,
+        )
+        .expect("legacy display fields should be ignored by serde");
+        assert_eq!(s.v, 1);
+        assert!(s.cpu.is_none());
     }
 
     #[test]

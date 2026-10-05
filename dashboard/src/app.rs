@@ -46,6 +46,10 @@ pub struct PerfApp {
     pub history: History,
     pub sensord: Option<SensordKind>,
     pub latest: Option<Snapshot>,
+    /// Active monitors, read in this process. `sensord` cannot see the
+    /// interactive desktop from session 0, so the footer gets its display
+    /// info from here instead of the snapshot.
+    pub display_cache: crate::displays::DisplayCache,
     pub status: Status,
     /// Receiver for events emitted by the [`crate::ipc::connect`] state
     /// machine. `Some` while connecting, `None` once `Ready` has been
@@ -175,6 +179,7 @@ impl PerfApp {
             history: History::default(),
             sensord,
             latest: None,
+            display_cache: crate::displays::DisplayCache::new(),
             status,
             connect_rx,
             dev_mode,
@@ -501,6 +506,7 @@ impl PerfApp {
             history: crate::history::History::default(),
             sensord: None,
             latest: None,
+            display_cache: crate::displays::DisplayCache::empty(),
             status: Status::Running,
             connect_rx: None,
             dev_mode: false,
@@ -536,6 +542,7 @@ impl eframe::App for PerfApp {
             self.apply_config_change(&ctx);
         }
         self.ingest();
+        self.display_cache.maybe_refresh(std::time::Instant::now());
         self.poll_connect_events();
         self.poll_download_outcome();
         self.sync_window_level(&ctx);

@@ -294,7 +294,7 @@ internal sealed class SensorPipeWorker : BackgroundService
                 Timestamp: DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
                 Cpu: null, Gpu: null, Igpu: null, Ram: null, Storage: null,
                 Board: null, Fans: null, Voltages: null, Net: null, Battery: null,
-                UptimeSec: null, AtkFans: null, Display: null, Displays: null,
+                UptimeSec: null, AtkFans: null,
                 Health: new HealthInfo(pawnio, Degraded: true, Notes: notes));
             string json = JsonSerializer.Serialize(snap, SensordJsonContext.Default.Snapshot);
             await writer.WriteLineAsync(json);

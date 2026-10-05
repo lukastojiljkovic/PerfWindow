@@ -254,8 +254,6 @@ mod tests {
             battery: None,
             uptime_sec: None,
             atk_fans: None,
-            display: None,
-            displays: None,
             health: None,
             ts_ms: None,
         };
@@ -311,8 +309,6 @@ mod tests {
             battery: None,
             uptime_sec: None,
             atk_fans: None,
-            display: None,
-            displays: None,
             health: None,
             ts_ms: None,
         }

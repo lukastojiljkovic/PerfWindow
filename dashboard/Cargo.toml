@@ -28,6 +28,16 @@ webbrowser = "1"
 # graph through rustls (`ureq`'s TLS backend), so this only names it directly.
 ring = "0.17"
 
+[target.'cfg(windows)'.dependencies]
+# `displays.rs` reads the active monitor modes in the dashboard process with
+# the CCD API. The `windows` crate is already in the dependency graph through
+# wgpu/winit, so this only turns on the modules that are called.
+windows = { version = "0.62", features = [
+    "Win32_Devices_Display",
+    "Win32_Foundation",
+    "Win32_Graphics_Gdi",
+] }
+
 [build-dependencies]
 winresource = "0.1.31"
 
