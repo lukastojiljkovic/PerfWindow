@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ## [Unreleased]
 
+## [0.11.1] — 2026-10-07
+
+### Changed
+
+- Nothing in the app. 0.11.1 is the first release that 0.11.0's update check
+  can find, so updating to it shows that the updater works end to end.
+
 ## [0.11.0] — 2026-10-05
 
 ### Added
@@ -1046,7 +1053,8 @@ User-facing application behaviour is unchanged.
   matching uninstaller that removes the exclusions, the `R0sensord` driver
   service, the install directory and the per-user data directory.
 
-[Unreleased]: https://github.com/lukastojiljkovic/PerfWindow/compare/v0.11.0...HEAD
+[Unreleased]: https://github.com/lukastojiljkovic/PerfWindow/compare/v0.11.1...HEAD
+[0.11.1]: https://github.com/lukastojiljkovic/PerfWindow/releases/tag/v0.11.1
 [0.11.0]: https://github.com/lukastojiljkovic/PerfWindow/releases/tag/v0.11.0
 [0.10.0]: https://github.com/lukastojiljkovic/PerfWindow/releases/tag/v0.10.0
 [0.9.5]: https://github.com/lukastojiljkovic/PerfWindow/releases/tag/v0.9.5
