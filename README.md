@@ -234,6 +234,8 @@ A **pushpin chip** in the title bar (also exposed in Settings) toggles
 
 [Terms of use](TERMS.md) · [Privacy](PRIVACY.md) · [Third-party notices](THIRD-PARTY-NOTICES.md)
 
+[Contributing](CONTRIBUTING.md) · [Support](SUPPORT.md) · [Security](SECURITY.md) · [Code of conduct](CODE_OF_CONDUCT.md) · [Product](PRODUCT.md) · [Design](DESIGN.md)
+
 PerfWindow builds on [LibreHardwareMonitorLib](https://github.com/LibreHardwareMonitor/LibreHardwareMonitor)
 (MPL-2.0) and installs the [PawnIO](https://pawnio.eu) driver (GPL-2.0). The license texts of every bundled
 component are installed in the `licenses` folder next to `PerfWindow.exe`.

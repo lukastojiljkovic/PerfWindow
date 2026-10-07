@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Report a security vulnerability
+    url: https://github.com/lukastojiljkovic/PerfWindow/security/advisories/new
+    about: Report it privately, not in a public issue.
+  - name: Read how to contribute
+    url: https://github.com/lukastojiljkovic/PerfWindow/blob/main/CONTRIBUTING.md
+    about: Build and test commands, the snapshot tests and the sensor helper.
