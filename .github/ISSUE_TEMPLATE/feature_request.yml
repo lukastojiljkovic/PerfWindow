@@ -1,0 +1,18 @@
+name: Feature request
+description: Suggest an improvement.
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What would you like PerfWindow to do, and when do you run into it?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Your idea
+      description: Which sensor or reading is involved, and how should it appear in the dashboard?
+    validations:
+      required: true

@@ -1,0 +1,68 @@
+name: Bug report
+description: Something in PerfWindow doesn't work as it should.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. For a security problem, follow the [security policy](https://github.com/lukastojiljkovic/PerfWindow/security/policy) instead.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What did you expect, and what happened instead? Name the card or dialog if the problem is in one.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open PerfWindow
+        2. Select the GPU card
+        3. ...
+    validations:
+      required: true
+  - type: input
+    id: perfwindow-version
+    attributes:
+      label: PerfWindow version
+      description: Settings > Updates, or the version number in the footer
+      placeholder: "0.11.0"
+    validations:
+      required: true
+  - type: input
+    id: windows-version
+    attributes:
+      label: Windows version and build
+      description: Settings > System > About, or the output of `winver`
+      placeholder: Windows 11 Pro 24H2, build 26100
+    validations:
+      required: true
+  - type: textarea
+    id: hardware
+    attributes:
+      label: Hardware
+      description: CPU and GPU model, and the motherboard if the Sensors card is involved.
+      placeholder: |
+        CPU: AMD Ryzen 7 7800X3D
+        GPU: NVIDIA GeForce RTX 4070
+    validations:
+      required: true
+  - type: dropdown
+    id: elevated
+    attributes:
+      label: Was PerfWindow running elevated?
+      description: The dashboard normally runs as the current user, not as administrator.
+      options:
+        - No, as the current user
+        - Yes, as administrator
+        - Not sure
+    validations:
+      required: true
+  - type: textarea
+    id: log
+    attributes:
+      label: Log
+      description: If PerfWindow or the sensor service failed, paste the newest entry from %APPDATA%\PerfWindow\panic.log. Check it for personal paths first.
+      render: text
