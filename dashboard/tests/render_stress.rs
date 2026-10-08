@@ -138,8 +138,7 @@ fn run_frame(
             });
         perfwindow::ui::settings::settings_modal(ctx, app);
         perfwindow::ui::update_modal::update_modal(ctx, app);
-        let mut show_changelog = app.show_changelog;
-        perfwindow::ui::changelog_modal::changelog_modal(ctx, &theme, &mut show_changelog);
+        perfwindow::ui::changelog_modal::changelog_modal(ctx, app);
         perfwindow::ui::effects::paint_effects(ctx, &theme, app.config.background_opacity);
     });
 

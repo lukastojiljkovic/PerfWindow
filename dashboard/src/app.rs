@@ -75,6 +75,12 @@ pub struct PerfApp {
     pub update_download_generation: u64,
     pub want_quit: bool,
     pub show_changelog: bool,
+    /// Version whose section the changelog viewer opens on when it was opened
+    /// by the post-update "what's new" flow; `None` shows the whole changelog.
+    /// Cleared when the footer's version label opens the full log.
+    pub changelog_version: Option<String>,
+    /// True once the post-update viewer was expanded with "Show all versions".
+    pub changelog_show_all: bool,
     /// Last `WindowLevel` value pushed to the viewport. Used to detect
     /// `config.always_on_top` toggles so we send `ViewportCommand::WindowLevel`
     /// only on transitions, not every frame.
@@ -125,10 +131,44 @@ fn startup_stalled(
     }
 }
 
+/// `true` when this launch follows an upgrade from `previous`: `None` means the
+/// config predates `last_run_version`, a semver-older value counts, and an
+/// unparseable value is treated as "different" so the notes still show.
+fn upgraded_from(previous: Option<&str>) -> bool {
+    let current = env!("CARGO_PKG_VERSION");
+    match previous {
+        None => true,
+        Some(prev) => match (
+            semver::Version::parse(prev),
+            semver::Version::parse(current),
+        ) {
+            (Ok(prev), Ok(cur)) => prev < cur,
+            _ => prev != current,
+        },
+    }
+}
+
+/// Debug-only escape hatch: `PERFWINDOW_SHOW_UPDATED_NOTES=1` forces the
+/// post-update notes even on a first run. Compiled out entirely in release, so
+/// the variable name never reaches the shipped binary.
+#[cfg(debug_assertions)]
+fn force_updated_notes() -> bool {
+    std::env::var("PERFWINDOW_SHOW_UPDATED_NOTES").is_ok_and(|value| value == "1")
+}
+
+#[cfg(not(debug_assertions))]
+fn force_updated_notes() -> bool {
+    false
+}
+
 impl PerfApp {
     pub fn new(cc: &eframe::CreationContext<'_>, dev_mode: bool) -> Self {
         theme::install_fonts(&cc.egui_ctx);
+        // A config file that already exists predates `last_run_version`, so its
+        // presence marks a launch after an update even when the field is None.
+        let config_file_existed = Config::path().is_some_and(|p| p.exists());
         let config = Config::load();
+        let previous_version = config.last_run_version.clone();
         let os_is_light = system::windows_is_light();
         let theme = Theme::for_id(system::effective_theme_id(&config, os_is_light));
         theme.apply(&cc.egui_ctx);
@@ -196,6 +236,8 @@ impl PerfApp {
             update_download_generation: 0,
             want_quit: false,
             show_changelog: false,
+            changelog_version: None,
+            changelog_show_all: false,
             applied_on_top: false,
             fullscreen: false,
             health_banner_dismissed: false,
@@ -206,7 +248,30 @@ impl PerfApp {
         if let Some(s) = &mut app.sensord {
             s.set_interval(app.config.refresh.as_millis());
         }
+        app.record_run(config_file_existed, previous_version.as_deref());
         app
+    }
+
+    /// First-launch-after-an-update hook. When the user upgraded from an older
+    /// version (or a build that predates `last_run_version`) and the embedded
+    /// changelog has a section for the running version, open the viewer on that
+    /// section. `last_run_version` is written and saved on every launch, even
+    /// when nothing was shown.
+    fn record_run(&mut self, ran_before: bool, previous: Option<&str>) {
+        let current = env!("CARGO_PKG_VERSION");
+        if crate::ui::changelog_modal::version_section(
+            crate::ui::changelog_modal::CHANGELOG_TEXT,
+            current,
+        )
+        .is_some()
+            && (force_updated_notes() || (ran_before && upgraded_from(previous)))
+        {
+            self.changelog_version = Some(current.to_string());
+            self.show_changelog = true;
+            self.changelog_show_all = false;
+        }
+        self.config.last_run_version = Some(current.to_string());
+        self.config.save();
     }
 
     /// Push the configured window-on-top preference to the OS only when it
@@ -521,6 +586,8 @@ impl PerfApp {
             update_download_generation: 0,
             want_quit: false,
             show_changelog: false,
+            changelog_version: None,
+            changelog_show_all: false,
             applied_on_top: false,
             fullscreen: false,
             health_banner_dismissed: false,
@@ -602,7 +669,7 @@ impl eframe::App for PerfApp {
         // `egui::Window` and so takes the `Context`, not a nested `Ui`.
         crate::ui::settings::settings_modal(&ctx, self);
         crate::ui::update_modal::update_modal(&ctx, self);
-        crate::ui::changelog_modal::changelog_modal(&ctx, &self.theme, &mut self.show_changelog);
+        crate::ui::changelog_modal::changelog_modal(&ctx, self);
 
         // The scanline + vignette overlay paints last so it sits on top of
         // every panel and the modal. (The grid is drawn earlier, inside the
@@ -824,6 +891,24 @@ mod tests {
     fn watchdog_is_disarmed_without_a_running_since() {
         let now = std::time::Instant::now() + std::time::Duration::from_secs(500);
         assert!(!startup_stalled(None, None, now));
+    }
+
+    #[test]
+    fn a_missing_previous_version_counts_as_an_upgrade() {
+        assert!(upgraded_from(None));
+    }
+
+    #[test]
+    fn only_a_strictly_older_previous_version_shows_the_notes() {
+        assert!(upgraded_from(Some("0.11.0")));
+        assert!(!upgraded_from(Some(env!("CARGO_PKG_VERSION"))));
+        assert!(!upgraded_from(Some("99.0.0")));
+    }
+
+    #[test]
+    fn an_unparseable_previous_version_is_treated_as_different() {
+        assert!(upgraded_from(Some("old-build")));
+        assert!(!upgraded_from(Some(env!("CARGO_PKG_VERSION"))));
     }
 
     #[test]

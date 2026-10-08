@@ -76,6 +76,11 @@ pub struct Config {
     /// never use it, so they stay fully opaque at any value.
     #[serde(default = "default_background_opacity")]
     pub background_opacity: u8,
+    /// The version that ran last, written at every startup. `None` only until
+    /// the first launch of a build that knows this field; it drives the
+    /// first-launch-after-an-update changelog.
+    #[serde(default)]
+    pub last_run_version: Option<String>,
 }
 
 fn default_check_updates() -> bool {
@@ -105,6 +110,7 @@ impl Default for Config {
             cpu_heat_map: false,
             always_on_top: false,
             background_opacity: MAX_BACKGROUND_OPACITY,
+            last_run_version: None,
         }
     }
 }
@@ -181,6 +187,7 @@ mod tests {
             cpu_heat_map: false,
             always_on_top: false,
             background_opacity: 60,
+            last_run_version: None,
         };
         let parsed = Config::from_toml_str(&c.to_toml_string());
         assert_eq!(parsed.theme, ThemeId::Amber);
@@ -277,6 +284,22 @@ mod tests {
             Config::from_toml_str(&too_high.to_toml_string()).background_opacity,
             100
         );
+    }
+
+    #[test]
+    fn last_run_version_defaults_to_none_when_missing() {
+        let parsed = Config::from_toml_str("");
+        assert!(parsed.last_run_version.is_none());
+    }
+
+    #[test]
+    fn last_run_version_round_trips() {
+        let c = Config {
+            last_run_version: Some("0.11.1".to_string()),
+            ..Config::default()
+        };
+        let parsed = Config::from_toml_str(&c.to_toml_string());
+        assert_eq!(parsed.last_run_version.as_deref(), Some("0.11.1"));
     }
 
     #[test]

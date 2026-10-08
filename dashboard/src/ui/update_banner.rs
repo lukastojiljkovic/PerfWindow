@@ -13,6 +13,11 @@ use egui::{Align, FontId, Layout, Margin, RichText, Sense, Stroke, StrokeKind, V
 const STRIP_PADDING_X: i8 = 13;
 const STRIP_PADDING_Y: i8 = 9;
 const GAP: f32 = 8.0;
+/// Inner padding of a banner chip. `banner_chip` sizes itself from its label
+/// galley plus this, and the strip pre-sizes its row to the same height.
+const CHIP_PAD: Vec2 = Vec2::new(10.0, 6.0);
+/// Chip label font size.
+const CHIP_LABEL_SIZE: f32 = 11.0;
 
 /// Returns true if a banner should be drawn this frame.
 pub fn is_visible(app: &PerfApp) -> bool {
@@ -49,36 +54,57 @@ pub fn update_banner(ui: &mut egui::Ui, app: &mut PerfApp) {
         .fill(theme.surface(theme.chrome, app.config.background_opacity))
         .inner_margin(Margin::symmetric(STRIP_PADDING_X, STRIP_PADDING_Y));
 
+    // Size the row to the action chips before laying anything out. A plain
+    // `ui.horizontal` grows its cross extent as children are added, so the
+    // text labels end up centred against the initial height while the chips
+    // centre against the final one; a fixed row height puts both on one line
+    // and leaves the frame's symmetric padding as the visible top/bottom
+    // inset.
+    let row_h = ui
+        .painter()
+        .layout_no_wrap(
+            "Update".to_owned(),
+            FontId::new(CHIP_LABEL_SIZE, theme.font_data.egui()),
+            theme.ink,
+        )
+        .size()
+        .y
+        + CHIP_PAD.y * 2.0;
+
     let mut update_clicked = false;
     let mut later_clicked = false;
 
     frame.show(ui, |ui| {
-        ui.horizontal(|ui| {
-            ui.spacing_mut().item_spacing.x = GAP;
+        ui.allocate_ui_with_layout(
+            Vec2::new(ui.available_width(), row_h),
+            Layout::left_to_right(Align::Center),
+            |ui| {
+                ui.spacing_mut().item_spacing.x = GAP;
 
-            ui.label(
-                RichText::new(crate::format::letter_spaced(tag))
-                    .family(theme.font_display.egui())
-                    .size(10.0)
-                    .color(theme.accent),
-            );
+                ui.label(
+                    RichText::new(crate::format::letter_spaced(tag))
+                        .family(theme.font_display.egui())
+                        .size(10.0)
+                        .color(theme.accent),
+                );
 
-            ui.label(
-                RichText::new(headline)
-                    .family(theme.font_data.egui())
-                    .size(11.0)
-                    .color(theme.ink),
-            );
+                ui.label(
+                    RichText::new(headline)
+                        .family(theme.font_data.egui())
+                        .size(11.0)
+                        .color(theme.ink),
+                );
 
-            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                if banner_chip(ui, &theme, "Later", false).clicked() {
-                    later_clicked = true;
-                }
-                if banner_chip(ui, &theme, "Update", true).clicked() {
-                    update_clicked = true;
-                }
-            });
-        });
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    if banner_chip(ui, &theme, "Later", false).clicked() {
+                        later_clicked = true;
+                    }
+                    if banner_chip(ui, &theme, "Update", true).clicked() {
+                        update_clicked = true;
+                    }
+                });
+            },
+        );
     });
 
     let rect = ui.min_rect();
@@ -98,14 +124,13 @@ pub fn update_banner(ui: &mut egui::Ui, app: &mut PerfApp) {
 /// A chip in the banner. Same visual idiom as the title-bar chip, with a
 /// slightly larger label.
 fn banner_chip(ui: &mut egui::Ui, theme: &Theme, label: &str, primary: bool) -> egui::Response {
-    let font = FontId::new(11.0, theme.font_data.egui());
+    let font = FontId::new(CHIP_LABEL_SIZE, theme.font_data.egui());
     let text_color = if primary { theme.bg } else { theme.dim };
     let galley = ui
         .painter()
         .layout_no_wrap(label.to_owned(), font, text_color);
 
-    let pad = Vec2::new(10.0, 6.0);
-    let size = galley.size() + pad * 2.0;
+    let size = galley.size() + CHIP_PAD * 2.0;
     let (rect, response) = ui.allocate_exact_size(size, Sense::click());
 
     if ui.is_rect_visible(rect) {
@@ -120,7 +145,7 @@ fn banner_chip(ui: &mut egui::Ui, theme: &Theme, label: &str, primary: bool) -> 
             Stroke::new(1.0_f32, stroke_color),
             StrokeKind::Inside,
         );
-        painter.galley(rect.min + pad, galley, text_color);
+        painter.galley(rect.min + CHIP_PAD, galley, text_color);
     }
     if response.hovered() {
         ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
