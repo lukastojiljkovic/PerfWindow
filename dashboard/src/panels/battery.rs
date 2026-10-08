@@ -22,7 +22,7 @@ pub fn battery_panel(
     capacity: Capacity,
     min_h: f32,
 ) {
-    card(ui, theme, min_h, |ui| {
+    card(ui, theme, "BATTERY", min_h, |ui| {
         panel_title(ui, theme, "BATTERY", None);
 
         ui.horizontal(|ui| {

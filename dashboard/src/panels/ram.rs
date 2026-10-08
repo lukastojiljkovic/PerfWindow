@@ -32,7 +32,7 @@ pub fn ram_panel(
     capacity: Capacity,
     min_h: f32,
 ) {
-    card(ui, theme, min_h, |ui| {
+    card(ui, theme, "RAM", min_h, |ui| {
         panel_title(ui, theme, "RAM", None);
 
         // Usage donut on the left, priority-ranked stat rows on the right.
