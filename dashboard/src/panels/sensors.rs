@@ -5,7 +5,7 @@ use crate::format::{finite, format_temp, TempUnit};
 use crate::ipc::{BoardInfo, FanInfo, VoltageInfo};
 use crate::theme::Theme;
 use crate::ui::capacity::Capacity;
-use crate::ui::tooltips::tip;
+use crate::ui::tooltips::describe;
 use crate::widgets::stat::stat_row;
 use crate::widgets::{temp_color, TempKind};
 use egui::{Color32, RichText};
@@ -14,6 +14,24 @@ use egui::{Color32, RichText};
 /// The Full capacity tier grew to 11 rows for the GPU card (v0.10.0), so cap
 /// locally instead of letting the longer list overflow the card frame.
 const MAX_READOUTS: usize = 9;
+
+/// How many readouts fit in a card `min_h` points tall. The readout list is
+/// the panel's only variable content, so the height budget (rather than the
+/// card's width) decides how many survive; the renderer's shed ladder picks a
+/// height at which the top-ranked readouts fit.
+fn readout_budget(min_h: f32) -> usize {
+    if min_h >= 302.0 {
+        MAX_READOUTS
+    } else if min_h >= 238.0 {
+        8
+    } else if min_h >= 212.0 {
+        6
+    } else if min_h >= 140.0 {
+        4
+    } else {
+        2
+    }
+}
 
 /// Render the BOARD & SENSORS card: a flat list of motherboard temperatures,
 /// fan speeds and voltage readouts, ranked by raw magnitude (hottest /
@@ -32,10 +50,10 @@ pub fn sensors_panel(
     fans: &[FanInfo],
     voltages: &[VoltageInfo],
     unit: TempUnit,
-    capacity: Capacity,
+    _capacity: Capacity,
     min_h: f32,
 ) {
-    card(ui, theme, min_h, |ui| {
+    card(ui, theme, "SENSORS", min_h, |ui| {
         panel_title(ui, theme, "BOARD & SENSORS", None);
 
         // Hardware-identity caption (v0.10.0): board model + BIOS version
@@ -117,22 +135,27 @@ pub fn sensors_panel(
             a.0.cmp(&b.0)
                 .then_with(|| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal))
         });
-        items.truncate(capacity.rows.min(MAX_READOUTS));
+        items.truncate(readout_budget(min_h));
 
-        if capacity.columns >= 2 {
+        // Two columns whenever the card body is wide enough for a label and a
+        // value; the stacked form is reserved for genuinely narrow cards.
+        if ui.available_width() >= 180.0 {
             // First half goes in the left column, second half in the right.
             let split = items.len().div_ceil(2);
             ui.columns(2, |cols| {
                 for (_, _, label, val, col) in &items[..split] {
-                    tip(stat_row(&mut cols[0], theme, label, val, *col), label);
+                    let base = describe(label).map(str::to_string);
+                    stat_row(&mut cols[0], theme, label, val, *col).with_hover(base);
                 }
                 for (_, _, label, val, col) in &items[split..] {
-                    tip(stat_row(&mut cols[1], theme, label, val, *col), label);
+                    let base = describe(label).map(str::to_string);
+                    stat_row(&mut cols[1], theme, label, val, *col).with_hover(base);
                 }
             });
         } else {
             for (_, _, label, val, col) in &items {
-                tip(stat_row(ui, theme, label, val, *col), label);
+                let base = describe(label).map(str::to_string);
+                stat_row(ui, theme, label, val, *col).with_hover(base);
             }
         }
     });

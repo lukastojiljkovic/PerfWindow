@@ -99,6 +99,11 @@ pub struct PerfApp {
     /// `config.always_on_top` toggles so we send `ViewportCommand::WindowLevel`
     /// only on transitions, not every frame.
     pub applied_on_top: bool,
+    /// Cached zoom-to-fit decision; see [`crate::ui::fit`]. `None` until the
+    /// first frame computes it. Holds the input [`crate::ui::fit::FitKey`] the
+    /// decision was taken from, so it is rebuilt only when the physical window
+    /// size, the OS scale factor or the card set changes.
+    pub(crate) grid_fit: Option<(crate::ui::fit::FitKey, crate::ui::fit::Plan)>,
     /// True while the window is in F11 fullscreen mode. Transient — not
     /// persisted to config. Toggled by the F11 keypress handler.
     pub fullscreen: bool,
@@ -309,6 +314,7 @@ impl PerfApp {
             changelog_version: None,
             changelog_show_all: false,
             applied_on_top: false,
+            grid_fit: None,
             fullscreen: false,
             window_hwnd,
             strip: None,
@@ -663,6 +669,30 @@ impl PerfApp {
         }
     }
 
+    /// The zoom-to-fit plan for this frame, reusing the cached decision unless
+    /// the physical window size, the OS scale factor or the card set changed.
+    ///
+    /// `avail_w` / `avail_h` are the grid's available size in zoom-1.0 points;
+    /// see [`crate::ui::fit::plan`]. Caching here rather than in the renderer
+    /// keeps the planner from running on every repaint while the window's
+    /// geometry is unchanged.
+    pub(crate) fn plan_for(
+        &mut self,
+        key: crate::ui::fit::FitKey,
+        metrics: &[crate::ui::fit::CardMetrics],
+        avail_w: f32,
+        avail_h: f32,
+    ) -> crate::ui::fit::Plan {
+        if let Some((cached, plan)) = self.grid_fit {
+            if cached == key {
+                return plan;
+            }
+        }
+        let plan = crate::ui::fit::plan(metrics, avail_w, avail_h);
+        self.grid_fit = Some((key, plan));
+        plan
+    }
+
     /// Pull the newest snapshot out of the shared state and update history.
     fn ingest(&mut self) {
         // While a connect machine runs it owns `status`. A stale (or absent)
@@ -829,6 +859,7 @@ impl PerfApp {
             changelog_version: None,
             changelog_show_all: false,
             applied_on_top: false,
+            grid_fit: None,
             fullscreen: false,
             window_hwnd: None,
             strip: None,
@@ -918,14 +949,11 @@ impl eframe::App for PerfApp {
             .show_inside(ui, |ui| {
                 // The faint grid sits on the body background, behind the cards.
                 crate::ui::effects::paint_grid(ui, &self.theme);
-                // `auto_shrink = [false, true]`: keep the full available
-                // width, but shrink vertically to whatever the cards take —
-                // no blank scrollable area below the grid.
-                egui::ScrollArea::vertical()
-                    .auto_shrink([false, true])
-                    .show(ui, |ui| {
-                        crate::ui::card_grid(ui, self);
-                    });
+                // No scroll area: the grid zooms itself to fit, and sheds
+                // content when even the smallest zoom cannot (see `ui::fit`).
+                let central = ui.max_rect();
+                crate::ui::card_grid(ui, self);
+                crate::ui::recorder::central(central);
             });
 
         // The settings modal floats above the panels; it is a free-floating

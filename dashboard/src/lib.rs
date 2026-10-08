@@ -11,6 +11,8 @@ pub mod format;
 pub mod history;
 pub mod ipc;
 pub mod panels;
+#[cfg(any(test, feature = "test-support"))]
+pub mod test_support;
 pub mod theme;
 pub mod ui;
 pub mod update;
