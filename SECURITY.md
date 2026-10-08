@@ -2,7 +2,7 @@
 
 ## Supported versions
 
-Security fixes go into the latest release. The current release line is 0.11.x
+Security fixes go into the latest release. The current release line is 2.0.x
 (`dashboard/Cargo.toml`). Update to it before reporting.
 
 ## Reporting a vulnerability
