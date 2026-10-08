@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ## [Unreleased]
 
-## [2.0.0] — 2026-10-08
+## [2.0.0] — 2026-10-09
 
 PerfWindow now fits any window, its backgrounds can turn see-through, and it collapses into a one-line strip of live readings over the top of the screen. Update notes read as a short list of what changed, and the first launch of a new version opens its changelog once.
 
