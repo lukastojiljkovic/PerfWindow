@@ -27,15 +27,26 @@ const VIGNETTE_RINGS: usize = 14;
 /// soft inset shadow without any blur work.
 const VIGNETTE_MAX_ALPHA: f32 = 80.0;
 
+/// The Background opacity setting as a 0..=1 multiplier for the overlays
+/// below. They are atmosphere painted over the body, not content, so they fade
+/// in step with the surfaces they sit on instead of darkening a see-through
+/// area that the desktop shows through.
+fn opacity_factor(opacity: u8) -> f32 {
+    opacity.min(100) as f32 / 100.0
+}
+
 /// Draw the faint 25 px background grid into `ui`.
 ///
 /// Called inside the central panel — after its body fill, before the cards —
 /// so the opaque card frames paint over it and it shows only through the
 /// inter-card gaps and body padding. The lines are `theme.border` faded to
-/// ~5 % alpha: just enough texture to read as a grid without competing with
+/// ~5 % alpha — scaled by `opacity` so the body does not darken as it turns
+/// see-through. Just enough texture to read as a grid without competing with
 /// panel content.
-pub fn paint_grid(ui: &egui::Ui, theme: &Theme) {
-    let color = theme.border.gamma_multiply(GRID_ALPHA);
+pub fn paint_grid(ui: &egui::Ui, theme: &Theme, opacity: u8) {
+    let color = theme
+        .border
+        .gamma_multiply(GRID_ALPHA * opacity_factor(opacity));
     // `gamma_multiply` can land on a fully transparent colour; nothing to draw.
     if color == Color32::TRANSPARENT {
         return;
@@ -79,7 +90,7 @@ pub fn paint_grid(ui: &egui::Ui, theme: &Theme) {
 /// a theme that disables an effect pays no painter cost for it at all. They
 /// share one foreground layer, so their draw order is fixed: scanlines first,
 /// then the vignette over them.
-pub fn paint_effects(ctx: &egui::Context, theme: &Theme) {
+pub fn paint_effects(ctx: &egui::Context, theme: &Theme, opacity: u8) {
     // `content_rect` is the whole window area safe for rendering — egui 0.34
     // split the former `screen_rect` into this and `viewport_rect`, and this is
     // the documented replacement for a full-window content overlay.
@@ -89,8 +100,9 @@ pub fn paint_effects(ctx: &egui::Context, theme: &Theme) {
     }
 
     let painter = ctx.layer_painter(LayerId::new(Order::Foreground, Id::new("pw_overlay")));
-    scanlines(&painter, theme, screen);
-    vignette(&painter, theme, screen);
+    let factor = opacity_factor(opacity);
+    scanlines(&painter, theme, screen, factor);
+    vignette(&painter, theme, screen, factor);
 }
 
 /// Draw horizontal scanlines every 4 px across the whole window.
@@ -98,11 +110,13 @@ pub fn paint_effects(ctx: &egui::Context, theme: &Theme) {
 /// Skipped unless `theme.scanline_opacity > 0` (the Light theme sets it to 0).
 /// Each line is solid black at `scanline_opacity` alpha; all lines are batched
 /// into one mesh so the per-frame overlay costs a single shape.
-fn scanlines(painter: &egui::Painter, theme: &Theme, screen: Rect) {
+fn scanlines(painter: &egui::Painter, theme: &Theme, screen: Rect, factor: f32) {
     if theme.scanline_opacity <= 0.0 {
         return;
     }
-    let alpha = (theme.scanline_opacity * 255.0).round().clamp(0.0, 255.0) as u8;
+    let alpha = (theme.scanline_opacity * factor * 255.0)
+        .round()
+        .clamp(0.0, 255.0) as u8;
     if alpha == 0 {
         return;
     }
@@ -130,7 +144,7 @@ fn scanlines(painter: &egui::Painter, theme: &Theme, screen: Rect) {
 /// alpha is highest at the outermost ring and decays linearly to zero, scaled
 /// overall by `theme.vignette`. A dark band hugging the frame without a blur
 /// pass.
-fn vignette(painter: &egui::Painter, theme: &Theme, screen: Rect) {
+fn vignette(painter: &egui::Painter, theme: &Theme, screen: Rect, factor: f32) {
     if theme.vignette <= 0.0 {
         return;
     }
@@ -138,7 +152,7 @@ fn vignette(painter: &egui::Painter, theme: &Theme, screen: Rect) {
         // `ring` 0 is the outermost, full-strength ring; strength fades to 0
         // at the innermost ring so the band dissolves into the centre.
         let strength = 1.0 - ring as f32 / VIGNETTE_RINGS as f32;
-        let alpha = (theme.vignette * strength * VIGNETTE_MAX_ALPHA)
+        let alpha = (theme.vignette * strength * VIGNETTE_MAX_ALPHA * factor)
             .round()
             .clamp(0.0, 255.0) as u8;
         if alpha == 0 {

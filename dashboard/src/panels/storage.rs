@@ -35,6 +35,7 @@ const ACTIVITY_WARN: f64 = 80.0;
 pub fn storage_panel(
     ui: &mut egui::Ui,
     theme: &Theme,
+    opacity: u8,
     disks: &[StorageInfo],
     unit: TempUnit,
     _capacity: Capacity,
@@ -45,7 +46,7 @@ pub fn storage_panel(
     // enough to fit the TEMP column at every viable window size.
     let show_temp = true;
 
-    card(ui, theme, min_h, |ui| {
+    card(ui, theme, opacity, min_h, |ui| {
         panel_title(
             ui,
             theme,

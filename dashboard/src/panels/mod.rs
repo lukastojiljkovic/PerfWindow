@@ -31,12 +31,20 @@ const EMPTY_NOTE_H: f32 = 22.0;
 /// inner padding and ~10 px of vertical spacing between stacked items. A 2 px
 /// `theme.accent` line is painted over the card's top edge.
 ///
-/// `min_h` is the desired outer card height; when intrinsic content is
-/// shorter the body is padded so all cards in a row come out the same height.
-/// Pass `0.0` for "no minimum".
-pub fn card(ui: &mut egui::Ui, theme: &Theme, min_h: f32, contents: impl FnOnce(&mut egui::Ui)) {
+/// `opacity` is the Background opacity percentage; only the card's own fill
+/// goes through it, so every readout inside stays opaque. `min_h` is the
+/// desired outer card height; when intrinsic content is shorter the body is
+/// padded so all cards in a row come out the same height. Pass `0.0` for "no
+/// minimum".
+pub fn card(
+    ui: &mut egui::Ui,
+    theme: &Theme,
+    opacity: u8,
+    min_h: f32,
+    contents: impl FnOnce(&mut egui::Ui),
+) {
     let frame = Frame::NONE
-        .fill(theme.panel)
+        .fill(theme.surface(theme.panel, opacity))
         .stroke(Stroke::new(1.0_f32, theme.border))
         .inner_margin(Margin::same(CARD_PADDING));
 

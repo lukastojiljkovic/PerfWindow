@@ -94,6 +94,12 @@ fn run_app(dev_mode: bool, renderer: eframe::Renderer) -> eframe::Result {
     let initially_on_top = Config::load().always_on_top;
     let mut viewport = egui::ViewportBuilder::default()
         .with_title("PerfWindow")
+        // The Background opacity setting dims the window's surface fills so
+        // the desktop behind them shows through, which needs an OS window
+        // composited with an alpha channel. Both the glow and the wgpu backend
+        // honour it; at 100 % every surface is painted opaque, so the window
+        // looks exactly as it did before the setting existed.
+        .with_transparent(true)
         // Default size matches the grid's natural footprint so the window
         // opens with no empty band. Min height equals the default height
         // so the user cannot shrink the window into the cards; min width

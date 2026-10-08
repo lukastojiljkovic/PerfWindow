@@ -23,16 +23,18 @@ const SWAP_ROW_H: f32 = 24.0;
 /// When no pagefile is configured (`pagefile_total_mb` absent or zero) the
 /// whole SWAP row is rendered in a dimmed, inactive state. Every absent
 /// (`None`) reading degrades gracefully; nothing here can panic.
+#[allow(clippy::too_many_arguments)]
 pub fn ram_panel(
     ui: &mut egui::Ui,
     theme: &Theme,
+    opacity: u8,
     ram: &RamInfo,
     history: Option<&RingBuffer>,
     unit: TempUnit,
     capacity: Capacity,
     min_h: f32,
 ) {
-    card(ui, theme, min_h, |ui| {
+    card(ui, theme, opacity, min_h, |ui| {
         panel_title(ui, theme, "RAM", None);
 
         // Usage donut on the left, priority-ranked stat rows on the right.

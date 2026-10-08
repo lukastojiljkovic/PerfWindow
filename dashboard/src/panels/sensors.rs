@@ -28,6 +28,7 @@ const MAX_READOUTS: usize = 9;
 pub fn sensors_panel(
     ui: &mut egui::Ui,
     theme: &Theme,
+    opacity: u8,
     board: Option<&BoardInfo>,
     fans: &[FanInfo],
     voltages: &[VoltageInfo],
@@ -35,7 +36,7 @@ pub fn sensors_panel(
     capacity: Capacity,
     min_h: f32,
 ) {
-    card(ui, theme, min_h, |ui| {
+    card(ui, theme, opacity, min_h, |ui| {
         panel_title(ui, theme, "BOARD & SENSORS", None);
 
         // Hardware-identity caption (v0.10.0): board model + BIOS version

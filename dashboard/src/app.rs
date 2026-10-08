@@ -579,10 +579,15 @@ impl eframe::App for PerfApp {
                 crate::ui::footer(ui, self);
             });
         egui::CentralPanel::default()
-            .frame(egui::Frame::NONE.fill(self.theme.bg))
+            .frame(
+                egui::Frame::NONE.fill(
+                    self.theme
+                        .surface(self.theme.bg, self.config.background_opacity),
+                ),
+            )
             .show_inside(ui, |ui| {
                 // The faint grid sits on the body background, behind the cards.
-                crate::ui::effects::paint_grid(ui, &self.theme);
+                crate::ui::effects::paint_grid(ui, &self.theme, self.config.background_opacity);
                 // `auto_shrink = [false, true]`: keep the full available
                 // width, but shrink vertically to whatever the cards take —
                 // no blank scrollable area below the grid.
@@ -602,7 +607,7 @@ impl eframe::App for PerfApp {
         // The scanline + vignette overlay paints last so it sits on top of
         // every panel and the modal. (The grid is drawn earlier, inside the
         // central panel, so the opaque cards cover it.)
-        crate::ui::effects::paint_effects(&ctx, &self.theme);
+        crate::ui::effects::paint_effects(&ctx, &self.theme, self.config.background_opacity);
 
         // Watchdog repaint a little past the refresh interval; new snapshots
         // already wake the UI via request_repaint from the reader thread, and
@@ -614,6 +619,15 @@ impl eframe::App for PerfApp {
         if self.want_quit {
             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
         }
+    }
+
+    /// The OS window is created transparent (see `main.rs`) so the dimmed
+    /// surface fills can show the desktop behind them. egui's own clear colour
+    /// must therefore contribute nothing: any opaque clear would fill the
+    /// transparent regions right back in. Both the glow and the wgpu backends
+    /// hand these four floats straight to their clear call.
+    fn clear_color(&self, _visuals: &egui::Visuals) -> [f32; 4] {
+        [0.0, 0.0, 0.0, 0.0]
     }
 
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {

@@ -18,11 +18,12 @@ use crate::widgets::health_color;
 pub fn battery_panel(
     ui: &mut egui::Ui,
     theme: &Theme,
+    opacity: u8,
     batt: &BatteryInfo,
     capacity: Capacity,
     min_h: f32,
 ) {
-    card(ui, theme, min_h, |ui| {
+    card(ui, theme, opacity, min_h, |ui| {
         panel_title(ui, theme, "BATTERY", None);
 
         ui.horizontal(|ui| {
