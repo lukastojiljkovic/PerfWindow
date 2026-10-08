@@ -41,6 +41,7 @@ const ACTIVITY_WARN: f64 = 80.0;
 pub fn storage_panel(
     ui: &mut egui::Ui,
     theme: &Theme,
+    opacity: u8,
     disks: &[StorageInfo],
     unit: TempUnit,
     _capacity: Capacity,
@@ -55,7 +56,7 @@ pub fn storage_panel(
     // frame, and report the count that actually made it.
     let shown = row_budget(min_h).min(disks.len());
 
-    card(ui, theme, "STORAGE", min_h, |ui| {
+    card(ui, theme, "STORAGE", opacity, min_h, |ui| {
         panel_title(ui, theme, "STORAGE", Some(&format!("{shown} DISKS")));
 
         header_row(ui, theme, show_temp);

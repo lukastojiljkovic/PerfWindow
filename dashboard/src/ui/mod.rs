@@ -61,7 +61,7 @@ const CURSOR_BLINK_PERIOD: f64 = 1.1;
 pub fn title_bar(ui: &mut egui::Ui, app: &mut PerfApp) {
     let theme = app.theme.clone();
     let frame = egui::Frame::NONE
-        .fill(theme.chrome)
+        .fill(theme.surface(theme.chrome, app.config.background_opacity))
         .inner_margin(Margin::symmetric(STRIP_PADDING_X, STRIP_PADDING_Y_TB));
 
     frame.show(ui, |ui| {
@@ -224,7 +224,7 @@ fn chip(ui: &mut egui::Ui, theme: &Theme, label: &str, on: bool) -> egui::Respon
 pub fn footer(ui: &mut egui::Ui, app: &mut PerfApp) {
     let theme = app.theme.clone();
     let frame = egui::Frame::NONE
-        .fill(theme.chrome)
+        .fill(theme.surface(theme.chrome, app.config.background_opacity))
         .inner_margin(Margin::symmetric(STRIP_PADDING_X, STRIP_PADDING_Y_FOOT));
 
     frame.show(ui, |ui| {
@@ -743,6 +743,7 @@ fn paint_card(
     capacity: crate::ui::capacity::Capacity,
 ) {
     let theme = &app.theme;
+    let opacity = app.config.background_opacity;
     let unit = app.config.unit;
     match card {
         Card::Cpu => {
@@ -750,6 +751,7 @@ fn paint_card(
                 panels::cpu::cpu_panel(
                     ui,
                     theme,
+                    opacity,
                     cpu,
                     app.history.cpu.as_ref(),
                     unit,
@@ -761,14 +763,23 @@ fn paint_card(
         }
         Card::Gpu(i) => {
             if let Some(gpu) = snap.gpu.as_ref().and_then(|g| g.get(i)) {
-                panels::gpu::gpu_panel(ui, theme, gpu, app.history.gpu(i), unit, capacity, min_h);
+                panels::gpu::gpu_panel(
+                    ui,
+                    theme,
+                    opacity,
+                    gpu,
+                    app.history.gpu(i),
+                    unit,
+                    capacity,
+                    min_h,
+                );
             }
         }
         Card::Igpu => {
             if let Some(igpu) = &snap.igpu {
                 // No history tracked for the iGPU yet — the panel renders
                 // without the trailing sparkline when `None`.
-                panels::gpu::gpu_panel(ui, theme, igpu, None, unit, capacity, min_h);
+                panels::gpu::gpu_panel(ui, theme, opacity, igpu, None, unit, capacity, min_h);
             }
         }
         Card::Ram => {
@@ -776,6 +787,7 @@ fn paint_card(
                 panels::ram::ram_panel(
                     ui,
                     theme,
+                    opacity,
                     ram,
                     app.history.ram.as_ref(),
                     unit,
@@ -786,13 +798,14 @@ fn paint_card(
         }
         Card::Storage => {
             if let Some(disks) = &snap.storage {
-                panels::storage::storage_panel(ui, theme, disks, unit, capacity, min_h);
+                panels::storage::storage_panel(ui, theme, opacity, disks, unit, capacity, min_h);
             }
         }
         Card::Sensors => {
             panels::sensors::sensors_panel(
                 ui,
                 theme,
+                opacity,
                 snap.board.as_ref(),
                 snap.fans.as_deref().unwrap_or(&[]),
                 snap.voltages.as_deref().unwrap_or(&[]),
@@ -805,6 +818,7 @@ fn paint_card(
             panels::network::network_panel(
                 ui,
                 theme,
+                opacity,
                 snap.net.as_ref(),
                 app.history.network.as_ref(),
                 capacity,
@@ -813,7 +827,7 @@ fn paint_card(
         }
         Card::Battery => {
             if let Some(batt) = &snap.battery {
-                panels::battery::battery_panel(ui, theme, batt, capacity, min_h);
+                panels::battery::battery_panel(ui, theme, opacity, batt, capacity, min_h);
             }
         }
     }
@@ -861,25 +875,34 @@ pub fn error_overlay(ui: &mut egui::Ui, app: &mut PerfApp, ctx: &egui::Context) 
             Layout::top_down(Align::Center),
             |ui| {
                 ui.set_width(ERROR_CARD_WIDTH);
-                panels::card(ui, &theme, "ERROR", 0.0, |ui| {
-                    // `hot` heading — the alarm line, in the display font.
-                    ui.label(
-                        RichText::new(letter_spaced("SENSOR FEED STOPPED"))
-                            .family(theme.font_display.egui())
-                            .size(13.0)
-                            .color(theme.hot),
-                    );
-                    // `dim` explanatory line, wrapped to the card width.
-                    ui.label(
-                        RichText::new("The sensor process exited. Hardware readings are paused.")
+                panels::card(
+                    ui,
+                    &theme,
+                    "ERROR",
+                    app.config.background_opacity,
+                    0.0,
+                    |ui| {
+                        // `hot` heading — the alarm line, in the display font.
+                        ui.label(
+                            RichText::new(letter_spaced("SENSOR FEED STOPPED"))
+                                .family(theme.font_display.egui())
+                                .size(13.0)
+                                .color(theme.hot),
+                        );
+                        // `dim` explanatory line, wrapped to the card width.
+                        ui.label(
+                            RichText::new(
+                                "The sensor process exited. Hardware readings are paused.",
+                            )
                             .family(theme.font_data.egui())
                             .size(11.0)
                             .color(theme.dim),
-                    );
-                    if respawn_button(ui, &theme).clicked() {
-                        respawn = true;
-                    }
-                });
+                        );
+                        if respawn_button(ui, &theme).clicked() {
+                            respawn = true;
+                        }
+                    },
+                );
             },
         );
     });

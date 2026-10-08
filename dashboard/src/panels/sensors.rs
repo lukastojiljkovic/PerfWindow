@@ -46,6 +46,7 @@ fn readout_budget(min_h: f32) -> usize {
 pub fn sensors_panel(
     ui: &mut egui::Ui,
     theme: &Theme,
+    opacity: u8,
     board: Option<&BoardInfo>,
     fans: &[FanInfo],
     voltages: &[VoltageInfo],
@@ -53,7 +54,7 @@ pub fn sensors_panel(
     _capacity: Capacity,
     min_h: f32,
 ) {
-    card(ui, theme, "SENSORS", min_h, |ui| {
+    card(ui, theme, "SENSORS", opacity, min_h, |ui| {
         panel_title(ui, theme, "BOARD & SENSORS", None);
 
         // Hardware-identity caption (v0.10.0): board model + BIOS version

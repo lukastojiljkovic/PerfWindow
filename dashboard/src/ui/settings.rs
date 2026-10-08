@@ -65,6 +65,14 @@ const SEG_PADDING_X: f32 = 15.0;
 const SEG_PADDING_Y: f32 = 8.0;
 /// Section-label and hint font size.
 const LABEL_FONT_SIZE: f32 = 10.0;
+/// Opacity slider track height.
+const SLIDER_TRACK_H: f32 = 5.0;
+/// Opacity slider knob diameter. The track is inset by half of it at each end
+/// so the knob stays inside the allocated row instead of being clipped.
+const SLIDER_KNOB_D: f32 = 13.0;
+/// Step between the opacity slider's stops. The 30..=100 range comes from
+/// `crate::config::{MIN,MAX}_BACKGROUND_OPACITY`.
+const SLIDER_STEP: u8 = 5;
 
 /// A pending change to `app.config`, queued by a control and applied after the
 /// window closure returns so `app` is not borrowed twice.
@@ -75,6 +83,7 @@ enum Change {
     Refresh(RefreshRate),
     CheckUpdates(bool),
     AlwaysOnTop(bool),
+    Opacity(u8),
     ManualCheck,
 }
 
@@ -140,7 +149,13 @@ pub fn settings_modal(ctx: &egui::Context, app: &mut PerfApp) {
                             theme_section(ui, &theme, app, &mut change);
                             unit_section(ui, &theme, app.config.unit, &mut change);
                             refresh_section(ui, &theme, app.config.refresh, &mut change);
-                            display_section(ui, &theme, app.config.always_on_top, &mut change);
+                            display_section(
+                                ui,
+                                &theme,
+                                app.config.always_on_top,
+                                app.config.background_opacity,
+                                &mut change,
+                            );
                             updates_section(ui, &theme, app, &mut change);
                         });
                 });
@@ -160,6 +175,7 @@ pub fn settings_modal(ctx: &egui::Context, app: &mut PerfApp) {
             Change::Refresh(rate) => app.config.refresh = rate,
             Change::CheckUpdates(on) => app.config.check_updates_on_startup = on,
             Change::AlwaysOnTop(on) => app.config.always_on_top = on,
+            Change::Opacity(percent) => app.config.background_opacity = percent,
             Change::ManualCheck => app.manual_update_check(ctx),
         }
         if needs_save {
@@ -618,10 +634,16 @@ fn footer(ui: &mut egui::Ui, theme: &Theme) {
     ));
 }
 
-/// The DISPLAY section: window-behaviour toggles. Currently holds only the
-/// "Keep window always on top" switch; further window-state controls (e.g.
-/// click-through, transparency) will live here.
-fn display_section(ui: &mut egui::Ui, theme: &Theme, on: bool, change: &mut Option<Change>) {
+/// The DISPLAY section: window-behaviour controls. Holds the "Keep window
+/// always on top" switch, the Background opacity slider and the hint that ties
+/// the two together.
+fn display_section(
+    ui: &mut egui::Ui,
+    theme: &Theme,
+    on: bool,
+    opacity: u8,
+    change: &mut Option<Change>,
+) {
     ui.vertical(|ui| {
         ui.spacing_mut().item_spacing.y = SECTION_INNER_GAP;
         section_label(ui, theme, "DISPLAY");
@@ -687,6 +709,113 @@ fn display_section(ui: &mut egui::Ui, theme: &Theme, on: bool, change: &mut Opti
             );
             ui.label(job);
         });
+
+        opacity_slider(ui, theme, opacity, change);
+
+        section_hint(
+            ui,
+            theme,
+            "Text and graphs stay solid. Works best with Always on top.",
+        );
+    });
+}
+
+/// Draw the Background opacity slider: a label row with the live `NN %`
+/// readout, then a bordered track whose filled length and knob follow the
+/// setting.
+///
+/// Clicking or dragging anywhere on the track snaps to the nearest 5 % stop
+/// between `crate::config::MIN_BACKGROUND_OPACITY` and
+/// `crate::config::MAX_BACKGROUND_OPACITY` and queues a [`Change::Opacity`].
+/// Only the dashboard's surface fills dim, so the readouts stay legible over
+/// whatever shows through.
+fn opacity_slider(ui: &mut egui::Ui, theme: &Theme, value: u8, change: &mut Option<Change>) {
+    let min = crate::config::MIN_BACKGROUND_OPACITY;
+    let max = crate::config::MAX_BACKGROUND_OPACITY;
+
+    ui.vertical(|ui| {
+        ui.spacing_mut().item_spacing.y = 6.0;
+
+        ui.horizontal(|ui| {
+            ui.label(
+                egui::RichText::new("Background opacity")
+                    .family(theme.font_data.egui())
+                    .size(11.0)
+                    .color(theme.ink),
+            );
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                ui.label(
+                    egui::RichText::new(format!("{value} %"))
+                        .family(theme.font_data.egui())
+                        .size(11.0)
+                        .color(theme.accent),
+                );
+            });
+        });
+
+        let (rect, response) = ui.allocate_exact_size(
+            Vec2::new(ui.available_width(), SLIDER_KNOB_D),
+            Sense::click_and_drag(),
+        );
+        // The track runs between the knob's extremes; click mapping below uses
+        // the same inset so a click on either end lands on the end stop.
+        let track = Rect::from_min_max(
+            Pos2::new(
+                rect.left() + SLIDER_KNOB_D / 2.0,
+                rect.center().y - SLIDER_TRACK_H / 2.0,
+            ),
+            Pos2::new(
+                rect.right() - SLIDER_KNOB_D / 2.0,
+                rect.center().y + SLIDER_TRACK_H / 2.0,
+            ),
+        );
+        let frac = (value.clamp(min, max) - min) as f32 / (max - min) as f32;
+        let knob_x = track.left() + track.width() * frac;
+
+        if ui.is_rect_visible(rect) {
+            let painter = ui.painter_at(rect);
+            painter.rect_filled(track, 0.0, theme.track);
+            if knob_x > track.left() {
+                painter.rect_filled(
+                    Rect::from_min_max(track.min, Pos2::new(knob_x, track.max.y)),
+                    0.0,
+                    theme.accent,
+                );
+            }
+            painter.rect_stroke(
+                track,
+                0.0,
+                Stroke::new(1.0_f32, theme.border),
+                StrokeKind::Inside,
+            );
+
+            let knob = Rect::from_center_size(
+                Pos2::new(knob_x, track.center().y),
+                Vec2::splat(SLIDER_KNOB_D),
+            );
+            painter.rect_filled(knob, 0.0, theme.accent);
+            painter.rect_stroke(
+                knob,
+                0.0,
+                Stroke::new(1.0_f32, theme.border),
+                StrokeKind::Inside,
+            );
+        }
+        if response.hovered() || response.dragged() {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
+        }
+
+        if let Some(pos) = response.interact_pointer_pos() {
+            if response.clicked() || response.dragged() {
+                let travel = track.width().max(1.0);
+                let frac = ((pos.x - track.left()) / travel).clamp(0.0, 1.0);
+                let stops = (max - min) / SLIDER_STEP;
+                let stepped = min + (frac * stops as f32).round() as u8 * SLIDER_STEP;
+                if stepped != value {
+                    *change = Some(Change::Opacity(stepped));
+                }
+            }
+        }
     });
 }
 
