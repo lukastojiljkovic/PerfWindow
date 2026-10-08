@@ -6,8 +6,13 @@
 //! the viewer offline and dependency-free — no `pulldown_cmark`, no browser
 //! hand-off, no network.
 
+use crate::app::PerfApp;
 use crate::theme::Theme;
-use egui::{RichText, ScrollArea};
+use egui::{Align, Layout, Margin, RichText, ScrollArea, Vec2};
+
+const WINDOW_WIDTH: f32 = 600.0;
+const BODY_PADDING_X: i8 = 18;
+const BODY_PADDING_Y: i8 = 16;
 
 /// The file contents, frozen at compile time. The path is relative to this
 /// source file: `dashboard/src/ui/changelog_modal.rs` → repo root.
@@ -211,39 +216,201 @@ fn next_char_end(s: &str, i: usize) -> usize {
         .unwrap_or(s.len())
 }
 
-/// Render the changelog modal when `*open` is `true`. Closing via the window
-/// ✕ flips `open` back to `false` automatically.
-pub fn changelog_modal(ctx: &egui::Context, theme: &Theme, open: &mut bool) {
-    if !*open {
+/// Map a Keep a Changelog subsection heading to the title the user sees.
+///
+/// Keep a Changelog's words (`Added`, `Changed`, …) are replaced with the
+/// plainer terms shared by every app in the portfolio's update notes; anything
+/// else is shown as written. Used by both the changelog viewer and the update
+/// modal so the two read the same.
+pub fn subsection_title(name: &str) -> &str {
+    let trimmed = name.trim();
+    if trimmed.eq_ignore_ascii_case("added") {
+        "New"
+    } else if trimmed.eq_ignore_ascii_case("changed") {
+        "Improved"
+    } else if trimmed.eq_ignore_ascii_case("fixed") {
+        "Fixed"
+    } else if trimmed.eq_ignore_ascii_case("removed") {
+        "Removed"
+    } else if trimmed.eq_ignore_ascii_case("deprecated") {
+        "Deprecated"
+    } else if trimmed.eq_ignore_ascii_case("security") {
+        "Security"
+    } else {
+        name
+    }
+}
+
+/// Turn a GitHub release body into the nodes the update modal paints.
+///
+/// When the body carries a `## What's new` section (matched
+/// case-insensitively with surrounding whitespace ignored), only the lines
+/// between it and the next `## ` heading are used; otherwise the whole body is
+/// parsed. The scanner is the same one the changelog viewer uses, so wrapped
+/// bullets fold and inline spans survive.
+pub fn release_notes_nodes(body: &str) -> Vec<ChangelogNode> {
+    let lines: Vec<&str> = body.lines().collect();
+    let Some(start) = lines
+        .iter()
+        .position(|line| line.trim().eq_ignore_ascii_case("## What's new"))
+    else {
+        return parse_changelog(body);
+    };
+    let after = start + 1;
+    let end = lines[after..]
+        .iter()
+        .position(|line| line.trim_start().starts_with("## "))
+        .map(|offset| after + offset)
+        .unwrap_or(lines.len());
+    parse_changelog(&lines[after..end].join("\n"))
+}
+
+/// The nodes of one version's section of a Keep a Changelog document — the
+/// content under its `## [X.Y.Z] — date` heading, up to the next `## `
+/// heading, without the heading itself. `None` when the version is absent;
+/// `## [Unreleased]` never matches.
+pub fn version_section(md: &str, version: &str) -> Option<Vec<ChangelogNode>> {
+    let mut body = String::new();
+    let mut inside = false;
+    for line in md.lines() {
+        if let Some(rest) = line.strip_prefix("## [") {
+            if let Some(end) = rest.find(']') {
+                if inside {
+                    break;
+                }
+                let tag = &rest[..end];
+                if tag.eq_ignore_ascii_case(version) && !tag.eq_ignore_ascii_case("unreleased") {
+                    inside = true;
+                    continue;
+                }
+            }
+        }
+        if inside {
+            body.push_str(line);
+            body.push('\n');
+        }
+    }
+    inside.then(|| parse_changelog(&body))
+}
+
+/// Paint a section title: the accent-coloured, letter-spaced label shared by
+/// the changelog viewer and the update modal.
+pub fn subsection_label(ui: &mut egui::Ui, theme: &Theme, name: &str) {
+    ui.label(
+        RichText::new(subsection_title(name).to_uppercase())
+            .family(theme.font_data.egui())
+            .size(10.0)
+            .color(theme.accent),
+    );
+}
+
+/// A clickable, accent-coloured underlined text link. Returns `true` on click.
+/// The changelog viewer's "Show all versions" and the update modal's GitHub
+/// link share this look.
+pub fn link_label(ui: &mut egui::Ui, theme: &Theme, text: &str) -> bool {
+    let response = ui.add(
+        egui::Label::new(
+            RichText::new(text)
+                .family(theme.font_data.egui())
+                .size(11.0)
+                .color(theme.accent)
+                .underline(),
+        )
+        .sense(egui::Sense::click()),
+    );
+    if response.hovered() {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+    }
+    response.clicked()
+}
+
+/// Render the changelog viewer when `app.show_changelog` is `true`. The title
+/// bar's close button flips it back to `false`.
+///
+/// Normally the whole embedded changelog is shown. When
+/// `app.changelog_version` is set — the first launch after an update — the
+/// viewer opens on that version's section under a "PerfWindow was updated to
+/// X.Y.Z" title, with a "Show all versions" link that reveals the full log.
+pub fn changelog_modal(ctx: &egui::Context, app: &mut PerfApp) {
+    if !app.show_changelog {
         return;
     }
+    let theme = app.theme.clone();
+    let updated_to = app.changelog_version.clone();
+    let mut show_all = app.changelog_show_all;
 
     // The embedded changelog never changes within a process lifetime, so it
     // is parsed exactly once — not on every frame the modal stays open.
     static NODES: std::sync::OnceLock<Vec<ChangelogNode>> = std::sync::OnceLock::new();
-    let nodes = NODES.get_or_init(|| parse_changelog(CHANGELOG_TEXT));
+    let full_nodes = NODES.get_or_init(|| parse_changelog(CHANGELOG_TEXT));
 
-    egui::Window::new("Changelog")
+    // The post-update view always shows the running version's section.
+    static UPDATED: std::sync::OnceLock<Vec<ChangelogNode>> = std::sync::OnceLock::new();
+    let updated_nodes = updated_to.as_ref().map(|_| {
+        UPDATED.get_or_init(|| {
+            version_section(CHANGELOG_TEXT, env!("CARGO_PKG_VERSION")).unwrap_or_default()
+        })
+    });
+
+    let updated_view = updated_to.is_some() && !show_all;
+    let mut close = false;
+
+    egui::Window::new("changelog")
+        .title_bar(false)
         .collapsible(false)
         .resizable(false)
+        .fixed_size(Vec2::new(WINDOW_WIDTH, f32::INFINITY))
         .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
-        .open(open)
+        .frame(crate::ui::modal::frame(&theme))
         .show(ctx, |ui| {
-            ui.set_min_width(560.0);
-            ui.set_max_width(640.0);
+            ui.set_width(WINDOW_WIDTH);
+            let label = if updated_view {
+                "WHAT'S NEW"
+            } else {
+                "CHANGELOG"
+            };
+            if crate::ui::modal::title_bar(ui, &theme, label).clicked() {
+                close = true;
+            }
+
             let viewport_h = ctx
                 .input(|i| i.viewport().inner_rect.map(|r| r.height()))
                 .unwrap_or(720.0);
             let max_h = (viewport_h - 120.0).max(200.0);
-            ScrollArea::vertical()
-                .max_height(max_h)
-                .auto_shrink([false, true])
+            let nodes: &[ChangelogNode] = match (&updated_to, show_all) {
+                (Some(_), false) => updated_nodes.map(Vec::as_slice).unwrap_or(full_nodes),
+                _ => full_nodes,
+            };
+            egui::Frame::NONE
+                .inner_margin(Margin::symmetric(BODY_PADDING_X, BODY_PADDING_Y))
                 .show(ui, |ui| {
-                    for node in nodes {
-                        render_node(ui, theme, node);
+                    if let (Some(version), true) = (&updated_to, updated_view) {
+                        ui.label(
+                            RichText::new(format!("PerfWindow was updated to {version}."))
+                                .family(theme.font_data.egui())
+                                .size(12.0)
+                                .color(theme.ink),
+                        );
+                        ui.add_space(6.0);
+                    }
+                    ScrollArea::vertical()
+                        .max_height(max_h)
+                        .auto_shrink([false, true])
+                        .show(ui, |ui| {
+                            for node in nodes {
+                                render_node(ui, &theme, node);
+                            }
+                        });
+                    if updated_view {
+                        ui.add_space(10.0);
+                        if link_label(ui, &theme, "Show all versions") {
+                            show_all = true;
+                        }
                     }
                 });
         });
+    app.show_changelog = !close;
+    app.changelog_show_all = show_all;
 }
 
 fn render_node(ui: &mut egui::Ui, theme: &Theme, node: &ChangelogNode) {
@@ -270,32 +437,43 @@ fn render_node(ui: &mut egui::Ui, theme: &Theme, node: &ChangelogNode) {
         }
         ChangelogNode::Subsection(name) => {
             ui.add_space(4.0);
-            ui.label(
-                RichText::new(name.to_uppercase())
-                    .family(theme.font_data.egui())
-                    .size(10.0)
-                    .color(theme.accent),
-            );
+            subsection_label(ui, theme, name);
         }
-        ChangelogNode::Bullet(spans) => render_bullet(ui, theme, spans),
+        ChangelogNode::Bullet(spans) => bullet_row(ui, theme, spans),
     }
 }
 
 /// Paint a single bullet — a centred dot plus one egui widget per inline
-/// span. Uses `horizontal_wrapped` so long lines fold inside the modal's
-/// fixed-width column.
-fn render_bullet(ui: &mut egui::Ui, theme: &Theme, spans: &[InlineSpan]) {
-    ui.horizontal_wrapped(|ui| {
+/// span. The dot sits in a fixed-width marker column and the spans wrap in
+/// the remaining width, so continuation lines hang under the text instead of
+/// under the dot.
+pub fn bullet_row(ui: &mut egui::Ui, theme: &Theme, spans: &[InlineSpan]) {
+    const MARKER_W: f32 = 12.0;
+    let text_w = (ui.available_width() - MARKER_W).max(1.0);
+    ui.horizontal_top(|ui| {
         ui.spacing_mut().item_spacing.x = 0.0;
-        ui.label(
-            RichText::new("\u{00b7}  ")
-                .family(theme.font_data.egui())
-                .size(11.0)
-                .color(theme.dim),
+        ui.allocate_ui_with_layout(
+            Vec2::new(MARKER_W, 0.0),
+            Layout::top_down(Align::Min),
+            |ui| {
+                ui.set_width(MARKER_W);
+                ui.label(
+                    RichText::new("\u{00b7}")
+                        .family(theme.font_data.egui())
+                        .size(11.0)
+                        .color(theme.dim),
+                );
+            },
         );
-        for span in spans {
-            render_span(ui, theme, span);
-        }
+        ui.allocate_ui_with_layout(Vec2::new(text_w, 0.0), Layout::top_down(Align::Min), |ui| {
+            ui.set_max_width(text_w);
+            ui.horizontal_wrapped(|ui| {
+                ui.spacing_mut().item_spacing.x = 0.0;
+                for span in spans {
+                    render_span(ui, theme, span);
+                }
+            });
+        });
     });
 }
 
@@ -498,5 +676,119 @@ mod tests {
                 .any(|n| matches!(n, ChangelogNode::VersionHeader { tag, .. } if tag == "0.1.0")),
             "expected v0.1.0 header in the embedded changelog"
         );
+    }
+
+    /// The verbatim body of the 0.11.1 GitHub release.
+    const CURRENT_RELEASE_BODY: &str = "\
+### Changed
+
+- Nothing in the app. 0.11.1 is the first release that 0.11.0's update check
+  can find, so updating to it shows that the updater works end to end.
+";
+
+    #[test]
+    fn keep_a_changelog_words_map_to_plain_titles() {
+        assert_eq!(subsection_title("Added"), "New");
+        assert_eq!(subsection_title("Changed"), "Improved");
+        assert_eq!(subsection_title("Fixed"), "Fixed");
+        assert_eq!(subsection_title("Removed"), "Removed");
+        assert_eq!(subsection_title("Deprecated"), "Deprecated");
+        assert_eq!(subsection_title("Security"), "Security");
+        assert_eq!(subsection_title("Highlights"), "Highlights");
+    }
+
+    #[test]
+    fn the_current_release_body_is_one_improved_section_with_one_bullet() {
+        let nodes = release_notes_nodes(CURRENT_RELEASE_BODY);
+        let sections: Vec<&str> = nodes
+            .iter()
+            .filter_map(|n| match n {
+                ChangelogNode::Subsection(name) => Some(subsection_title(name)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(sections, vec!["Improved"]);
+        let bullets: Vec<&ChangelogNode> = nodes
+            .iter()
+            .filter(|n| matches!(n, ChangelogNode::Bullet(_)))
+            .collect();
+        assert_eq!(bullets.len(), 1);
+        let text = bullet_plain_text(bullets[0]);
+        assert!(text.contains("works end to end"));
+    }
+
+    #[test]
+    fn a_whats_new_section_selects_only_its_lines() {
+        let body = "\
+Intro paragraph nobody should see.
+
+## What's new
+
+### Added
+- Only this bullet.
+
+## Something else
+
+- Not this bullet.
+";
+        let nodes = release_notes_nodes(body);
+        assert_eq!(
+            nodes
+                .iter()
+                .filter(|n| matches!(n, ChangelogNode::Bullet(_)))
+                .count(),
+            1
+        );
+        let text = bullet_plain_text(
+            nodes
+                .iter()
+                .find(|n| matches!(n, ChangelogNode::Bullet(_)))
+                .unwrap(),
+        );
+        assert!(text.contains("Only this bullet"));
+    }
+
+    #[test]
+    fn a_wrapped_bullet_stays_one_item() {
+        let nodes = release_notes_nodes(CURRENT_RELEASE_BODY);
+        let bullets: Vec<&ChangelogNode> = nodes
+            .iter()
+            .filter(|n| matches!(n, ChangelogNode::Bullet(_)))
+            .collect();
+        assert_eq!(
+            bullets.len(),
+            1,
+            "the folded continuation is not its own item"
+        );
+        assert!(bullet_plain_text(bullets[0]).contains("can find"));
+    }
+
+    #[test]
+    fn crlf_bodies_parse_the_same_as_lf() {
+        let lf = release_notes_nodes(CURRENT_RELEASE_BODY);
+        let crlf = release_notes_nodes(&CURRENT_RELEASE_BODY.replace('\n', "\r\n"));
+        assert_eq!(lf, crlf);
+    }
+
+    #[test]
+    fn version_section_finds_the_release_and_stops_at_the_next_one() {
+        let nodes = version_section(CHANGELOG_TEXT, "0.11.1").expect("0.11.1 is embedded");
+        let text: String = nodes
+            .iter()
+            .filter(|n| matches!(n, ChangelogNode::Bullet(_)))
+            .map(bullet_plain_text)
+            .collect();
+        assert!(text.contains("updater works end to end"));
+        assert!(
+            !text.contains("Terms of use"),
+            "the 0.11.0 section must not leak into the 0.11.1 section"
+        );
+    }
+
+    #[test]
+    fn version_section_returns_none_for_unknown_and_unreleased() {
+        assert!(version_section(CHANGELOG_TEXT, "9.9.9").is_none());
+        assert!(version_section(CHANGELOG_TEXT, "Unreleased").is_none());
+        assert!(version_section(CHANGELOG_TEXT, "unreleased").is_none());
     }
 }

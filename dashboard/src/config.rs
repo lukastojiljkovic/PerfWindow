@@ -62,6 +62,11 @@ pub struct Config {
     pub cpu_heat_map: bool,
     #[serde(default = "default_always_on_top")]
     pub always_on_top: bool,
+    /// The version that ran last, written at every startup. `None` only until
+    /// the first launch of a build that knows this field; it drives the
+    /// first-launch-after-an-update changelog.
+    #[serde(default)]
+    pub last_run_version: Option<String>,
     /// Mini mode: a thin strip docked to the top of a monitor instead of the
     /// full window. Persisted so a relaunch comes back in the same mode.
     #[serde(default = "default_mini_strip")]
@@ -69,11 +74,7 @@ pub struct Config {
     /// Device name (`\\.\DISPLAYn`) of the monitor the strip is docked to.
     /// `None` (and a name whose monitor no longer exists) means "the monitor
     /// the window is on".
-    ///
-    /// `skip_serializing_if` is not optional here: the TOML serializer rejects
-    /// `None` outright, and one rejected field would turn the whole write into
-    /// an empty file that silently resets every setting on the next launch.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub mini_strip_monitor: Option<String>,
     /// Which readings the strip shows. Last field on purpose: it serializes as
     /// a `[mini_strip_values]` table, and TOML requires tables after plain
@@ -146,6 +147,7 @@ impl Default for Config {
             check_updates_on_startup: true,
             cpu_heat_map: false,
             always_on_top: false,
+            last_run_version: None,
             mini_strip: false,
             mini_strip_monitor: None,
             mini_strip_values: MiniStripValues::default(),
@@ -216,6 +218,7 @@ mod tests {
             check_updates_on_startup: true,
             cpu_heat_map: false,
             always_on_top: false,
+            last_run_version: None,
             mini_strip: true,
             mini_strip_monitor: Some(r"\\.\DISPLAY2".to_string()),
             mini_strip_values: MiniStripValues {
@@ -357,12 +360,27 @@ battery = true
 
     #[test]
     fn serializing_without_a_strip_monitor_writes_a_non_empty_file() {
-        // The `Option` field must be skipped, not written as an empty value:
-        // a TOML write that fails halfway would leave the config unreadable.
+        // A `None` monitor is left out of the file, not written as an empty value.
         let text = Config::default().to_toml_string();
-        assert!(!text.is_empty(), "a skipped None must not fail the write");
+        assert!(!text.is_empty());
         assert!(!text.contains("mini_strip_monitor"));
         assert_eq!(Config::from_toml_str(&text), Config::default());
+    }
+
+    #[test]
+    fn last_run_version_defaults_to_none_when_missing() {
+        let parsed = Config::from_toml_str("");
+        assert!(parsed.last_run_version.is_none());
+    }
+
+    #[test]
+    fn last_run_version_round_trips() {
+        let c = Config {
+            last_run_version: Some("0.11.1".to_string()),
+            ..Config::default()
+        };
+        let parsed = Config::from_toml_str(&c.to_toml_string());
+        assert_eq!(parsed.last_run_version.as_deref(), Some("0.11.1"));
     }
 
     #[test]

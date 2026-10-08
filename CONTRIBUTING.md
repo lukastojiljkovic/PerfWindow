@@ -101,8 +101,11 @@ The .NET tests are under `sensord/tests/`.
 - **A test for new behavior.** A suite that stays green while the feature is
   broken reads as coverage without being it.
 - **A line in [CHANGELOG.md](CHANGELOG.md)** under *Unreleased* for anything
-  users notice. The changelog is embedded in the dashboard and opened by the
-  version number in the footer.
+  users notice. The changelog is embedded in the dashboard, opened by the
+  version number in the footer, and becomes the release notes the update window
+  shows, so write each line as a user would describe the change, not as the
+  code does: "The dashboard fits the window without scrolling", not "Removed
+  the ScrollArea".
 - **No invented numbers.** The README and the website claim only what the code
   does.
 

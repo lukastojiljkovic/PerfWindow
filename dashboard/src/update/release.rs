@@ -11,6 +11,11 @@ pub struct Release {
     pub body: String,
     pub html_url: String,
     pub assets: Vec<Asset>,
+    /// RFC 3339 publish timestamp from the API. Releases that predate the
+    /// update modal's "Released on" line have no value (the field is absent
+    /// from the JSON), so it defaults to `None`.
+    #[serde(default)]
+    pub published_at: Option<String>,
 }
 
 /// One published asset on a release. Only the installer is consumed by the
@@ -70,6 +75,43 @@ pub fn parse_sidecar(body: &str) -> Option<String> {
 /// Parse the JSON body of `GET /repos/{owner}/{repo}/releases/latest`.
 pub fn parse_release(json: &str) -> Result<Release, serde_json::Error> {
     serde_json::from_str(json)
+}
+
+/// Month names for [`format_published_date`], indexed by `month - 1`.
+const MONTH_NAMES: [&str; 12] = [
+    "January",
+    "February",
+    "March",
+    "April",
+    "May",
+    "June",
+    "July",
+    "August",
+    "September",
+    "October",
+    "November",
+    "December",
+];
+
+/// Render a release's RFC 3339 `YYYY-MM-DDTHH:MM:SSZ` timestamp as the
+/// user-facing date `d MMMM yyyy` (`"8 October 2026"`). The time-of-day and
+/// timezone are ignored — the UTC calendar date is shown — and `None` is
+/// returned when the string is not a recognisable timestamp, so a malformed
+/// field simply omits the line.
+pub fn format_published_date(rfc3339: &str) -> Option<String> {
+    let date = rfc3339.get(..10)?;
+    let mut parts = date.split('-');
+    let year: i32 = parts.next()?.parse().ok()?;
+    let month: usize = parts.next()?.parse().ok()?;
+    let day: u32 = parts.next()?.parse().ok()?;
+    if parts.next().is_some() {
+        return None;
+    }
+    let name = MONTH_NAMES.get(month.checked_sub(1)?)?;
+    if !(1..=31).contains(&day) {
+        return None;
+    }
+    Some(format!("{day} {name} {year}"))
 }
 
 #[cfg(test)]
@@ -132,6 +174,51 @@ mod tests {
             "completely_new_field": "ignored"
         }"#;
         assert!(parse_release(extra).is_ok());
+    }
+
+    #[test]
+    fn a_release_without_a_publish_date_has_none() {
+        let r = parse_release(VALID).expect("parses");
+        assert!(r.published_at.is_none());
+    }
+
+    #[test]
+    fn a_publish_date_is_carried_through() {
+        let json = r#"{
+            "tag_name": "v0.2.0",
+            "name": "x",
+            "body": "",
+            "html_url": "https://example.com",
+            "assets": [],
+            "published_at": "2026-10-08T09:30:00Z"
+        }"#;
+        let r = parse_release(json).expect("parses");
+        assert_eq!(r.published_at.as_deref(), Some("2026-10-08T09:30:00Z"));
+    }
+
+    #[test]
+    fn rfc3339_dates_render_as_spelled_out_dates() {
+        assert_eq!(
+            format_published_date("2026-10-08T09:30:00Z").as_deref(),
+            Some("8 October 2026")
+        );
+        assert_eq!(
+            format_published_date("2026-01-31T00:00:00Z").as_deref(),
+            Some("31 January 2026")
+        );
+        assert_eq!(
+            format_published_date("2026-12-25T12:00:00Z").as_deref(),
+            Some("25 December 2026")
+        );
+    }
+
+    #[test]
+    fn malformed_publish_dates_render_as_none() {
+        assert!(format_published_date("").is_none());
+        assert!(format_published_date("not a date").is_none());
+        assert!(format_published_date("2026-13-08T00:00:00Z").is_none());
+        assert!(format_published_date("2026-10-00T00:00:00Z").is_none());
+        assert!(format_published_date("2026-10-32T00:00:00Z").is_none());
     }
 
     #[test]

@@ -28,9 +28,6 @@ const CHROME_RESERVE: f32 = 90.0;
 /// Floor for the body's `ScrollArea` max height. Below this the modal becomes
 /// useless even with scroll — pick something that still shows one section.
 const MIN_BODY_HEIGHT: f32 = 180.0;
-/// Title-bar strip padding.
-const TB_PADDING_X: i8 = 15;
-const TB_PADDING_Y: i8 = 12;
 /// Footer strip padding.
 const FOOT_PADDING_X: i8 = 15;
 const FOOT_PADDING_Y: i8 = 10;
@@ -176,15 +173,7 @@ pub fn settings_modal(ctx: &egui::Context, app: &mut PerfApp) {
     // The window's `Frame` carries the theme background, a 1 px border and a
     // soft drop shadow. No inner margin: the title bar, body and footer each
     // set their own padding.
-    let frame = egui::Frame::NONE
-        .fill(theme.bg)
-        .stroke(Stroke::new(1.0_f32, theme.border))
-        .shadow(egui::epaint::Shadow {
-            offset: [0, 18],
-            blur: 48,
-            spread: 0,
-            color: Color32::from_black_alpha(140),
-        });
+    let frame = crate::ui::modal::frame(&theme);
 
     // Collected inside the closure, applied once afterwards to keep `app`'s
     // borrow single. `close` is set by the `✕` button.
@@ -205,7 +194,7 @@ pub fn settings_modal(ctx: &egui::Context, app: &mut PerfApp) {
             // than requested; pin the width so every strip spans the full 600.
             ui.set_width(WINDOW_WIDTH);
 
-            if title_bar(ui, &theme).clicked() {
+            if crate::ui::modal::title_bar(ui, &theme, "\u{2699} SETTINGS").clicked() {
                 close = true;
             }
 
@@ -280,76 +269,6 @@ pub fn settings_modal(ctx: &egui::Context, app: &mut PerfApp) {
     }
 }
 
-/// Draw the modal title bar: a `chrome` strip with the `⚙ SETTINGS` wordmark on
-/// the left and a bordered `✕` close button on the right, closed by a 1 px
-/// `border` bottom rule. Returns the close button's click response.
-fn title_bar(ui: &mut egui::Ui, theme: &Theme) -> Response {
-    let inner = egui::Frame::NONE
-        .fill(theme.chrome)
-        .inner_margin(Margin::symmetric(TB_PADDING_X, TB_PADDING_Y))
-        .show(ui, |ui| {
-            ui.horizontal(|ui| {
-                ui.label(
-                    egui::RichText::new(letter_spaced("\u{2699} SETTINGS"))
-                        .family(theme.font_display.egui())
-                        .size(13.0)
-                        .color(theme.accent),
-                );
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    close_button(ui, theme)
-                })
-                .inner
-            })
-            .inner
-        });
-
-    // 1 px `border` rule along the strip's bottom edge.
-    let rect = inner.response.rect;
-    ui.painter().add(egui::Shape::line_segment(
-        [rect.left_bottom(), rect.right_bottom()],
-        Stroke::new(1.0_f32, theme.border),
-    ));
-    inner.inner
-}
-
-/// Draw the `✕` close button: a `dim` glyph inside a 1 px `border` box that
-/// fills `accent` on hover. Returns its click-sensing response.
-fn close_button(ui: &mut egui::Ui, theme: &Theme) -> Response {
-    let font = FontId::new(12.0, theme.font_data.egui());
-    let pad = Vec2::new(9.0, 4.0);
-    // Laid out with `PLACEHOLDER` so the hover-dependent `text_color` below
-    // tints the glyph via `painter.galley`'s fallback colour.
-    let galley = ui
-        .painter()
-        .layout_no_wrap("\u{2715}".to_owned(), font, Color32::PLACEHOLDER);
-    let size = galley.size() + pad * 2.0;
-    let (rect, response) = ui.allocate_exact_size(size, Sense::click());
-
-    if ui.is_rect_visible(rect) {
-        let painter = ui.painter_at(rect);
-        let hovered = response.hovered();
-        let (fill, stroke_color, text_color) = if hovered {
-            (theme.accent, theme.accent, theme.bg)
-        } else {
-            (Color32::TRANSPARENT, theme.border, theme.dim)
-        };
-        if fill != Color32::TRANSPARENT {
-            painter.rect_filled(rect, 0.0, fill);
-        }
-        painter.rect_stroke(
-            rect,
-            0.0,
-            Stroke::new(1.0_f32, stroke_color),
-            StrokeKind::Inside,
-        );
-        painter.galley(rect.min + pad, galley, text_color);
-    }
-    if response.hovered() {
-        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
-    }
-    response
-}
-
 /// Draw a section header: a letter-spaced, ~10 px `accent` label in the display
 /// font.
 fn section_label(ui: &mut egui::Ui, theme: &Theme, text: &str) {
@@ -403,7 +322,9 @@ fn theme_grid(ui: &mut egui::Ui, theme: &Theme, selected: ThemeId, change: &mut 
     ui.vertical(|ui| {
         ui.spacing_mut().item_spacing.y = THEME_CARD_GAP;
         for row in THEME_CARDS.chunks(COLS) {
-            ui.horizontal(|ui| {
+            // Top-aligned: `horizontal` centres each card on the row's height
+            // so far, which stepped every card lower than the one before it.
+            ui.horizontal_top(|ui| {
                 ui.spacing_mut().item_spacing.x = THEME_CARD_GAP;
                 for &(id, tag) in row {
                     ui.allocate_ui_with_layout(
@@ -764,17 +685,12 @@ fn segmented(ui: &mut egui::Ui, theme: &Theme, segments: &[(&str, bool)]) -> Opt
 /// Draw the modal footer: a `chrome` strip with the version / licence credit,
 /// opened by a 1 px `border` top rule.
 fn footer(ui: &mut egui::Ui, theme: &Theme) {
-    egui::Frame::NONE
+    let inner = egui::Frame::NONE
         .fill(theme.chrome)
         .inner_margin(Margin::symmetric(FOOT_PADDING_X, FOOT_PADDING_Y))
         .show(ui, |ui| {
-            // The 1 px top rule — drawn explicitly because the strip is filled
-            // and the body above carries no bottom border of its own.
-            let rect = ui.max_rect();
-            ui.painter().add(egui::Shape::line_segment(
-                [rect.left_top(), rect.right_top()],
-                Stroke::new(1.0_f32, theme.border),
-            ));
+            // Fill the modal's full width, not just the label's.
+            ui.set_width(ui.available_width());
             ui.label(
                 egui::RichText::new(format!(
                     "PerfWindow v{} \u{00b7} MIT license \u{00b7} sensors: \
@@ -786,6 +702,14 @@ fn footer(ui: &mut egui::Ui, theme: &Theme) {
                 .color(theme.dim),
             );
         });
+
+    // The 1 px top rule on the strip's outer edge — drawn explicitly because
+    // the strip is filled and the body above carries no bottom border.
+    let rect = inner.response.rect;
+    ui.painter().add(egui::Shape::line_segment(
+        [rect.left_top(), rect.right_top()],
+        Stroke::new(1.0_f32, theme.border),
+    ));
 }
 
 /// The DISPLAY section: window-behaviour toggles. Currently holds only the
