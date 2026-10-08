@@ -16,6 +16,7 @@ pub mod changelog_modal;
 pub mod effects;
 pub mod health_banner;
 pub mod loading_screen;
+pub mod mini_strip;
 pub mod settings;
 pub mod shell;
 pub mod stat_priority;
@@ -150,6 +151,15 @@ fn chip_row(ui: &mut egui::Ui, theme: &Theme, app: &mut PerfApp) {
     if chip(ui, theme, "\u{1F4CC}", app.config.always_on_top).clicked() {
         app.config.always_on_top = !app.config.always_on_top;
         app.config.save();
+    }
+
+    // Mini strip: the whole window collapses into a taskbar-style bar docked
+    // to the top of the monitor. `PerfApp::enter_strip` owns the viewport and
+    // appbar side of the switch, and persists it.
+    let mini = chip(ui, theme, "MINI", false).on_hover_text("Mini strip \u{00b7} Ctrl+M");
+    if mini.clicked() {
+        let ctx = ui.ctx().clone();
+        app.enter_strip(&ctx);
     }
 
     // Fahrenheit / Celsius — the active unit is filled.

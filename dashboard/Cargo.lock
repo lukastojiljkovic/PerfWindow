@@ -2411,6 +2411,7 @@ dependencies = [
  "egui",
  "egui_kittest",
  "perfwindow",
+ "raw-window-handle",
  "ring",
  "semver",
  "serde",

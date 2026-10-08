@@ -16,8 +16,9 @@
 //! deterministic; the parallel form is only marginally faster and not worth
 //! the flakiness when capturing baselines.
 //!
-//! Current suite size: 10 scenarios (5 modal + 5 loading screen) x 6 themes
-//! = 60 PNGs under `tests/snapshots/<theme>/`.
+//! Current suite size: 10 scenarios (5 modal + 5 loading screen) x 6 themes,
+//! plus 2 mini-strip scenarios x 2 themes, = 64 PNGs under
+//! `tests/snapshots/<theme>/`.
 
 use egui_kittest::{Harness, SnapshotResults};
 use perfwindow::app::PerfApp;
@@ -349,4 +350,87 @@ fn loading_sensors_checklist_matches_baseline() {
                 });
         },
     );
+}
+
+// ---- Mini-strip scenarios --------------------------------------------
+
+/// The themes the mini strip is snapshotted in. Two palettes are enough: the
+/// strip is one row of text and two hand-drawn icons, so Slate covers the dark
+/// themes and Light covers the pale one.
+const STRIP_THEMES: &[ThemeId] = &[ThemeId::Slate, ThemeId::Light];
+
+/// A deterministic snapshot carrying every reading the strip can show, so the
+/// `mini_strip_full` baseline exercises the whole row and `mini_strip_narrow`
+/// exercises dropping from the right.
+fn strip_snapshot() -> perfwindow::ipc::Snapshot {
+    perfwindow::ipc::parse_snapshot(
+        r#"{"v":1,"ts":1747645200,
+           "cpu":{"name":"Test CPU","load":23.4,"temp":58.0},
+           "gpu":[{"name":"RTX 4070","kind":"discrete","load":41.2,"temp":62.0,
+                   "vram_used_mb":6246.4,"vram_total_mb":8192.0}],
+           "ram":{"used_mb":14540.8,"total_mb":32768,"load":47.2},
+           "net":{"adapter":"Ethernet","down_bps":1258291.0,"up_bps":122880.0,
+                  "link_bps":1000000000},
+           "battery":{"charge_pct":87.4,"rate_w":-12.0}}"#,
+    )
+    .expect("the strip snapshot parses")
+}
+
+/// Snapshot the strip row alone, at `width` logical px and the strip's own
+/// height, for each theme in [`STRIP_THEMES`]. The strip is rendered through
+/// the same central panel production uses, so the chrome fill and the bottom
+/// rule land exactly where they do on screen.
+fn snapshot_strip(scenario: &str, width: f32) {
+    let mut results = SnapshotResults::new();
+    for &id in STRIP_THEMES {
+        let theme = Theme::for_id(id);
+        let config = Config {
+            theme: id,
+            // Show every reading, battery included, so the scenario covers the
+            // longest possible row.
+            mini_strip_values: perfwindow::config::MiniStripValues {
+                battery: true,
+                ..Default::default()
+            },
+            ..Config::default()
+        };
+        let snapshot = strip_snapshot();
+        snapshot_scenario(
+            &mut results,
+            egui::vec2(width, perfwindow::ui::mini_strip::STRIP_HEIGHT),
+            id,
+            scenario,
+            move |ctx| {
+                #[allow(deprecated)]
+                egui::CentralPanel::default()
+                    .frame(egui::Frame::NONE.fill(theme.chrome))
+                    .show(ctx, |ui| {
+                        let _ = perfwindow::ui::mini_strip::strip_row(
+                            ui,
+                            &theme,
+                            Some(&snapshot),
+                            &config,
+                        );
+                    });
+            },
+        );
+    }
+}
+
+/// Every reading, on a 1920 px monitor: the widest row the strip can draw.
+#[test]
+fn mini_strip_full_matches_baseline() {
+    snapshot_strip("mini_strip_full", 1920.0);
+}
+
+/// The same readings on a narrow monitor, where the row does not fit and the
+/// rightmost readings are dropped.
+///
+/// 900 logical px is what a 1350 px monitor shows at 150 % scaling. The strip's
+/// whole row is only ~950 px wide at the design's 13 px data font, so a
+/// 1280 px strip would still show every reading; 900 is the width that
+/// actually exercises dropping from the right.
+#[test]
+fn mini_strip_narrow_matches_baseline() {
+    snapshot_strip("mini_strip_narrow", 900.0);
 }

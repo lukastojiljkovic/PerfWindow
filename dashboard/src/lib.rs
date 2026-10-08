@@ -4,6 +4,7 @@
 #![allow(dead_code)]
 
 pub mod app;
+pub mod appbar;
 pub mod config;
 pub mod displays;
 pub mod format;

@@ -91,7 +91,7 @@ fn run_app(dev_mode: bool, renderer: eframe::Renderer) -> eframe::Result {
     // so the window starts at the correct Z-level and doesn't briefly flash
     // behind other windows on launch. `PerfApp::new` re-reads the config and
     // is the canonical owner; this peek is purely a cosmetic-startup fix.
-    let initially_on_top = Config::load().always_on_top;
+    let startup = Config::load();
     let mut viewport = egui::ViewportBuilder::default()
         .with_title("PerfWindow")
         // Default size matches the grid's natural footprint so the window
@@ -100,9 +100,15 @@ fn run_app(dev_mode: bool, renderer: eframe::Renderer) -> eframe::Result {
         // sits just below the 4-col breakpoint so the grid can collapse
         // to 3 cols when the user shrinks the window deliberately.
         .with_inner_size([1180.0, 600.0])
-        .with_min_inner_size([720.0, 500.0]);
-    if initially_on_top {
+        .with_min_inner_size(perfwindow::app::MIN_INNER_SIZE);
+    if startup.always_on_top || startup.mini_strip {
         viewport = viewport.with_always_on_top();
+    }
+    if startup.mini_strip {
+        // The first frame docks the strip (and records the rectangle it should
+        // restore on the way back); starting borderless avoids a decorated
+        // flash while that happens.
+        viewport = viewport.with_decorations(false);
     }
     let options = eframe::NativeOptions {
         viewport,
@@ -126,6 +132,12 @@ fn install_panic_log() {
     // that env var set, but a postmortem without a backtrace is useless.
     let default = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
+        // Best effort: hand the mini strip's reserved band back before the
+        // process goes down. Allocation-free, and a `no-op` when the strip was
+        // never docked, because this runs while the process is already in
+        // trouble. A process killed from outside never reaches this hook, and
+        // nothing in-process can cover that case.
+        perfwindow::appbar::emergency_remove();
         write_panic_entry(info);
         default(info);
     }));
@@ -358,6 +370,11 @@ fn install_seh_handler() {
 /// worse).
 unsafe extern "system" fn seh_filter(info: *mut ExceptionPointers) -> LONG {
     use std::io::Write;
+
+    // Same best-effort band release as the panic hook: a native crash never
+    // runs the panic hook, and a registered appbar that is never removed keeps
+    // the monitor's work area shrunk.
+    perfwindow::appbar::emergency_remove();
 
     // `catch_unwind` to make sure a panic inside this handler does not
     // escape the FFI boundary and abort with no log at all.
