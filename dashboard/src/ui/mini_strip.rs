@@ -1,10 +1,11 @@
-//! The mini strip: a one-row, 28 logical px taskbar-style bar.
+//! The mini strip: a one-row, 28 logical px overlay bar.
 //!
 //! [`strip_row`] paints the whole strip — the PerfWindow mark, the configured
-//! readings and the trailing expand/close controls — and reports the control
-//! the user pressed. Everything that can be decided without measuring glyphs
-//! is a pure function ([`items`], [`fit_plan`]) so the readings, their colours
-//! and their fit are unit-tested and snapshotted headlessly.
+//! readings and the trailing opacity slider plus the expand/close controls —
+//! and reports what the user did. Everything that can be decided without
+//! measuring glyphs is a pure function ([`items`], [`fit_plan`]) so the
+//! readings, their colours and their fit are unit-tested and snapshotted
+//! headlessly.
 //!
 //! Readings come from the same [`crate::format`] helpers the cards and the
 //! footer use, and temperature colours come from the dashboard's own warn/hot
@@ -12,8 +13,8 @@
 //! a calm reading stays `ink`.
 //!
 //! The strip never scrolls, wraps or overlaps: a reading that does not fit the
-//! monitor's width is dropped from the right, and the trailing controls are
-//! reserved before the readings are measured.
+//! monitor's width is dropped from the right, and the trailing slider group and
+//! controls are reserved before the readings are measured.
 
 use crate::config::{Config, MiniStripValues};
 use crate::format::{
@@ -27,8 +28,9 @@ use egui::{Color32, FontId, Galley, Margin, Pos2, Rect, Sense, Shape, Stroke, St
 use std::sync::Arc;
 
 /// Height of the strip in logical pixels. Matches
-/// [`crate::appbar::STRIP_HEIGHT_LOGICAL`], which is what the shell reserves.
-pub const STRIP_HEIGHT: f32 = crate::appbar::STRIP_HEIGHT_LOGICAL;
+/// [`crate::strip_window::STRIP_HEIGHT_LOGICAL`], which is what the overlay
+/// window is sized to.
+pub const STRIP_HEIGHT: f32 = crate::strip_window::STRIP_HEIGHT_LOGICAL;
 
 /// `"—"`, the placeholder every reading without data renders as.
 pub const MISSING: &str = "\u{2014}";
@@ -56,6 +58,12 @@ const BUTTON_GAP: f32 = 4.0;
 const CONTROL_GAP: f32 = 6.0;
 /// How far the icon inside a control is inset from the control's edge.
 const ICON_INSET: f32 = 4.5;
+/// Length of the opacity slider's track.
+const OPACITY_TRACK_W: f32 = 56.0;
+/// Height of the opacity slider's track.
+const OPACITY_TRACK_H: f32 = 3.0;
+/// Side of the opacity slider's square knob.
+const OPACITY_KNOB: f32 = 9.0;
 
 /// One reading on the strip: a `dim` label and one or more coloured value
 /// fragments, e.g. `CPU` + `23%` + `54°C`.
@@ -77,10 +85,10 @@ pub struct StripPart {
 pub enum StripAction {
     #[default]
     None,
+    /// The background-opacity setting was changed to this percentage.
+    Opacity(u8),
     /// Back to the full window.
     Expand,
-    /// Back to the full window, with the settings modal open.
-    OpenSettings,
     /// Close PerfWindow entirely.
     Close,
 }
@@ -271,12 +279,18 @@ pub fn fit_plan(
     plan
 }
 
-/// Draw the strip row into `ui` and report the control the user pressed.
+/// Draw the strip row into `ui` and report what the user did.
 ///
 /// Left to right: the PerfWindow mark, the selected readings (each introduced
 /// by a thin `border` rule, label `dim`, values in `ink` or the dashboard's own
-/// warn/hot colours), then the expand and close controls. A double-click
-/// anywhere on the readings expands; a right-click opens the strip's menu.
+/// warn/hot colours), then a compact Background-opacity slider and the expand
+/// and close controls. A double-click anywhere on the readings expands. There
+/// is no right-click menu: the window is only 28 px tall, so a popup would be
+/// clipped to the strip, and the controls already cover expand and close.
+///
+/// The whole strip background is painted here, once, dimmed by the shared
+/// `background_opacity` setting; the mark, the readings, the rules, the slider
+/// and the controls stay solid.
 pub fn strip_row(
     ui: &mut egui::Ui,
     theme: &Theme,
@@ -287,7 +301,7 @@ pub fn strip_row(
     let mut action = StripAction::None;
 
     let frame = egui::Frame::NONE
-        .fill(theme.chrome)
+        .fill(theme.surface(theme.chrome, config.background_opacity))
         .inner_margin(Margin::symmetric(PAD_X as i8, 0));
 
     let inner = frame.show(ui, |ui| {
@@ -295,10 +309,12 @@ pub fn strip_row(
         ui.horizontal_centered(|ui| {
             ui.spacing_mut().item_spacing.x = 0.0;
 
-            // Reserve the trailing controls first: the readings are measured
-            // against the room that is genuinely left for them.
-            let controls_w = BUTTON_W * 2.0 + BUTTON_GAP;
-            let body_w = (ui.available_width() - controls_w - CONTROL_GAP).max(0.0);
+            // Reserve the trailing slider group and controls first: the
+            // readings are measured against the room that is genuinely left
+            // for them, and are the ones dropped once it runs out.
+            let reserve = opacity_reserve(ui, theme);
+            let opacity_w = opacity_group_width(&reserve);
+            let body_w = readings_width(ui.available_width(), opacity_w);
             let (body_rect, body_response) =
                 ui.allocate_exact_size(Vec2::new(body_w, height), Sense::click());
             paint_readings(ui, theme, body_rect, snapshot, config);
@@ -306,20 +322,13 @@ pub fn strip_row(
             if body_response.double_clicked() {
                 action = StripAction::Expand;
             }
-            body_response.context_menu(|ui| {
-                if ui.button("Open PerfWindow").clicked() {
-                    action = StripAction::Expand;
-                    ui.close();
-                }
-                if ui.button("Settings\u{2026}").clicked() {
-                    action = StripAction::OpenSettings;
-                    ui.close();
-                }
-                if ui.button("Close PerfWindow").clicked() {
-                    action = StripAction::Close;
-                    ui.close();
-                }
-            });
+
+            ui.add_space(CONTROL_GAP);
+            if let Some(value) =
+                opacity_group(ui, theme, height, reserve, config.background_opacity)
+            {
+                action = StripAction::Opacity(value);
+            }
 
             ui.add_space(CONTROL_GAP);
             let (expand_rect, expand_response) =
@@ -353,6 +362,134 @@ pub fn strip_row(
     ));
 
     action
+}
+
+/// The `100 %` readout the opacity group's width is measured from. The widest
+/// value reserves the slot, so the strip's layout never shifts as the setting
+/// changes.
+fn opacity_reserve(ui: &egui::Ui, theme: &Theme) -> Arc<Galley> {
+    ui.painter().layout_no_wrap(
+        "100%".to_owned(),
+        FontId::new(FONT_SIZE, theme.font_data.egui()),
+        theme.dim,
+    )
+}
+
+/// The total width the opacity group occupies: its leading `border` rule, the
+/// track with the knob's overhang at either end, and the value slot.
+fn opacity_group_width(reserve: &Galley) -> f32 {
+    SEP_GAP
+        + SEP_WIDTH
+        + SEP_GAP
+        + OPACITY_KNOB / 2.0
+        + OPACITY_TRACK_W
+        + OPACITY_KNOB / 2.0
+        + VALUE_GAP
+        + reserve.size().x
+}
+
+/// The room left for the mark and the readings once the trailing opacity group
+/// and controls are reserved.
+fn readings_width(available: f32, opacity_w: f32) -> f32 {
+    (available - opacity_w - BUTTON_W * 2.0 - BUTTON_GAP - CONTROL_GAP * 2.0).max(0.0)
+}
+
+/// Draw the compact opacity slider and report a new value when the user picked
+/// one. Clicking or dragging anywhere on the track snaps to the nearest 5 %
+/// stop, exactly like Settings; the wheel over the group steps 5 % per notch.
+fn opacity_group(
+    ui: &mut egui::Ui,
+    theme: &Theme,
+    height: f32,
+    reserve: Arc<Galley>,
+    value: u8,
+) -> Option<u8> {
+    let knob_r = OPACITY_KNOB / 2.0;
+    let (rect, response) = ui.allocate_exact_size(
+        Vec2::new(opacity_group_width(&reserve), height),
+        Sense::click_and_drag(),
+    );
+    if !ui.is_rect_visible(rect) {
+        return None;
+    }
+    let painter = ui.painter_at(rect);
+
+    // The group is introduced by the same thin `border` rule the readings use.
+    let rule_x = rect.left() + SEP_GAP;
+    painter.add(Shape::line_segment(
+        [
+            Pos2::new(rule_x, rect.top() + SEP_INSET),
+            Pos2::new(rule_x, rect.bottom() - SEP_INSET),
+        ],
+        Stroke::new(SEP_WIDTH, theme.border),
+    ));
+
+    let content_left = rule_x + SEP_WIDTH + SEP_GAP;
+    let track = Rect::from_min_max(
+        Pos2::new(
+            content_left + knob_r,
+            rect.center().y - OPACITY_TRACK_H / 2.0,
+        ),
+        Pos2::new(
+            content_left + knob_r + OPACITY_TRACK_W,
+            rect.center().y + OPACITY_TRACK_H / 2.0,
+        ),
+    );
+    crate::ui::slider::paint(&painter, theme, track, value, OPACITY_KNOB);
+
+    // The live value, left-aligned in the `100 %` slot reserved above.
+    let value_galley = painter.layout_no_wrap(
+        format!("{value}%"),
+        FontId::new(FONT_SIZE, theme.font_data.egui()),
+        theme.dim,
+    );
+    paint_galley(
+        &painter,
+        &value_galley,
+        track.right() + knob_r + VALUE_GAP,
+        rect.center().y,
+        theme.dim,
+    );
+
+    let dragged = response.dragged_by(egui::PointerButton::Primary);
+    if response.hovered() || dragged {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
+    }
+
+    // Primary button only: a right-click or right-drag on the slider does
+    // nothing.
+    let mut picked = None;
+    if let Some(pos) = response.interact_pointer_pos() {
+        if response.clicked() || dragged {
+            picked = Some(crate::ui::slider::opacity_at(track, pos.x));
+        }
+    }
+    if picked.is_none() && response.hovered() {
+        let notches = wheel_notches(ui);
+        if notches != 0 {
+            picked = Some(crate::ui::slider::stepped(value, notches));
+        }
+    }
+    picked.filter(|&next| next != value)
+}
+
+/// This frame's wheel notches, positive when the user scrolled up: one notch
+/// steps the setting one 5 % stop.
+fn wheel_notches(ui: &egui::Ui) -> i32 {
+    let delta: f32 = ui.input(|i| {
+        i.events
+            .iter()
+            .filter_map(|event| match event {
+                egui::Event::MouseWheel { unit, delta, .. } => Some(match unit {
+                    egui::MouseWheelUnit::Line => delta.y,
+                    egui::MouseWheelUnit::Point => delta.y / 50.0,
+                    egui::MouseWheelUnit::Page => delta.y,
+                }),
+                _ => None,
+            })
+            .sum()
+    });
+    delta.round() as i32
 }
 
 /// Paint the mark and the readings that fit `rect`.
@@ -718,5 +855,48 @@ mod tests {
         // Rule 9..10, text 19..29, right edge 29.
         assert_eq!(fit_plan(&[10.0], 0.0, 9.0, 1.0, 29.0).len(), 1);
         assert_eq!(fit_plan(&[10.0], 0.0, 9.0, 1.0, 28.9).len(), 0);
+    }
+
+    #[test]
+    fn the_opacity_group_is_reserved_before_the_readings_are_measured() {
+        // The group, the two 17 px controls, the 4 px control gap and the two
+        // 6 px control gaps: 200 - 90 - 34 - 4 - 12 = 60 px for the readings.
+        let (available, group) = (200.0, 90.0);
+        assert_eq!(readings_width(available, group), 60.0);
+
+        // After the 40 px mark, neither 30 px reading fits in the reserved
+        // room, and the plan drops both from the right.
+        let widths = [30.0, 30.0];
+        let reserved = fit_plan(
+            &widths,
+            40.0,
+            SEP_GAP,
+            SEP_WIDTH,
+            readings_width(available, group),
+        );
+        assert!(
+            reserved.is_empty(),
+            "the reserved-away room holds no reading"
+        );
+
+        // The same readings fit when the whole row is theirs.
+        let unreserved = fit_plan(&widths, 40.0, SEP_GAP, SEP_WIDTH, available);
+        assert_eq!(unreserved.len(), 2);
+    }
+
+    #[test]
+    fn a_narrow_monitor_keeps_the_group_and_drops_readings() {
+        // A 900 px strip: the group and controls are still reserved, so the
+        // readings that used to fit at 1920 px are the ones that go.
+        let widths = [90.0, 90.0, 80.0, 80.0, 120.0];
+        let group = 120.0;
+        let body = readings_width(900.0, group);
+        let plan = fit_plan(&widths, 180.0, SEP_GAP, SEP_WIDTH, body);
+        assert!(plan.len() < widths.len(), "something must be dropped");
+        assert!(plan.len() >= 2, "the leftmost readings stay");
+        // The mark and every surviving reading sit left of the group.
+        for (_, text_x) in &plan {
+            assert!(*text_x < body);
+        }
     }
 }

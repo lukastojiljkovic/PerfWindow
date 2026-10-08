@@ -36,10 +36,9 @@ windows = { version = "0.62", features = [
     "Win32_Devices_Display",
     "Win32_Foundation",
     "Win32_Graphics_Gdi",
-    # Mini strip: the appbar (`SHAppBarMessage` + `SetWindowSubclass`), the
-    # per-monitor DPI scale and `SetWindowPos`.
+    # Mini strip: the per-monitor DPI scale, the extended style and
+    # `SetWindowPos`.
     "Win32_UI_HiDpi",
-    "Win32_UI_Shell",
     "Win32_UI_WindowsAndMessaging",
 ] }
 # The mini strip needs the window's raw `HWND`, which `eframe::CreationContext`

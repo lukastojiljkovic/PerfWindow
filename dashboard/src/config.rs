@@ -81,13 +81,13 @@ pub struct Config {
     /// first-launch-after-an-update changelog.
     #[serde(default)]
     pub last_run_version: Option<String>,
-    /// Mini mode: a thin strip docked to the top of a monitor instead of the
+    /// Mini mode: a thin topmost bar over the top of a monitor instead of the
     /// full window. Persisted so a relaunch comes back in the same mode.
     #[serde(default = "default_mini_strip")]
     pub mini_strip: bool,
-    /// Device name (`\\.\DISPLAYn`) of the monitor the strip is docked to.
-    /// `None` (and a name whose monitor no longer exists) means "the monitor
-    /// the window is on".
+    /// Device name (`\\.\DISPLAYn`) of the monitor the strip covers. `None`
+    /// (and a name whose monitor no longer exists) means "the monitor the
+    /// window is on".
     #[serde(default)]
     pub mini_strip_monitor: Option<String>,
     /// Which readings the strip shows. Last field on purpose: it serializes as
