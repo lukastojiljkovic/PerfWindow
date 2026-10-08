@@ -70,9 +70,6 @@ const SLIDER_TRACK_H: f32 = 5.0;
 /// Opacity slider knob diameter. The track is inset by half of it at each end
 /// so the knob stays inside the allocated row instead of being clipped.
 const SLIDER_KNOB_D: f32 = 13.0;
-/// Step between the opacity slider's stops. The 30..=100 range comes from
-/// `crate::config::{MIN,MAX}_BACKGROUND_OPACITY`.
-const SLIDER_STEP: u8 = 5;
 
 /// A pending change to `app.config`, queued by a control and applied after the
 /// window closure returns so `app` is not borrowed twice.
@@ -244,7 +241,7 @@ pub fn settings_modal(ctx: &egui::Context, app: &mut PerfApp) {
     // Apply the queued change after the closure: writing `config`, re-applying
     // the theme and persisting to disk all happen exactly once per frame.
     // The mini-strip switch is collected separately because it also drives the
-    // viewport and the appbar.
+    // viewport and the overlay placement.
     let mut strip_toggle: Option<bool> = None;
     if let Some(change) = change {
         let needs_save = !matches!(change, Change::ManualCheck);
@@ -273,8 +270,8 @@ pub fn settings_modal(ctx: &egui::Context, app: &mut PerfApp) {
         }
     }
     // Applying the mode switch after the closure keeps the config write and
-    // the viewport/appbar switch in one place: `enter_strip`/`leave_strip`
-    // own the window's chrome, dock the strip and persist the new mode.
+    // the viewport/overlay switch in one place: `enter_strip`/`leave_strip`
+    // own the window's chrome, place the strip and persist the new mode.
     match strip_toggle {
         Some(true) => app.enter_strip(ctx),
         Some(false) => app.leave_strip(ctx),
@@ -811,9 +808,6 @@ fn display_section(
 /// Only the dashboard's surface fills dim, so the readouts stay legible over
 /// whatever shows through.
 fn opacity_slider(ui: &mut egui::Ui, theme: &Theme, value: u8, change: &mut Option<Change>) {
-    let min = crate::config::MIN_BACKGROUND_OPACITY;
-    let max = crate::config::MAX_BACKGROUND_OPACITY;
-
     ui.vertical(|ui| {
         ui.spacing_mut().item_spacing.y = 6.0;
 
@@ -850,37 +844,9 @@ fn opacity_slider(ui: &mut egui::Ui, theme: &Theme, value: u8, change: &mut Opti
                 rect.center().y + SLIDER_TRACK_H / 2.0,
             ),
         );
-        let frac = (value.clamp(min, max) - min) as f32 / (max - min) as f32;
-        let knob_x = track.left() + track.width() * frac;
-
         if ui.is_rect_visible(rect) {
             let painter = ui.painter_at(rect);
-            painter.rect_filled(track, 0.0, theme.track);
-            if knob_x > track.left() {
-                painter.rect_filled(
-                    Rect::from_min_max(track.min, Pos2::new(knob_x, track.max.y)),
-                    0.0,
-                    theme.accent,
-                );
-            }
-            painter.rect_stroke(
-                track,
-                0.0,
-                Stroke::new(1.0_f32, theme.border),
-                StrokeKind::Inside,
-            );
-
-            let knob = Rect::from_center_size(
-                Pos2::new(knob_x, track.center().y),
-                Vec2::splat(SLIDER_KNOB_D),
-            );
-            painter.rect_filled(knob, 0.0, theme.accent);
-            painter.rect_stroke(
-                knob,
-                0.0,
-                Stroke::new(1.0_f32, theme.border),
-                StrokeKind::Inside,
-            );
+            crate::ui::slider::paint(&painter, theme, track, value, SLIDER_KNOB_D);
         }
         if response.hovered() || response.dragged() {
             ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
@@ -888,10 +854,7 @@ fn opacity_slider(ui: &mut egui::Ui, theme: &Theme, value: u8, change: &mut Opti
 
         if let Some(pos) = response.interact_pointer_pos() {
             if response.clicked() || response.dragged() {
-                let travel = track.width().max(1.0);
-                let frac = ((pos.x - track.left()) / travel).clamp(0.0, 1.0);
-                let stops = (max - min) / SLIDER_STEP;
-                let stepped = min + (frac * stops as f32).round() as u8 * SLIDER_STEP;
+                let stepped = crate::ui::slider::opacity_at(track, pos.x);
                 if stepped != value {
                     *change = Some(Change::Opacity(stepped));
                 }
@@ -951,7 +914,7 @@ fn mini_toggle(ui: &mut egui::Ui, theme: &Theme, on: bool, change: &mut Option<C
             },
         );
         job.append(
-            "  \u{2014} a thin bar docked to the top of the screen \u{00b7} Ctrl+M",
+            "  \u{2014} a thin bar over the top of the screen \u{00b7} Ctrl+M",
             0.0,
             egui::TextFormat {
                 font_id: data_font,

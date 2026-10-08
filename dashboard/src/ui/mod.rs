@@ -28,6 +28,7 @@ pub mod recorder;
 pub mod recorder;
 pub mod settings;
 pub mod shell;
+pub mod slider;
 pub mod stat_priority;
 pub mod tooltips;
 pub mod update_banner;
@@ -159,9 +160,9 @@ fn chip_row(ui: &mut egui::Ui, theme: &Theme, app: &mut PerfApp) {
         app.config.save();
     }
 
-    // Mini strip: the whole window collapses into a taskbar-style bar docked
-    // to the top of the monitor. `PerfApp::enter_strip` owns the viewport and
-    // appbar side of the switch, and persists it.
+    // Mini strip: the whole window collapses into a thin topmost bar over the
+    // top of the monitor. `PerfApp::enter_strip` owns the viewport and the
+    // overlay placement, and persists the switch.
     let mini = chip(ui, theme, "MINI", false).on_hover_text("Mini strip \u{00b7} Ctrl+M");
     if mini.clicked() {
         let ctx = ui.ctx().clone();
