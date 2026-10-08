@@ -297,6 +297,18 @@ impl Theme {
         visuals.widgets.noninteractive.bg_stroke = egui::Stroke::new(1.0_f32, self.border);
         ctx.set_visuals(visuals);
     }
+
+    /// `color` with its alpha scaled to `opacity` percent, premultiplied the
+    /// way `gamma_multiply` does it. This is the one helper the Background
+    /// opacity setting goes through, and it is deliberately only ever handed
+    /// the surface fills — the body, the chrome strips, the card backgrounds
+    /// and the banners. Text, values, graphs, borders and accents keep their
+    /// own palette entries, so nothing that has to be read turns
+    /// translucent. At 100 % the multiplication is the identity, which is why
+    /// every snapshot captured before the setting existed still matches.
+    pub fn surface(&self, color: Color32, opacity: u8) -> Color32 {
+        color.gamma_multiply(opacity as f32 / 100.0)
+    }
 }
 
 #[cfg(test)]
@@ -362,5 +374,28 @@ mod tests {
         ] {
             assert!(Theme::for_id(id).scanline_opacity > 0.0);
         }
+    }
+
+    #[test]
+    fn surface_at_full_opacity_is_the_input_colour() {
+        let theme = Theme::for_id(ThemeId::Slate);
+        for color in [
+            theme.bg,
+            theme.panel,
+            theme.chrome,
+            Color32::from_rgba_unmultiplied(3, 200, 17, 40),
+        ] {
+            assert_eq!(theme.surface(color, 100), color);
+        }
+    }
+
+    #[test]
+    fn surface_premultiplies_the_alpha_and_the_colour_channels() {
+        let theme = Theme::for_id(ThemeId::Slate);
+        let half = theme.surface(theme.panel, 50);
+        assert_eq!(half.a(), 128);
+        assert_eq!(half.r(), (theme.panel.r() as f32 * 0.5 + 0.5) as u8);
+        assert_eq!(half.g(), (theme.panel.g() as f32 * 0.5 + 0.5) as u8);
+        assert_eq!(half.b(), (theme.panel.b() as f32 * 0.5 + 0.5) as u8);
     }
 }

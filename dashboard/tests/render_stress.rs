@@ -126,7 +126,11 @@ fn run_frame(
                 egui::CentralPanel::default()
                     .frame(egui::Frame::NONE.fill(theme.bg))
                     .show_inside(ui, |ui| {
-                        perfwindow::ui::effects::paint_grid(ui, &theme);
+                        perfwindow::ui::effects::paint_grid(
+                            ui,
+                            &theme,
+                            app.config.background_opacity,
+                        );
                         egui::ScrollArea::vertical()
                             .auto_shrink([false, true])
                             .show(ui, |ui| perfwindow::ui::card_grid(ui, app));
@@ -135,7 +139,7 @@ fn run_frame(
         perfwindow::ui::settings::settings_modal(ctx, app);
         perfwindow::ui::update_modal::update_modal(ctx, app);
         perfwindow::ui::changelog_modal::changelog_modal(ctx, app);
-        perfwindow::ui::effects::paint_effects(ctx, &theme);
+        perfwindow::ui::effects::paint_effects(ctx, &theme, app.config.background_opacity);
     });
 
     let output = FrameOutput {

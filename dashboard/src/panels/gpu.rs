@@ -20,9 +20,11 @@ use crate::widgets::{temp_color, TempKind};
 /// the integrated case so the card never carries a wall of em-dashes;
 /// discrete GPUs always render the headline rows (TEMP/CLOCK/POWER) even
 /// when momentarily absent so the layout stays stable across snapshots.
+#[allow(clippy::too_many_arguments)]
 pub fn gpu_panel(
     ui: &mut egui::Ui,
     theme: &Theme,
+    opacity: u8,
     gpu: &GpuInfo,
     history: Option<&GpuHistory>,
     unit: TempUnit,
@@ -32,7 +34,7 @@ pub fn gpu_panel(
     let integrated = gpu.kind == "integrated";
     let title = if integrated { "iGPU" } else { "GPU" };
 
-    card(ui, theme, title, min_h, |ui| {
+    card(ui, theme, title, opacity, min_h, |ui| {
         panel_title(ui, theme, title, Some(&gpu.name));
 
         // Load donut on the left, priority-ranked stat rows on the right.

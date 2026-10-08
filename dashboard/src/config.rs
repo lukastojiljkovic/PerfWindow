@@ -49,6 +49,14 @@ impl RefreshRate {
     }
 }
 
+/// Lowest Background opacity the setting offers, as a percentage. The window
+/// stops being legible much below this over a busy desktop, so the settings
+/// slider and the load path both clamp to it.
+pub const MIN_BACKGROUND_OPACITY: u8 = 30;
+/// Highest Background opacity, as a percentage: fully opaque, the pre-setting
+/// look every existing snapshot baseline was captured with.
+pub const MAX_BACKGROUND_OPACITY: u8 = 100;
+
 /// Persisted user settings. This is the only state PerfWindow writes to disk.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Config {
@@ -62,6 +70,12 @@ pub struct Config {
     pub cpu_heat_map: bool,
     #[serde(default = "default_always_on_top")]
     pub always_on_top: bool,
+    /// Percentage alpha for the window's surface fills: the body behind the
+    /// grid, the title bar / footer chrome, the card backgrounds and the
+    /// update / health banners. Text, values, graphs, borders and accents
+    /// never use it, so they stay fully opaque at any value.
+    #[serde(default = "default_background_opacity")]
+    pub background_opacity: u8,
     /// The version that ran last, written at every startup. `None` only until
     /// the first launch of a build that knows this field; it drives the
     /// first-launch-after-an-update changelog.
@@ -137,6 +151,10 @@ impl Default for MiniStripValues {
     }
 }
 
+fn default_background_opacity() -> u8 {
+    MAX_BACKGROUND_OPACITY
+}
+
 impl Default for Config {
     fn default() -> Self {
         Self {
@@ -147,6 +165,7 @@ impl Default for Config {
             check_updates_on_startup: true,
             cpu_heat_map: false,
             always_on_top: false,
+            background_opacity: MAX_BACKGROUND_OPACITY,
             last_run_version: None,
             mini_strip: false,
             mini_strip_monitor: None,
@@ -195,8 +214,16 @@ impl Config {
         }
     }
 
+    /// Parse a config file, clamping `background_opacity` into the range the
+    /// settings slider offers. A hand-edited or older file outside that range
+    /// must never reach the renderer, where it would either paint an unreadable
+    /// window or a translucent-looking one at 100.
     pub fn from_toml_str(s: &str) -> Self {
-        toml::from_str(s).unwrap_or_default()
+        let mut config: Self = toml::from_str(s).unwrap_or_default();
+        config.background_opacity = config
+            .background_opacity
+            .clamp(MIN_BACKGROUND_OPACITY, MAX_BACKGROUND_OPACITY);
+        config
     }
 
     pub fn to_toml_string(&self) -> String {
@@ -218,6 +245,7 @@ mod tests {
             check_updates_on_startup: true,
             cpu_heat_map: false,
             always_on_top: false,
+            background_opacity: 60,
             last_run_version: None,
             mini_strip: true,
             mini_strip_monitor: Some(r"\\.\DISPLAY2".to_string()),
@@ -237,6 +265,7 @@ mod tests {
         assert!(parsed.mini_strip_values.battery);
         assert!(!parsed.mini_strip_values.network);
         assert!(parsed.mini_strip_values.cpu_load);
+        assert_eq!(parsed.background_opacity, 60);
     }
 
     #[test]
@@ -365,6 +394,33 @@ battery = true
         assert!(!text.is_empty());
         assert!(!text.contains("mini_strip_monitor"));
         assert_eq!(Config::from_toml_str(&text), Config::default());
+    }
+
+    #[test]
+    fn background_opacity_defaults_to_fully_opaque() {
+        assert_eq!(Config::default().background_opacity, 100);
+        assert_eq!(Config::from_toml_str("").background_opacity, 100);
+    }
+
+    #[test]
+    fn background_opacity_load_clamps_out_of_range_values() {
+        let too_low = Config {
+            background_opacity: 10,
+            ..Config::default()
+        };
+        assert_eq!(
+            Config::from_toml_str(&too_low.to_toml_string()).background_opacity,
+            30
+        );
+
+        let too_high = Config {
+            background_opacity: 150,
+            ..Config::default()
+        };
+        assert_eq!(
+            Config::from_toml_str(&too_high.to_toml_string()).background_opacity,
+            100
+        );
     }
 
     #[test]

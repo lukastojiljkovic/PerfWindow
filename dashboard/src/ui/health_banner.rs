@@ -52,7 +52,7 @@ pub fn health_banner(ui: &mut egui::Ui, app: &mut PerfApp) {
     let notes = health.notes.clone();
 
     let frame = egui::Frame::NONE
-        .fill(theme.chrome)
+        .fill(theme.surface(theme.chrome, app.config.background_opacity))
         .inner_margin(Margin::symmetric(STRIP_PADDING_X, STRIP_PADDING_Y));
 
     let mut install_clicked = false;

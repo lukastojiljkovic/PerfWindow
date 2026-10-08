@@ -197,6 +197,12 @@ fn run_app(dev_mode: bool, renderer: eframe::Renderer) -> eframe::Result {
     let (inner_size, position) = startup_window_geometry();
     let mut viewport = egui::ViewportBuilder::default()
         .with_title("PerfWindow")
+        // The Background opacity setting dims the window's surface fills so
+        // the desktop behind them shows through, which needs an OS window
+        // composited with an alpha channel. Both the glow and the wgpu backend
+        // honour it; at 100 % every surface is painted opaque, so the window
+        // looks exactly as it did before the setting existed.
+        .with_transparent(true)
         .with_inner_size(inner_size)
         .with_min_inner_size(perfwindow::app::MIN_INNER_SIZE);
     if let Some(position) = position {
