@@ -60,6 +60,7 @@ mod tests {
             name: "PerfWindow 0.2.6".to_string(),
             html_url: "https://example/v0.2.6".to_string(),
             body: "notes".to_string(),
+            published_at: None,
             assets: vec![],
         }
     }

@@ -17,6 +17,7 @@ pub mod effects;
 pub mod fit;
 pub mod health_banner;
 pub mod loading_screen;
+pub mod modal;
 // The geometry recorder is a test-only instrument: production builds link the
 // empty stub so the shipping binary never pays for a rectangle it discards.
 #[cfg(any(test, feature = "test-support"))]
@@ -252,6 +253,10 @@ pub fn footer(ui: &mut egui::Ui, app: &mut PerfApp) {
                         .on_hover_text("Show changelog");
                     if resp.clicked() {
                         app.show_changelog = true;
+                        // The footer opens the full log, not the one-version
+                        // "what's new" view the post-update path installs.
+                        app.changelog_version = None;
+                        app.changelog_show_all = false;
                     }
                 }
                 Status::Connecting(_) => {

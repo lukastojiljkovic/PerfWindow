@@ -23,6 +23,11 @@ pub struct Cache {
     /// caches written before the sidecar existed.
     #[serde(default)]
     pub latest_sidecar_url: String,
+    /// RFC 3339 publish timestamp of the cached release, shown as
+    /// "Released on …" in the update modal. `None` for caches written before
+    /// the modal showed the date.
+    #[serde(default)]
+    pub latest_published_at: Option<String>,
 }
 
 impl Cache {
@@ -126,6 +131,7 @@ mod tests {
             latest_asset_url: "https://example.com/PerfWindow-Setup.exe".into(),
             latest_asset_size: 1234,
             latest_sidecar_url: "https://example.com/PerfWindow-Setup.exe.sha256".into(),
+            latest_published_at: Some("2026-10-08T09:30:00Z".into()),
         }
     }
 
@@ -151,6 +157,7 @@ mod tests {
         }"#;
         let parsed = Cache::from_json(json).expect("older cache loads");
         assert!(parsed.latest_sidecar_url.is_empty());
+        assert!(parsed.latest_published_at.is_none());
     }
 
     #[test]

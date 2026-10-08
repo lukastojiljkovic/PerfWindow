@@ -108,16 +108,70 @@ fn app_with_settings_open(theme_id: ThemeId) -> PerfApp {
 /// identically — no timestamps, no network state, no varying byte counts.
 fn fake_release() -> Release {
     Release {
-        tag_name: "v0.3.0".to_string(),
-        name: "PerfWindow 0.3.0".to_string(),
-        html_url: "https://example/v0.3.0".to_string(),
-        body: "* added thing\n* fixed thing".to_string(),
+        tag_name: "v0.12.0".to_string(),
+        name: "PerfWindow 0.12.0".to_string(),
+        html_url: "https://example/v0.12.0".to_string(),
+        body: "### Added\n- A clearer update window that lists what changed.\n\n\
+               ### Fixed\n- The close button no longer shows an empty square."
+            .to_string(),
+        published_at: Some("2026-10-08T09:30:00Z".to_string()),
         assets: vec![perfwindow::update::release::Asset {
             name: "PerfWindow-Setup.exe".to_string(),
-            browser_download_url: "https://example/v0.3.0/PerfWindow-Setup.exe".to_string(),
+            browser_download_url: "https://example/v0.12.0/PerfWindow-Setup.exe".to_string(),
             size: 60_000_000,
         }],
     }
+}
+
+/// A release body with three sections and a dozen bullets, several wrapping
+/// inside the modal. Exercises the notes `ScrollArea` at a short viewport.
+fn fake_release_long() -> Release {
+    let mut release = fake_release();
+    release.body = String::from(
+        r#"### Added
+
+- A rewritten update modal that lists what changed instead of showing the raw release notes as typed.
+- Release notes are folded one bullet at a time, so a wrapped continuation stays with its bullet.
+- A link to the full release notes on GitHub sits under the list.
+- The modal keeps each theme's own accent colour in the notes.
+
+### Changed
+
+- The modal hugs its content, so the action row sits directly under the notes.
+- The banner's vertical padding is symmetric and its action chips are centred on the text.
+- The close button is painted with two strokes so every theme font can draw it.
+- The header reads as a sentence instead of two stacked version columns.
+
+### Fixed
+
+- The close button no longer renders as an empty square.
+- Wrapped bullet lines hang under the text instead of under the dot.
+- The release date is shown whenever GitHub publishes one.
+- The empty band below the action row is gone.
+"#,
+    );
+    release
+}
+
+/// Put `release` into `app`'s shared update state as an available update.
+fn publish_available(app: &mut PerfApp, release: Release) {
+    if let Ok(mut g) = app.update_state.lock() {
+        *g = UpdateState::Available {
+            release,
+            checked_at: std::time::SystemTime::UNIX_EPOCH,
+        };
+    }
+}
+
+/// A `PerfApp` in `theme_id` with an update available but no modal open.
+fn app_with_update_available(theme_id: ThemeId) -> PerfApp {
+    let cfg = Config {
+        theme: theme_id,
+        ..Config::default()
+    };
+    let mut app = PerfApp::for_tests(cfg);
+    publish_available(&mut app, fake_release());
+    app
 }
 
 /// Build a `PerfApp` in `theme_id` with the update modal opened in `phase`.
@@ -128,17 +182,7 @@ fn fake_release() -> Release {
 /// before paint. To keep the snapshot deterministic at 42 %, we also seed the
 /// shared progress mutex with matching bytes/total values.
 fn app_with_update_modal(theme_id: ThemeId, phase: ModalPhase) -> PerfApp {
-    let cfg = Config {
-        theme: theme_id,
-        ..Config::default()
-    };
-    let mut app = PerfApp::for_tests(cfg);
-    if let Ok(mut g) = app.update_state.lock() {
-        *g = UpdateState::Available {
-            release: fake_release(),
-            checked_at: std::time::SystemTime::UNIX_EPOCH,
-        };
-    }
+    let mut app = app_with_update_available(theme_id);
     if let ModalPhase::Downloading { bytes, total, .. } = &phase {
         if let Ok(mut p) = app.update_download_progress.lock() {
             *p = perfwindow::update::download::DownloadProgress {
@@ -247,6 +291,85 @@ fn update_modal_failed_matches_baseline() {
             "update_modal_failed",
             move |ctx| {
                 perfwindow::ui::update_modal::update_modal(ctx, &mut app);
+            },
+        );
+    }
+}
+
+#[test]
+fn update_modal_confirm_long_notes_matches_baseline() {
+    // A 1180x600 window with three sections and a dozen bullets: the notes
+    // area must scroll while the header, link and action row stay put.
+    let mut results = SnapshotResults::new();
+    for &id in ALL_THEMES {
+        let mut app = app_with_update_modal(id, ModalPhase::Confirm);
+        publish_available(&mut app, fake_release_long());
+        snapshot_scenario(
+            &mut results,
+            egui::vec2(1180.0, 600.0),
+            id,
+            "update_modal_confirm_long_notes",
+            move |ctx| {
+                perfwindow::ui::update_modal::update_modal(ctx, &mut app);
+            },
+        );
+    }
+}
+
+#[test]
+fn update_banner_matches_baseline() {
+    // The banner as the app hosts it: a title bar above it, both strips
+    // spanning the full 1180-wide window.
+    let mut results = SnapshotResults::new();
+    for &id in ALL_THEMES {
+        let mut app = app_with_update_available(id);
+        let theme = Theme::for_id(id);
+        snapshot_scenario(
+            &mut results,
+            egui::vec2(1180.0, 600.0),
+            id,
+            "update_banner",
+            move |ctx| {
+                #[allow(deprecated)]
+                egui::CentralPanel::default()
+                    .frame(egui::Frame::NONE.fill(theme.bg))
+                    .show(ctx, |ui| {
+                        egui::Panel::top("pw_title_bar")
+                            .frame(egui::Frame::NONE)
+                            .show_inside(ui, |ui| perfwindow::ui::title_bar(ui, &mut app));
+                        if perfwindow::ui::update_banner::is_visible(&app) {
+                            egui::Panel::top("pw_update_banner")
+                                .frame(egui::Frame::NONE)
+                                .show_inside(ui, |ui| {
+                                    perfwindow::ui::update_banner::update_banner(ui, &mut app)
+                                });
+                        }
+                    });
+            },
+        );
+    }
+}
+
+#[test]
+fn changelog_after_update_matches_baseline() {
+    // The post-update viewer: the running version's section under the
+    // "PerfWindow was updated to …" heading, with "Show all versions".
+    let mut results = SnapshotResults::new();
+    for &id in ALL_THEMES {
+        let mut app = PerfApp::for_tests(Config {
+            theme: id,
+            ..Config::default()
+        });
+        app.show_changelog = true;
+        app.changelog_version = Some(env!("CARGO_PKG_VERSION").to_string());
+        app.changelog_show_all = false;
+        snapshot_scenario(
+            &mut results,
+            egui::vec2(1180.0, 600.0),
+            id,
+            "changelog_after_update",
+            move |ctx| {
+                perfwindow::ui::changelog_modal::changelog_modal(ctx, &mut app);
             },
         );
     }
