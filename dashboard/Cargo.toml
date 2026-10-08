@@ -36,7 +36,16 @@ windows = { version = "0.62", features = [
     "Win32_Devices_Display",
     "Win32_Foundation",
     "Win32_Graphics_Gdi",
+    # Mini strip: the appbar (`SHAppBarMessage` + `SetWindowSubclass`), the
+    # per-monitor DPI scale and `SetWindowPos`.
+    "Win32_UI_HiDpi",
+    "Win32_UI_Shell",
+    "Win32_UI_WindowsAndMessaging",
 ] }
+# The mini strip needs the window's raw `HWND`, which `eframe::CreationContext`
+# and `eframe::Frame` expose through this trait. Pinned to the version winit
+# 0.30 (and therefore eframe) is built against.
+raw-window-handle = "0.6.2"
 
 [build-dependencies]
 winresource = "0.1.31"

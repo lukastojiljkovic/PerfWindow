@@ -63,8 +63,6 @@ const RENDERER_FALLBACK_WINDOW: std::time::Duration = std::time::Duration::from_
 const DESIGN_WINDOW: [f32; 2] = [1180.0, 600.0];
 /// The startup window fills at most this fraction of the monitor work area.
 const WORK_AREA_FRACTION: f32 = 0.8;
-/// Minimum inner size the user may shrink the window to.
-const MIN_INNER_SIZE: [f32; 2] = [720.0, 500.0];
 
 /// The primary monitor's work area, in logical points, as
 /// `(x, y, width, height)`.
@@ -191,7 +189,7 @@ fn run_app(dev_mode: bool, renderer: eframe::Renderer) -> eframe::Result {
     // so the window starts at the correct Z-level and doesn't briefly flash
     // behind other windows on launch. `PerfApp::new` re-reads the config and
     // is the canonical owner; this peek is purely a cosmetic-startup fix.
-    let initially_on_top = Config::load().always_on_top;
+    let startup = Config::load();
     // Open as large as the monitor sensibly allows: the grid zooms to whatever
     // window it gets, so a small default window would only make the dashboard
     // cramped. The minimum stays small enough that the user can still shrink
@@ -206,12 +204,18 @@ fn run_app(dev_mode: bool, renderer: eframe::Renderer) -> eframe::Result {
         // looks exactly as it did before the setting existed.
         .with_transparent(true)
         .with_inner_size(inner_size)
-        .with_min_inner_size(MIN_INNER_SIZE);
+        .with_min_inner_size(perfwindow::app::MIN_INNER_SIZE);
     if let Some(position) = position {
         viewport = viewport.with_position(position);
     }
-    if initially_on_top {
+    if startup.always_on_top || startup.mini_strip {
         viewport = viewport.with_always_on_top();
+    }
+    if startup.mini_strip {
+        // The first frame docks the strip (and records the rectangle it should
+        // restore on the way back); starting borderless avoids a decorated
+        // flash while that happens.
+        viewport = viewport.with_decorations(false);
     }
     let options = eframe::NativeOptions {
         viewport,
@@ -235,6 +239,12 @@ fn install_panic_log() {
     // that env var set, but a postmortem without a backtrace is useless.
     let default = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
+        // Best effort: hand the mini strip's reserved band back before the
+        // process goes down. Allocation-free, and a `no-op` when the strip was
+        // never docked, because this runs while the process is already in
+        // trouble. A process killed from outside never reaches this hook, and
+        // nothing in-process can cover that case.
+        perfwindow::appbar::emergency_remove();
         write_panic_entry(info);
         default(info);
     }));
@@ -467,6 +477,11 @@ fn install_seh_handler() {
 /// worse).
 unsafe extern "system" fn seh_filter(info: *mut ExceptionPointers) -> LONG {
     use std::io::Write;
+
+    // Same best-effort band release as the panic hook: a native crash never
+    // runs the panic hook, and a registered appbar that is never removed keeps
+    // the monitor's work area shrunk.
+    perfwindow::appbar::emergency_remove();
 
     // `catch_unwind` to make sure a panic inside this handler does not
     // escape the FFI boundary and abort with no log at all.

@@ -12,7 +12,7 @@
 //! never seen.
 
 use crate::app::PerfApp;
-use crate::config::{RefreshRate, ThemeId};
+use crate::config::{MiniStripValues, RefreshRate, ThemeId};
 use crate::format::{letter_spaced, TempUnit};
 use crate::theme::Theme;
 use egui::{
@@ -83,8 +83,85 @@ enum Change {
     Refresh(RefreshRate),
     CheckUpdates(bool),
     AlwaysOnTop(bool),
+    /// Turn mini-strip mode on or off.
+    MiniStrip(bool),
+    /// Show or hide one mini-strip reading.
+    MiniValue(MiniValue, bool),
     Opacity(u8),
     ManualCheck,
+}
+
+/// One checkbox in the MINI STRIP section. The four load/temperature switches
+/// are separate even though the strip pairs them under one label.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MiniValue {
+    CpuLoad,
+    CpuTemp,
+    GpuLoad,
+    GpuTemp,
+    Vram,
+    Ram,
+    Network,
+    Battery,
+}
+
+impl MiniValue {
+    /// Every checkbox, in the order the strip renders its readings.
+    const ALL: [MiniValue; 8] = [
+        MiniValue::CpuLoad,
+        MiniValue::CpuTemp,
+        MiniValue::GpuLoad,
+        MiniValue::GpuTemp,
+        MiniValue::Vram,
+        MiniValue::Ram,
+        MiniValue::Network,
+        MiniValue::Battery,
+    ];
+
+    fn label(self) -> &'static str {
+        match self {
+            MiniValue::CpuLoad => "CPU load",
+            MiniValue::CpuTemp => "CPU temperature",
+            MiniValue::GpuLoad => "GPU load",
+            MiniValue::GpuTemp => "GPU temperature",
+            MiniValue::Vram => "VRAM",
+            MiniValue::Ram => "RAM",
+            MiniValue::Network => "Network",
+            MiniValue::Battery => "Battery",
+        }
+    }
+
+    fn get(self, values: &MiniStripValues) -> bool {
+        match self {
+            MiniValue::CpuLoad => values.cpu_load,
+            MiniValue::CpuTemp => values.cpu_temp,
+            MiniValue::GpuLoad => values.gpu_load,
+            MiniValue::GpuTemp => values.gpu_temp,
+            MiniValue::Vram => values.vram,
+            MiniValue::Ram => values.ram,
+            MiniValue::Network => values.network,
+            MiniValue::Battery => values.battery,
+        }
+    }
+
+    fn set(self, values: &mut MiniStripValues, on: bool) {
+        match self {
+            MiniValue::CpuLoad => values.cpu_load = on,
+            MiniValue::CpuTemp => values.cpu_temp = on,
+            MiniValue::GpuLoad => values.gpu_load = on,
+            MiniValue::GpuTemp => values.gpu_temp = on,
+            MiniValue::Vram => values.vram = on,
+            MiniValue::Ram => values.ram = on,
+            MiniValue::Network => values.network = on,
+            MiniValue::Battery => values.battery = on,
+        }
+    }
+
+    /// Battery is the one reading that is only offered when the machine has
+    /// something to report.
+    fn available(self, has_battery: bool) -> bool {
+        self != MiniValue::Battery || has_battery
+    }
 }
 
 /// Draw the settings modal when `app.settings_open` is set.
@@ -156,6 +233,7 @@ pub fn settings_modal(ctx: &egui::Context, app: &mut PerfApp) {
                                 app.config.background_opacity,
                                 &mut change,
                             );
+                            mini_section(ui, &theme, app, &mut change);
                             updates_section(ui, &theme, app, &mut change);
                         });
                 });
@@ -165,6 +243,9 @@ pub fn settings_modal(ctx: &egui::Context, app: &mut PerfApp) {
 
     // Apply the queued change after the closure: writing `config`, re-applying
     // the theme and persisting to disk all happen exactly once per frame.
+    // The mini-strip switch is collected separately because it also drives the
+    // viewport and the appbar.
+    let mut strip_toggle: Option<bool> = None;
     if let Some(change) = change {
         let needs_save = !matches!(change, Change::ManualCheck);
         let refresh_changed = matches!(&change, Change::Refresh(_));
@@ -175,6 +256,11 @@ pub fn settings_modal(ctx: &egui::Context, app: &mut PerfApp) {
             Change::Refresh(rate) => app.config.refresh = rate,
             Change::CheckUpdates(on) => app.config.check_updates_on_startup = on,
             Change::AlwaysOnTop(on) => app.config.always_on_top = on,
+            Change::MiniStrip(on) => {
+                app.config.mini_strip = on;
+                strip_toggle = Some(on);
+            }
+            Change::MiniValue(kind, on) => kind.set(&mut app.config.mini_strip_values, on),
             Change::Opacity(percent) => app.config.background_opacity = percent,
             Change::ManualCheck => app.manual_update_check(ctx),
         }
@@ -185,6 +271,14 @@ pub fn settings_modal(ctx: &egui::Context, app: &mut PerfApp) {
             }
             app.config.save();
         }
+    }
+    // Applying the mode switch after the closure keeps the config write and
+    // the viewport/appbar switch in one place: `enter_strip`/`leave_strip`
+    // own the window's chrome, dock the strip and persist the new mode.
+    match strip_toggle {
+        Some(true) => app.enter_strip(ctx),
+        Some(false) => app.leave_strip(ctx),
+        None => {}
     }
     if close {
         app.settings_open = false;
@@ -817,6 +911,201 @@ fn opacity_slider(ui: &mut egui::Ui, theme: &Theme, value: u8, change: &mut Opti
             }
         }
     });
+}
+
+/// The UPDATES section: current version, opt-out toggle, manual check,
+/// Draw the MINI STRIP section: the mode toggle with its Ctrl+M shortcut, the
+/// per-reading checkboxes and a note about readings that do not fit.
+///
+/// The Battery checkbox is only offered when the latest snapshot reports a
+/// battery, so a desktop is not invited to switch on a reading that can never
+/// appear.
+fn mini_section(ui: &mut egui::Ui, theme: &Theme, app: &PerfApp, change: &mut Option<Change>) {
+    ui.vertical(|ui| {
+        ui.spacing_mut().item_spacing.y = SECTION_INNER_GAP;
+        section_label(ui, theme, "MINI STRIP");
+        mini_toggle(ui, theme, app.config.mini_strip, change);
+
+        let has_battery = app
+            .latest
+            .as_ref()
+            .is_some_and(|snap| snap.battery.is_some());
+        let offered: Vec<MiniValue> = MiniValue::ALL
+            .iter()
+            .copied()
+            .filter(|value| value.available(has_battery))
+            .collect();
+        value_grid(ui, theme, &offered, &app.config.mini_strip_values, change);
+
+        section_hint(
+            ui,
+            theme,
+            "The strip shows these left to right; values that do not fit the \
+             screen width are dropped from the right.",
+        );
+    });
+}
+
+/// Draw the mini-mode toggle: the switch, the label and the shortcut hint.
+fn mini_toggle(ui: &mut egui::Ui, theme: &Theme, on: bool, change: &mut Option<Change>) {
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 11.0;
+        let response = toggle_switch(ui, theme, on);
+        let mut job = egui::text::LayoutJob::default();
+        let data_font = FontId::new(11.0, theme.font_data.egui());
+        job.wrap.max_width = ui.available_width();
+        job.append(
+            "Mini strip",
+            0.0,
+            egui::TextFormat {
+                font_id: data_font.clone(),
+                color: theme.ink,
+                ..Default::default()
+            },
+        );
+        job.append(
+            "  \u{2014} a thin bar docked to the top of the screen \u{00b7} Ctrl+M",
+            0.0,
+            egui::TextFormat {
+                font_id: data_font,
+                color: theme.dim,
+                ..Default::default()
+            },
+        );
+        ui.label(job);
+        if response.clicked() {
+            *change = Some(Change::MiniStrip(!on));
+        }
+    });
+}
+
+/// Lay the offered checkboxes out in two columns, in strip order.
+fn value_grid(
+    ui: &mut egui::Ui,
+    theme: &Theme,
+    offered: &[MiniValue],
+    values: &MiniStripValues,
+    change: &mut Option<Change>,
+) {
+    const COLUMNS: usize = 2;
+    const COLUMN_GAP: f32 = 18.0;
+    let cell_w = ((ui.available_width() - COLUMN_GAP) / COLUMNS as f32).max(1.0);
+    for row in offered.chunks(COLUMNS) {
+        // Top-aligned: a centred row places each zero-height cell at its middle,
+        // which the first cell has already moved, so the second sits lower.
+        ui.horizontal_top(|ui| {
+            ui.spacing_mut().item_spacing.x = COLUMN_GAP;
+            for &value in row {
+                ui.allocate_ui_with_layout(
+                    Vec2::new(cell_w, 0.0),
+                    egui::Layout::left_to_right(egui::Align::Center),
+                    |ui| {
+                        ui.set_width(cell_w);
+                        if checkbox(ui, theme, value.label(), value.get(values)).clicked() {
+                            *change = Some(Change::MiniValue(value, !value.get(values)));
+                        }
+                    },
+                );
+            }
+        });
+    }
+}
+
+/// Draw a square checkbox: a 12 px box that fills `accent` with a `bg`-coloured
+/// check drawn from two line segments when on, followed by its label. Returns
+/// the click-sensing response.
+fn checkbox(ui: &mut egui::Ui, theme: &Theme, label: &str, on: bool) -> Response {
+    const BOX: f32 = 12.0;
+    const LABEL_GAP: f32 = 8.0;
+    let galley = ui.painter().layout_no_wrap(
+        label.to_owned(),
+        FontId::new(11.0, theme.font_data.egui()),
+        theme.ink,
+    );
+    let size = Vec2::new(BOX + LABEL_GAP + galley.size().x, BOX.max(galley.size().y));
+    let (rect, response) = ui.allocate_exact_size(size, Sense::click());
+
+    if ui.is_rect_visible(rect) {
+        let painter = ui.painter_at(rect);
+        let box_rect = Rect::from_min_size(
+            Pos2::new(rect.min.x, rect.center().y - BOX / 2.0),
+            Vec2::splat(BOX),
+        );
+        let stroke_color = if on { theme.accent } else { theme.border };
+        if on {
+            painter.rect_filled(box_rect, 0.0, theme.accent);
+        }
+        painter.rect_stroke(
+            box_rect,
+            0.0,
+            Stroke::new(1.0_f32, stroke_color),
+            StrokeKind::Inside,
+        );
+        if on {
+            // Two segments: a short left arm and a longer right arm.
+            let check = Stroke::new(1.5_f32, theme.bg);
+            let elbow = Pos2::new(box_rect.center().x - 0.5, box_rect.bottom() - 3.5);
+            painter.add(egui::Shape::line_segment(
+                [Pos2::new(box_rect.left() + 3.0, box_rect.center().y), elbow],
+                check,
+            ));
+            painter.add(egui::Shape::line_segment(
+                [
+                    elbow,
+                    Pos2::new(box_rect.right() - 3.0, box_rect.top() + 3.5),
+                ],
+                check,
+            ));
+        }
+        painter.galley(
+            Pos2::new(
+                box_rect.right() + LABEL_GAP,
+                rect.center().y - galley.size().y / 2.0,
+            ),
+            galley,
+            theme.ink,
+        );
+    }
+    if response.hovered() {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+    }
+    response
+}
+
+/// Draw one toggle switch on its own. Shared by the mini-strip row; the other
+/// toggles in this modal predate it and keep their inline copies.
+fn toggle_switch(ui: &mut egui::Ui, theme: &Theme, on: bool) -> Response {
+    let (track_rect, response) =
+        ui.allocate_exact_size(Vec2::new(TOGGLE_W, TOGGLE_H), Sense::click());
+    if ui.is_rect_visible(track_rect) {
+        let painter = ui.painter_at(track_rect);
+        let (track_fill, track_stroke) = if on {
+            (theme.accent, theme.accent)
+        } else {
+            (theme.track, theme.border)
+        };
+        painter.rect_filled(track_rect, 0.0, track_fill);
+        painter.rect_stroke(
+            track_rect,
+            0.0,
+            Stroke::new(1.0_f32, track_stroke),
+            StrokeKind::Inside,
+        );
+        let knob_x = if on {
+            track_rect.max.x - 2.0 - TOGGLE_DOT
+        } else {
+            track_rect.min.x + 2.0
+        };
+        let knob = Rect::from_min_size(
+            Pos2::new(knob_x, track_rect.min.y + 2.0),
+            Vec2::splat(TOGGLE_DOT),
+        );
+        painter.rect_filled(knob, 0.0, if on { theme.bg } else { theme.dim });
+    }
+    if response.hovered() {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+    }
+    response
 }
 
 /// The UPDATES section: current version, opt-out toggle, manual check,

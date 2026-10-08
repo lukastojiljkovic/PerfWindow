@@ -81,6 +81,20 @@ pub struct Config {
     /// first-launch-after-an-update changelog.
     #[serde(default)]
     pub last_run_version: Option<String>,
+    /// Mini mode: a thin strip docked to the top of a monitor instead of the
+    /// full window. Persisted so a relaunch comes back in the same mode.
+    #[serde(default = "default_mini_strip")]
+    pub mini_strip: bool,
+    /// Device name (`\\.\DISPLAYn`) of the monitor the strip is docked to.
+    /// `None` (and a name whose monitor no longer exists) means "the monitor
+    /// the window is on".
+    #[serde(default)]
+    pub mini_strip_monitor: Option<String>,
+    /// Which readings the strip shows. Last field on purpose: it serializes as
+    /// a `[mini_strip_values]` table, and TOML requires tables after plain
+    /// values.
+    #[serde(default)]
+    pub mini_strip_values: MiniStripValues,
 }
 
 fn default_check_updates() -> bool {
@@ -93,6 +107,48 @@ fn default_cpu_heat_map() -> bool {
 
 fn default_always_on_top() -> bool {
     false
+}
+
+fn default_mini_strip() -> bool {
+    false
+}
+
+/// Which readings the mini strip shows, left to right.
+///
+/// CPU load and CPU temperature are separate switches but share the strip's
+/// single `CPU` label (as do GPU load and GPU temperature), so a user can keep
+/// the temperature without the load figure or the other way round.
+///
+/// `#[serde(default)]` at the container level fills in any field an older
+/// config file is missing from [`MiniStripValues::default`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct MiniStripValues {
+    pub cpu_load: bool,
+    pub cpu_temp: bool,
+    pub gpu_load: bool,
+    pub gpu_temp: bool,
+    pub vram: bool,
+    pub ram: bool,
+    pub network: bool,
+    pub battery: bool,
+}
+
+impl Default for MiniStripValues {
+    /// Everything but Battery: a desktop has no battery, and asking for one
+    /// should be a deliberate click rather than a permanently empty reading.
+    fn default() -> Self {
+        Self {
+            cpu_load: true,
+            cpu_temp: true,
+            gpu_load: true,
+            gpu_temp: true,
+            vram: true,
+            ram: true,
+            network: true,
+            battery: false,
+        }
+    }
 }
 
 fn default_background_opacity() -> u8 {
@@ -111,6 +167,9 @@ impl Default for Config {
             always_on_top: false,
             background_opacity: MAX_BACKGROUND_OPACITY,
             last_run_version: None,
+            mini_strip: false,
+            mini_strip_monitor: None,
+            mini_strip_values: MiniStripValues::default(),
         }
     }
 }
@@ -188,12 +247,24 @@ mod tests {
             always_on_top: false,
             background_opacity: 60,
             last_run_version: None,
+            mini_strip: true,
+            mini_strip_monitor: Some(r"\\.\DISPLAY2".to_string()),
+            mini_strip_values: MiniStripValues {
+                battery: true,
+                network: false,
+                ..MiniStripValues::default()
+            },
         };
         let parsed = Config::from_toml_str(&c.to_toml_string());
         assert_eq!(parsed.theme, ThemeId::Amber);
         assert!(parsed.follow_windows);
         assert_eq!(parsed.unit, TempUnit::Fahrenheit);
         assert_eq!(parsed.refresh, RefreshRate::S2);
+        assert!(parsed.mini_strip);
+        assert_eq!(parsed.mini_strip_monitor.as_deref(), Some(r"\\.\DISPLAY2"));
+        assert!(parsed.mini_strip_values.battery);
+        assert!(!parsed.mini_strip_values.network);
+        assert!(parsed.mini_strip_values.cpu_load);
         assert_eq!(parsed.background_opacity, 60);
     }
 
@@ -257,6 +328,72 @@ mod tests {
         };
         let parsed = Config::from_toml_str(&c.to_toml_string());
         assert!(parsed.always_on_top);
+    }
+
+    #[test]
+    fn mini_strip_defaults_are_off_with_every_reading_but_battery() {
+        let parsed = Config::from_toml_str("");
+        assert!(!parsed.mini_strip);
+        assert!(parsed.mini_strip_monitor.is_none());
+        assert_eq!(parsed.mini_strip_values, MiniStripValues::default());
+        assert!(!parsed.mini_strip_values.battery);
+        assert!(parsed.mini_strip_values.cpu_load);
+    }
+
+    #[test]
+    fn a_config_file_without_the_mini_fields_still_parses() {
+        // The shape a pre-mini-mode PerfWindow wrote.
+        let old = "\
+theme = \"Amber\"
+follow_windows = false
+unit = \"Celsius\"
+refresh = \"S5\"
+check_updates_on_startup = false
+cpu_heat_map = true
+always_on_top = true
+";
+        let parsed = Config::from_toml_str(old);
+        assert_eq!(parsed.theme, ThemeId::Amber);
+        assert_eq!(parsed.refresh, RefreshRate::S5);
+        assert!(parsed.cpu_heat_map && parsed.always_on_top);
+        // The new fields fall back to their defaults.
+        assert!(!parsed.mini_strip);
+        assert!(parsed.mini_strip_monitor.is_none());
+        assert_eq!(parsed.mini_strip_values, MiniStripValues::default());
+    }
+
+    #[test]
+    fn mini_strip_values_round_trip_through_a_partial_table() {
+        // The device name is written as a TOML literal string so the trailing
+        // backslashes need no escape.
+        let text = r#"
+theme = "Slate"
+follow_windows = false
+unit = "Celsius"
+refresh = "S1"
+mini_strip = true
+mini_strip_monitor = '\\.\DISPLAY1'
+
+[mini_strip_values]
+cpu_temp = false
+battery = true
+"#;
+        let parsed = Config::from_toml_str(text);
+        assert!(parsed.mini_strip);
+        assert_eq!(parsed.mini_strip_monitor.as_deref(), Some(r"\\.\DISPLAY1"));
+        assert!(!parsed.mini_strip_values.cpu_temp);
+        assert!(parsed.mini_strip_values.battery);
+        // Fields the table does not mention keep their defaults.
+        assert!(parsed.mini_strip_values.ram);
+    }
+
+    #[test]
+    fn serializing_without_a_strip_monitor_writes_a_non_empty_file() {
+        // A `None` monitor is left out of the file, not written as an empty value.
+        let text = Config::default().to_toml_string();
+        assert!(!text.is_empty());
+        assert!(!text.contains("mini_strip_monitor"));
+        assert_eq!(Config::from_toml_str(&text), Config::default());
     }
 
     #[test]

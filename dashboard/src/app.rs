@@ -39,6 +39,20 @@ pub enum DownloadOutcome {
 /// attempts are recognised and discarded by [`PerfApp::poll_download_outcome`].
 pub type SharedDownloadOutcome = std::sync::Arc<std::sync::Mutex<Option<(u64, DownloadOutcome)>>>;
 
+/// The full window's minimum inner size. `main.rs` sets it at startup; leaving
+/// the mini strip puts it back after the strip lowered it to fit the band.
+pub const MIN_INNER_SIZE: [f32; 2] = [720.0, 500.0];
+
+/// The parts of the window's rectangle mini-strip mode has to put back when it
+/// expands into the full window again.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct RestoreRect {
+    /// Outer (decorated) top-left corner, in monitor space.
+    pub outer_pos: Option<egui::Pos2>,
+    /// Client-area size.
+    pub inner_size: Option<egui::Vec2>,
+}
+
 /// The PerfWindow application.
 pub struct PerfApp {
     pub config: Config,
@@ -93,6 +107,28 @@ pub struct PerfApp {
     /// True while the window is in F11 fullscreen mode. Transient — not
     /// persisted to config. Toggled by the F11 keypress handler.
     pub fullscreen: bool,
+    /// Raw `HWND` of the dashboard window, captured from the eframe creation
+    /// context. `None` in headless tests (and on platforms where the handle is
+    /// unavailable), where strip mode runs without an appbar registration.
+    pub window_hwnd: Option<isize>,
+    /// The live appbar session: `Some` while the strip has a reserved band.
+    /// Its `Drop` sends `ABM_REMOVE` and unsubclasses the window.
+    pub strip: Option<crate::appbar::StripSession>,
+    /// The window rectangle captured when strip mode was entered.
+    pub strip_restore: Option<RestoreRect>,
+    /// `true` while a fullscreen application owns the topmost band, so the
+    /// strip only changes its Z-order on transitions.
+    pub strip_fullscreen_app: bool,
+    /// Runtime guard for the viewport/Win32 side of strip mode. The mode
+    /// itself is `config.mini_strip`; this says whether that state has already
+    /// been applied to the window this launch, which is what lets a launch
+    /// straight into strip mode save the window rectangle before it is docked.
+    strip_applied: bool,
+    /// The appbar is registered one frame after strip mode is entered: the
+    /// viewport commands that drop the decorations and the minimum size are
+    /// applied at the end of the frame that sends them, and docking before
+    /// that would have winit clamp the 28 px band to the window's minimum.
+    strip_dock_after_pass: Option<u64>,
     /// Set to true when the user clicks Dismiss on the sensord health banner,
     /// hiding it for the rest of the session even if the degraded condition
     /// persists. Reset on next launch (not persisted).
@@ -134,6 +170,37 @@ fn startup_stalled(
         Some(line) => now.saturating_duration_since(line) > LINE_SILENCE,
         None => true,
     }
+}
+
+/// The dashboard window's raw `HWND`, taken from the eframe creation context
+/// through `raw-window-handle` (which is also how winit hands the handle to
+/// eframe). `None` when the handle is unavailable — headless tests, or a
+/// platform whose handle is not Win32.
+#[cfg(windows)]
+fn creation_window_hwnd(cc: &eframe::CreationContext<'_>) -> Option<isize> {
+    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+    match cc.window_handle().ok()?.as_raw() {
+        RawWindowHandle::Win32(handle) => Some(handle.hwnd.get()),
+        _ => None,
+    }
+}
+
+#[cfg(not(windows))]
+fn creation_window_hwnd(_cc: &eframe::CreationContext<'_>) -> Option<isize> {
+    None
+}
+
+/// The window rectangle egui last saw, captured so the strip can put the full
+/// window back where it was. Either half is `None` until egui has seen a
+/// frame; the strip then restores only the half it knows.
+fn capture_window_rect(ctx: &egui::Context) -> RestoreRect {
+    ctx.input(|i| {
+        let viewport = i.viewport();
+        RestoreRect {
+            outer_pos: viewport.outer_rect.map(|rect| rect.min),
+            inner_size: viewport.inner_rect.map(|rect| rect.size()),
+        }
+    })
 }
 
 /// `true` when this launch follows an upgrade from `previous`: `None` means the
@@ -218,6 +285,9 @@ impl PerfApp {
         // start time so the no-first-snapshot deadline applies there too.
         let running_since = matches!(status, Status::Running).then(std::time::Instant::now);
 
+        // The strip registers an appbar, which needs the window's raw handle.
+        let window_hwnd = creation_window_hwnd(cc);
+
         let mut app = Self {
             config,
             theme,
@@ -246,6 +316,12 @@ impl PerfApp {
             applied_on_top: false,
             grid_fit: None,
             fullscreen: false,
+            window_hwnd,
+            strip: None,
+            strip_restore: None,
+            strip_fullscreen_app: false,
+            strip_applied: false,
+            strip_dock_after_pass: None,
             health_banner_dismissed: false,
             running_since,
             update_source,
@@ -426,6 +502,170 @@ impl PerfApp {
     pub fn apply_refresh_change(&mut self) {
         if let Some(sensord) = &mut self.sensord {
             sensord.set_interval(self.config.refresh.as_millis());
+        }
+    }
+
+    /// Enter mini-strip mode: borderless, topmost, and registered as an appbar
+    /// on the top edge of the strip's monitor, so the shell shrinks that
+    /// monitor's work area by the strip's height and maximized windows start
+    /// below it.
+    ///
+    /// The window's current rectangle is captured first, so leaving strip mode
+    /// puts the full window back where it was. The mode itself is
+    /// `config.mini_strip`, which is persisted here: the strip is a window
+    /// mode, not a session state.
+    pub fn enter_strip(&mut self, ctx: &egui::Context) {
+        if self.strip_applied {
+            return;
+        }
+        if self.strip_restore.is_none() {
+            self.strip_restore = Some(capture_window_rect(ctx));
+        }
+        // The settings modal has no home in a 28 px strip.
+        self.settings_open = false;
+        if self.fullscreen {
+            // A fullscreen window has no chrome to hide, and its pinned
+            // top-left corner would fight the band; return it to windowed
+            // sizing before the appbar moves it.
+            ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(false));
+            self.fullscreen = false;
+        }
+        ctx.send_viewport_cmd(egui::ViewportCommand::Decorations(false));
+        ctx.send_viewport_cmd(egui::ViewportCommand::Resizable(false));
+        // winit enforces the minimum size on every `SetWindowPos`, so the
+        // band could never be 28 px tall with the full window's minimum.
+        ctx.send_viewport_cmd(egui::ViewportCommand::MinInnerSize(egui::Vec2::splat(1.0)));
+        ctx.send_viewport_cmd(egui::ViewportCommand::WindowLevel(
+            egui::WindowLevel::AlwaysOnTop,
+        ));
+        // Strip mode owns the Z-order from here (`ABN_FULLSCREENAPP` flips it
+        // through `SetWindowPos`), so `sync_window_level` stays out of the way
+        // until the full window is back.
+        self.applied_on_top = true;
+        self.strip_dock_after_pass = Some(ctx.cumulative_pass_nr());
+        self.strip_fullscreen_app = false;
+        self.strip_applied = true;
+        self.config.mini_strip = true;
+        self.config.save();
+        ctx.request_repaint();
+    }
+
+    /// Register the appbar and dock the window, on the frame after
+    /// [`Self::enter_strip`] sent its viewport commands.
+    fn dock_strip(&mut self) {
+        self.strip_dock_after_pass = None;
+        self.strip = crate::appbar::StripSession::attach(
+            self.window_hwnd.unwrap_or(0),
+            self.config.mini_strip_monitor.as_deref(),
+        );
+        // Persist the monitor the shell actually docked on: the configured
+        // name may have been stale, and the next launch should use the real
+        // one.
+        if let Some(device) = self.strip.as_ref().and_then(|strip| strip.device_name()) {
+            if self.config.mini_strip_monitor.as_deref() != Some(device) {
+                self.config.mini_strip_monitor = Some(device.to_owned());
+                self.config.save();
+            }
+        }
+    }
+
+    /// Leave mini-strip mode: release the reserved band, restore the window
+    /// chrome and the saved rectangle, and re-apply the user's always-on-top
+    /// preference.
+    pub fn leave_strip(&mut self, ctx: &egui::Context) {
+        if let Some(mut session) = self.strip.take() {
+            session.release();
+        }
+        self.strip_dock_after_pass = None;
+        let level = if self.config.always_on_top {
+            egui::WindowLevel::AlwaysOnTop
+        } else {
+            egui::WindowLevel::Normal
+        };
+        ctx.send_viewport_cmd(egui::ViewportCommand::Decorations(true));
+        ctx.send_viewport_cmd(egui::ViewportCommand::Resizable(true));
+        ctx.send_viewport_cmd(egui::ViewportCommand::MinInnerSize(egui::Vec2::from(
+            MIN_INNER_SIZE,
+        )));
+        ctx.send_viewport_cmd(egui::ViewportCommand::WindowLevel(level));
+        self.applied_on_top = self.config.always_on_top;
+        if let Some(saved) = self.strip_restore.take() {
+            if let Some(pos) = saved.outer_pos {
+                ctx.send_viewport_cmd(egui::ViewportCommand::OuterPosition(pos));
+            }
+            if let Some(size) = saved.inner_size {
+                ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(size));
+            }
+        }
+        self.strip_fullscreen_app = false;
+        self.strip_applied = false;
+        self.config.mini_strip = false;
+        self.config.save();
+    }
+
+    /// `Ctrl+M` in the full window enters strip mode. The strip's own `Ctrl+M`
+    /// is handled by [`Self::strip_frame`], which has different modals to
+    /// close and a different window to restore.
+    fn handle_strip_hotkey(&mut self, ctx: &egui::Context) {
+        let pressed = ctx.input(|i| i.focused && i.modifiers.ctrl && i.key_pressed(egui::Key::M));
+        if pressed {
+            self.enter_strip(ctx);
+        }
+    }
+
+    /// One frame of strip mode: apply whatever the shell reported since the
+    /// last frame, draw the strip row and act on the control the user pressed.
+    fn strip_frame(&mut self, ctx: &egui::Context, ui: &mut egui::Ui) {
+        // `Ctrl+M` with the strip focused is the keyboard route back to the
+        // full window.
+        let expand = ctx.input(|i| i.focused && i.modifiers.ctrl && i.key_pressed(egui::Key::M));
+        if expand {
+            self.leave_strip(ctx);
+            return;
+        }
+        if self
+            .strip_dock_after_pass
+            .is_some_and(|sent| ctx.cumulative_pass_nr() > sent)
+        {
+            self.dock_strip();
+        } else if self.strip_dock_after_pass.is_some() {
+            ctx.request_repaint();
+        }
+
+        if let Some(session) = &mut self.strip {
+            let flags = session.take_flags();
+            if flags.redock {
+                session.redock();
+            }
+            if flags.fullscreen_app != self.strip_fullscreen_app {
+                self.strip_fullscreen_app = flags.fullscreen_app;
+                // A fullscreen application gets to cover the strip: leaving
+                // the topmost band is enough, and the band stays reserved so
+                // the desktop is laid out the same way while the game runs.
+                session.set_topmost(!flags.fullscreen_app);
+            }
+        }
+
+        let action = egui::CentralPanel::default()
+            .frame(egui::Frame::NONE.fill(self.theme.chrome))
+            .show_inside(ui, |ui| {
+                crate::ui::mini_strip::strip_row(
+                    ui,
+                    &self.theme,
+                    self.latest.as_ref(),
+                    &self.config,
+                )
+            })
+            .inner;
+
+        match action {
+            crate::ui::mini_strip::StripAction::None => {}
+            crate::ui::mini_strip::StripAction::Expand => self.leave_strip(ctx),
+            crate::ui::mini_strip::StripAction::OpenSettings => {
+                self.leave_strip(ctx);
+                self.settings_open = true;
+            }
+            crate::ui::mini_strip::StripAction::Close => self.want_quit = true,
         }
     }
 
@@ -621,6 +861,12 @@ impl PerfApp {
             applied_on_top: false,
             grid_fit: None,
             fullscreen: false,
+            window_hwnd: None,
+            strip: None,
+            strip_restore: None,
+            strip_fullscreen_app: false,
+            strip_applied: false,
+            strip_dock_after_pass: None,
             health_banner_dismissed: false,
             running_since: None,
             update_source: Arc::new(GitHubReleaseSource::new(OWNER, REPO)),
@@ -643,8 +889,30 @@ impl eframe::App for PerfApp {
         self.display_cache.maybe_refresh(std::time::Instant::now());
         self.poll_connect_events();
         self.poll_download_outcome();
+
+        // A launch whose config asked for the strip enters it here, on the
+        // first frame: by now the window exists and its rectangle is known, so
+        // it can be saved before the appbar resizes the window to the band.
+        if self.config.mini_strip && !self.strip_applied {
+            self.enter_strip(&ctx);
+        }
+
+        if self.config.mini_strip {
+            // Sensor polling, history and the update machinery above all keep
+            // running; only the chrome is replaced by the strip row.
+            self.strip_frame(&ctx, ui);
+            ctx.request_repaint_after(std::time::Duration::from_millis(
+                self.config.refresh.as_millis() as u64 + 500,
+            ));
+            if self.want_quit {
+                ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+            }
+            return;
+        }
+
         self.sync_window_level(&ctx);
         self.handle_fullscreen_keypress(&ctx);
+        self.handle_strip_hotkey(&ctx);
 
         // Title bar on top, footer on the bottom, the card grid filling the
         // scrollable centre. Panels are nested with `show_inside` (we render
@@ -726,6 +994,12 @@ impl eframe::App for PerfApp {
     }
 
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
+        // Release the reserved band before the window goes away: this is the
+        // app's normal close path, and an appbar that is never removed would
+        // keep the work area shrunk.
+        if let Some(mut session) = self.strip.take() {
+            session.release();
+        }
         // Tell the worker to exit (over the pipe) before the dashboard
         // process tears down. Drop alone is unreliable during shutdown —
         // explicit shutdown() while the egui frame is still alive is
