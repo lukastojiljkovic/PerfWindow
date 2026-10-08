@@ -24,11 +24,12 @@ const MIN_BODY_HEIGHT: f32 = 180.0;
 /// Floor for the notes `ScrollArea` height on a very short viewport.
 const MIN_NOTES_HEIGHT: f32 = 90.0;
 /// Vertical room the confirm screen's fixed rows take inside the body: the
-/// body padding, the header and "Released on" lines, the GitHub link and the
-/// action row, plus the gaps between them. Subtracted from the body's viewport
-/// budget to size the notes `ScrollArea`, so only the notes scroll. Chosen
-/// with slack for a header that wraps to two lines on a narrow window.
-const CONFIRM_FIXED_BODY_H: f32 = 290.0;
+/// body padding, the header and "Released on" lines, the GitHub link, the
+/// installer note and the action row, plus the gaps between them. Subtracted
+/// from the body's viewport budget to size the notes `ScrollArea`, so only the
+/// notes scroll. Chosen with slack for a header that wraps to two lines on a
+/// narrow window.
+const CONFIRM_FIXED_BODY_H: f32 = 330.0;
 /// Height of one action row (Cancel / Update now, …). Bounding it stops the
 /// right-to-left layout from claiming the body's remaining height, which would
 /// stretch the modal instead of letting it hug its content.
@@ -218,6 +219,16 @@ fn confirm_screen(
         {
             crate::ui::shell::open_url(&release.html_url);
         }
+
+        ui.label(
+            egui::RichText::new(
+                "The installer will close PerfWindow, install the new version and offer to \
+                 launch it again.",
+            )
+            .family(theme.font_data.egui())
+            .size(11.0)
+            .color(theme.dim),
+        );
 
         // The action row is bounded so its right-to-left layout cannot claim
         // the body's leftover height; the frame's symmetric padding then puts
