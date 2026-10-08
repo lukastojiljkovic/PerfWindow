@@ -16,6 +16,7 @@ pub mod changelog_modal;
 pub mod effects;
 pub mod health_banner;
 pub mod loading_screen;
+pub mod modal;
 pub mod settings;
 pub mod shell;
 pub mod stat_priority;
@@ -247,6 +248,10 @@ pub fn footer(ui: &mut egui::Ui, app: &mut PerfApp) {
                         .on_hover_text("Show changelog");
                     if resp.clicked() {
                         app.show_changelog = true;
+                        // The footer opens the full log, not the one-version
+                        // "what's new" view the post-update path installs.
+                        app.changelog_version = None;
+                        app.changelog_show_all = false;
                     }
                 }
                 Status::Connecting(_) => {

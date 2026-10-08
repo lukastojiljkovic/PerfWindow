@@ -153,6 +153,7 @@ fn cache_from(release: &Release, checked_at: SystemTime) -> Cache {
             .sidecar_asset()
             .map(|a| a.browser_download_url.clone())
             .unwrap_or_default(),
+        latest_published_at: release.published_at.clone(),
     }
 }
 
@@ -177,6 +178,7 @@ fn publish_cached(state: &SharedUpdateState, cache: &Cache, repaint: &(impl Fn()
                 tag_name: cache.latest_tag.clone(),
                 name: cache.latest_name.clone(),
                 body: cache.latest_body.clone(),
+                published_at: cache.latest_published_at.clone(),
                 html_url: format!(
                     "https://github.com/{}/{}/releases/tag/{}",
                     crate::update::OWNER,
@@ -375,6 +377,7 @@ mod tests {
                     .into(),
             latest_asset_size: 1,
             latest_sidecar_url: String::new(),
+            latest_published_at: None,
         });
         // A failing source proves the cache served the result: any network
         // attempt would have landed in Failed.
@@ -418,6 +421,7 @@ mod tests {
                     .into(),
             latest_asset_size: 1,
             latest_sidecar_url: String::new(),
+            latest_published_at: None,
         });
 
         let state = new_shared();

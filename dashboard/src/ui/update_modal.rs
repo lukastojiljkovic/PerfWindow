@@ -8,12 +8,10 @@
 use crate::app::PerfApp;
 use crate::theme::Theme;
 use crate::update::UpdateState;
-use egui::{Align2, Color32, FontId, Margin, Response, Sense, Stroke, StrokeKind, Vec2};
+use egui::{Align2, FontId, Margin, Sense, Stroke, StrokeKind, Vec2};
 use std::sync::atomic::Ordering;
 
 const WINDOW_WIDTH: f32 = 520.0;
-const TB_PADDING_X: i8 = 15;
-const TB_PADDING_Y: i8 = 12;
 const BODY_PADDING_X: i8 = 18;
 const BODY_PADDING_Y: i8 = 20;
 const BTN_PAD: Vec2 = Vec2::new(14.0, 8.0);
@@ -23,6 +21,22 @@ const PROGRESS_BAR_H: f32 = 14.0;
 const CHROME_RESERVE: f32 = 60.0;
 /// Floor for the body's `ScrollArea` max height when the viewport is tiny.
 const MIN_BODY_HEIGHT: f32 = 180.0;
+/// Floor for the notes `ScrollArea` height on a very short viewport.
+const MIN_NOTES_HEIGHT: f32 = 90.0;
+/// Vertical room the confirm screen's fixed rows take inside the body: the
+/// body padding, the header and "Released on" lines, the GitHub link and the
+/// action row, plus the gaps between them. Subtracted from the body's viewport
+/// budget to size the notes `ScrollArea`, so only the notes scroll. Chosen
+/// with slack for a header that wraps to two lines on a narrow window.
+const CONFIRM_FIXED_BODY_H: f32 = 290.0;
+/// Height of one action row (Cancel / Update now, …). Bounding it stops the
+/// right-to-left layout from claiming the body's remaining height, which would
+/// stretch the modal instead of letting it hug its content.
+const ACTION_ROW_H: f32 = 32.0;
+/// Gap between two consecutive notes items.
+const NOTE_ITEM_GAP: f32 = 6.0;
+/// Gap between two notes sections.
+const NOTE_SECTION_GAP: f32 = 14.0;
 
 /// Which screen the modal is currently showing.
 #[derive(Debug, Clone, Default)]
@@ -86,15 +100,7 @@ pub fn update_modal(ctx: &egui::Context, app: &mut PerfApp) {
     }
 
     let theme = app.theme.clone();
-    let frame = egui::Frame::NONE
-        .fill(theme.bg)
-        .stroke(Stroke::new(1.0_f32, theme.border))
-        .shadow(egui::epaint::Shadow {
-            offset: [0, 18],
-            blur: 48,
-            spread: 0,
-            color: Color32::from_black_alpha(140),
-        });
+    let frame = crate::ui::modal::frame(&theme);
 
     let mut close = false;
     let phase_snapshot = app.update_modal_phase.clone();
@@ -108,7 +114,7 @@ pub fn update_modal(ctx: &egui::Context, app: &mut PerfApp) {
         .frame(frame)
         .show(ctx, |ui| {
             ui.set_width(WINDOW_WIDTH);
-            if modal_title_bar(ui, &theme).clicked() {
+            if crate::ui::modal::title_bar(ui, &theme, "\u{25b2} UPDATE PERFWINDOW").clicked() {
                 close = true;
             }
             // Cap the body to whatever vertical room is left after the title
@@ -123,7 +129,7 @@ pub fn update_modal(ctx: &egui::Context, app: &mut PerfApp) {
                         .inner_margin(Margin::symmetric(BODY_PADDING_X, BODY_PADDING_Y))
                         .show(ui, |ui| match &phase_snapshot {
                             ModalPhase::Confirm => {
-                                confirm_screen(ui, &theme, app, &release, &mut close)
+                                confirm_screen(ui, &theme, app, &release, &mut close, body_max_h)
                             }
                             ModalPhase::Downloading {
                                 progress,
@@ -154,47 +160,20 @@ pub fn update_modal(ctx: &egui::Context, app: &mut PerfApp) {
     }
 }
 
-fn modal_title_bar(ui: &mut egui::Ui, theme: &Theme) -> Response {
-    let inner = egui::Frame::NONE
-        .fill(theme.chrome)
-        .inner_margin(Margin::symmetric(TB_PADDING_X, TB_PADDING_Y))
-        .show(ui, |ui| {
-            ui.horizontal(|ui| {
-                ui.label(
-                    egui::RichText::new(crate::format::letter_spaced("\u{2913} UPDATE PERFWINDOW"))
-                        .family(theme.font_display.egui())
-                        .size(13.0)
-                        .color(theme.accent),
-                );
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    close_button(ui, theme)
-                })
-                .inner
-            })
-            .inner
-        });
-
-    let rect = inner.response.rect;
-    ui.painter().add(egui::Shape::line_segment(
-        [rect.left_bottom(), rect.right_bottom()],
-        Stroke::new(1.0_f32, theme.border),
-    ));
-    inner.inner
-}
-
 fn confirm_screen(
     ui: &mut egui::Ui,
     theme: &Theme,
     app: &mut PerfApp,
     release: &crate::update::Release,
     close: &mut bool,
+    body_max_h: f32,
 ) {
     ui.vertical(|ui| {
         ui.spacing_mut().item_spacing.y = 12.0;
 
         ui.label(
             egui::RichText::new(format!(
-                "Current  {}   New  {}",
+                "You have {}. PerfWindow {} is ready to install.",
                 env!("CARGO_PKG_VERSION"),
                 release.tag_name.trim_start_matches('v'),
             ))
@@ -202,6 +181,19 @@ fn confirm_screen(
             .size(12.0)
             .color(theme.ink),
         );
+
+        if let Some(date) = release
+            .published_at
+            .as_deref()
+            .and_then(crate::update::release::format_published_date)
+        {
+            ui.label(
+                egui::RichText::new(format!("Released on {date}"))
+                    .family(theme.font_data.egui())
+                    .size(11.0)
+                    .color(theme.dim),
+            );
+        }
 
         ui.add(egui::Separator::default().horizontal());
 
@@ -212,38 +204,68 @@ fn confirm_screen(
                 .color(theme.accent),
         );
 
+        // Only the notes scroll: the surrounding rows keep their natural
+        // height, so the modal hugs its content and the `ScrollArea` shrinks
+        // whenever the notes fit inside the cap.
+        let notes_h = (body_max_h - CONFIRM_FIXED_BODY_H).max(MIN_NOTES_HEIGHT);
         egui::ScrollArea::vertical()
-            .max_height(220.0)
+            .id_salt("update_notes")
+            .max_height(notes_h)
             .auto_shrink([false, true])
-            .show(ui, |ui| {
-                ui.label(
-                    egui::RichText::new(&release.body)
-                        .family(theme.font_data.egui())
-                        .size(11.0)
-                        .color(theme.dim),
-                );
-            });
+            .show(ui, |ui| release_notes(ui, theme, &release.body));
 
-        ui.label(
-            egui::RichText::new(
-                "The installer will close PerfWindow, install the new version \
-                 and offer to launch it again.",
-            )
-            .family(theme.font_data.egui())
-            .size(11.0)
-            .color(theme.dim),
+        if crate::ui::changelog_modal::link_label(ui, theme, "See the full release notes on GitHub")
+        {
+            crate::ui::shell::open_url(&release.html_url);
+        }
+
+        // The action row is bounded so its right-to-left layout cannot claim
+        // the body's leftover height; the frame's symmetric padding then puts
+        // the buttons at the bottom with the same inset as the header's top.
+        ui.allocate_ui_with_layout(
+            Vec2::new(ui.available_width(), ACTION_ROW_H),
+            egui::Layout::right_to_left(egui::Align::Center),
+            |ui| {
+                if action_button(ui, theme, "Update now", true).clicked() {
+                    start_update_download(ui.ctx(), app, release);
+                }
+                ui.add_space(8.0);
+                if action_button(ui, theme, "Cancel", false).clicked() {
+                    *close = true;
+                }
+            },
         );
-
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            if action_button(ui, theme, "Update now", true).clicked() {
-                start_update_download(ui.ctx(), app, release);
-            }
-            ui.add_space(8.0);
-            if action_button(ui, theme, "Cancel", false).clicked() {
-                *close = true;
-            }
-        });
     });
+}
+
+/// Paint a release body's parsed notes: accent section titles, hanging-indent
+/// bullets, 6 px between items and 14 px between sections.
+fn release_notes(ui: &mut egui::Ui, theme: &Theme, body: &str) {
+    use crate::ui::changelog_modal::{
+        bullet_row, release_notes_nodes, subsection_label, ChangelogNode,
+    };
+
+    // The explicit gaps below are the whole story: without this the ambient
+    // `item_spacing` would add to every `add_space` and inflate the list.
+    ui.spacing_mut().item_spacing.y = 0.0;
+
+    let nodes = release_notes_nodes(body);
+    let mut painted = false;
+    for node in &nodes {
+        match node {
+            ChangelogNode::Subsection(name) => {
+                ui.add_space(if painted { NOTE_SECTION_GAP } else { 0.0 });
+                subsection_label(ui, theme, name);
+                painted = true;
+            }
+            ChangelogNode::Bullet(spans) => {
+                ui.add_space(if painted { NOTE_ITEM_GAP } else { 0.0 });
+                bullet_row(ui, theme, spans);
+                painted = true;
+            }
+            ChangelogNode::VersionHeader { .. } => {}
+        }
+    }
 }
 
 fn downloading_screen(
@@ -281,12 +303,17 @@ fn downloading_screen(
             .color(theme.dim),
         );
 
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            if action_button(ui, theme, "Cancel", false).clicked() {
-                app.update_download_cancel.store(true, Ordering::SeqCst);
-                app.update_modal_phase = ModalPhase::Confirm;
-            }
-        });
+        // Bounded so the row cannot stretch the modal past its content.
+        ui.allocate_ui_with_layout(
+            Vec2::new(ui.available_width(), ACTION_ROW_H),
+            egui::Layout::right_to_left(egui::Align::Center),
+            |ui| {
+                if action_button(ui, theme, "Cancel", false).clicked() {
+                    app.update_download_cancel.store(true, Ordering::SeqCst);
+                    app.update_modal_phase = ModalPhase::Confirm;
+                }
+            },
+        );
     });
 }
 
@@ -322,14 +349,11 @@ fn failed_screen(
 ) {
     let (title, intro) = if launch_failure {
         (
-            "\u{2715} COULD NOT START INSTALLER",
+            "COULD NOT START INSTALLER",
             "The installer downloaded but could not be started:",
         )
     } else {
-        (
-            "\u{2715} DOWNLOAD FAILED",
-            "Could not download the installer:",
-        )
+        ("DOWNLOAD FAILED", "Could not download the installer:")
     };
     ui.vertical(|ui| {
         ui.spacing_mut().item_spacing.y = 12.0;
@@ -357,16 +381,21 @@ fn failed_screen(
             .color(theme.dim),
         );
 
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            if action_button(ui, theme, "Try again", true).clicked() {
-                app.update_modal_phase = ModalPhase::Confirm;
-            }
-            ui.add_space(8.0);
-            if action_button(ui, theme, "Open in browser", false).clicked() {
-                crate::ui::shell::open_url(&release.html_url);
-                *close = true;
-            }
-        });
+        // Bounded so the row cannot stretch the modal past its content.
+        ui.allocate_ui_with_layout(
+            Vec2::new(ui.available_width(), ACTION_ROW_H),
+            egui::Layout::right_to_left(egui::Align::Center),
+            |ui| {
+                if action_button(ui, theme, "Try again", true).clicked() {
+                    app.update_modal_phase = ModalPhase::Confirm;
+                }
+                ui.add_space(8.0);
+                if action_button(ui, theme, "Open in browser", false).clicked() {
+                    crate::ui::shell::open_url(&release.html_url);
+                    *close = true;
+                }
+            },
+        );
     });
 }
 
@@ -510,40 +539,6 @@ fn action_button(ui: &mut egui::Ui, theme: &Theme, label: &str, primary: bool) -
             StrokeKind::Inside,
         );
         painter.galley(rect.min + BTN_PAD, galley, text_color);
-    }
-    if response.hovered() {
-        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
-    }
-    response
-}
-
-fn close_button(ui: &mut egui::Ui, theme: &Theme) -> Response {
-    let font = FontId::new(12.0, theme.font_data.egui());
-    let pad = Vec2::new(9.0, 4.0);
-    let galley = ui
-        .painter()
-        .layout_no_wrap("\u{2715}".to_owned(), font, Color32::PLACEHOLDER);
-    let size = galley.size() + pad * 2.0;
-    let (rect, response) = ui.allocate_exact_size(size, Sense::click());
-
-    if ui.is_rect_visible(rect) {
-        let painter = ui.painter_at(rect);
-        let hovered = response.hovered();
-        let (fill, stroke_color, text_color) = if hovered {
-            (theme.accent, theme.accent, theme.bg)
-        } else {
-            (Color32::TRANSPARENT, theme.border, theme.dim)
-        };
-        if fill != Color32::TRANSPARENT {
-            painter.rect_filled(rect, 0.0, fill);
-        }
-        painter.rect_stroke(
-            rect,
-            0.0,
-            Stroke::new(1.0_f32, stroke_color),
-            StrokeKind::Inside,
-        );
-        painter.galley(rect.min + pad, galley, text_color);
     }
     if response.hovered() {
         ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
