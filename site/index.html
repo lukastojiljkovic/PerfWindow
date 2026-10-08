@@ -39,7 +39,7 @@
             {
                 "@type": "SoftwareApplication",
                 "name": "PerfWindow",
-                "description": "Windows hardware monitor that shows real-time usage, temperatures, clocks, power and SMART drive health for the CPU, GPU, RAM, storage, motherboard, fans, voltages, battery and network in one dashboard, built on LibreHardwareMonitor. No background process or tray icon while it's closed.",
+                "description": "Windows hardware monitor that shows real-time usage, temperatures, clocks, power and SMART drive health for the CPU, GPU, RAM, storage, motherboard, fans, voltages, battery and network in one dashboard that fits any window size or collapses into a one-line strip at the top of the screen, built on LibreHardwareMonitor. No background process or tray icon while it's closed.",
                 "applicationCategory": "UtilitiesApplication",
                 "operatingSystem": "Windows 11, Windows 10 version 1607 or later",
                 "url": "https://lukastojiljkovic.github.io/PerfWindow/",
@@ -59,7 +59,8 @@
                     { "@type": "Question", "name": "Why does PerfWindow ask for administrator approval when it starts?", "acceptedAnswer": { "@type": "Answer", "text": "CPU temperatures, clocks and power, and drive SMART data, can only be read with administrator rights. PerfWindow runs the dashboard as you and asks Windows once per launch to start its sensor service, which reads the hardware." } },
                     { "@type": "Question", "name": "Can PerfWindow change my hardware settings?", "acceptedAnswer": { "@type": "Answer", "text": "No. PerfWindow only reads sensors. It doesn't overclock, undervolt, change fan curves or write to any hardware setting." } },
                     { "@type": "Question", "name": "What is PawnIO and why does the installer add it?", "acceptedAnswer": { "@type": "Answer", "text": "PawnIO is a small, signed kernel driver that LibreHardwareMonitor uses to read CPU temperature, clock and power registers. The installer adds it unless a current version is already installed. Without it, everything except those CPU readings still works." } },
-                    { "@type": "Question", "name": "Does PerfWindow collect any data?", "acceptedAnswer": { "@type": "Answer", "text": "No. Its only connection is an anonymous update check against GitHub's public Releases API, at most once every six hours, which you can turn off in Settings." } }
+                    { "@type": "Question", "name": "Does PerfWindow collect any data?", "acceptedAnswer": { "@type": "Answer", "text": "No. Its only connection is an anonymous update check against GitHub's public Releases API, at most once every six hours, which you can turn off in Settings." } },
+                    { "@type": "Question", "name": "Can PerfWindow stay out of the way?", "acceptedAnswer": { "@type": "Answer", "text": "Yes. The cards fill any window size, and in Settings you can make the window's backgrounds see-through from 100 % to 30 %. Press Ctrl+M, or click MINI in the title bar, to collapse the window into a one-line strip of live values docked to the top of a monitor, the way the taskbar is; the expand button or Ctrl+M brings the full window back." } }
                 ]
             }
         ]
@@ -145,6 +146,10 @@
                 <h3>Network and themes</h3>
                 <p>Throughput and link use, with SSID and signal on Wi-Fi. Six themes, from CRT amber to a plain light one, can follow Windows' light and dark setting.</p>
             </article>
+            <article class="cell">
+                <h3>The window</h3>
+                <p>Cards scale to fill any window, from 720×500 up to a 4K screen, with no scroll bar; the least important readings step aside first. Backgrounds can be made see-through from 100 % down to 30 %, and the window collapses into a one-line strip of live values docked to the top of a monitor, the way the taskbar is.</p>
+            </article>
         </div>
         <div class="screens">
             <figure>
@@ -181,7 +186,7 @@
             <div>
                 <h3>How it's verified</h3>
                 <ul>
-                    <li><b>Unit tests</b> for the dashboard in Rust and the sensor service in .NET run on every push to main and every pull request.</li>
+                    <li><b>343 Rust tests</b> for the dashboard and <b>112 .NET tests</b> for the sensor service run on every push to main and every pull request.</li>
                     <li><b>Clippy</b> with warnings as errors, format checks and a <code>cargo audit</code> of every Rust dependency.</li>
                     <li><b>CI</b> then builds the full installer, with the license texts of every bundled component.</li>
                 </ul>
@@ -192,6 +197,7 @@
                     <li><b>Read what the hardware hides.</b> What appears depends on the board, chips and drivers, and some machines report only part of it.</li>
                     <li><b>Change anything.</b> It reads sensors only: no overclocking, undervolting or fan control.</li>
                     <li><b>Skip the prompt.</b> Admin-only sensors need one approval per launch. The installer isn't code-signed yet, so SmartScreen warns.</li>
+                    <li><b>Move the strip by itself.</b> The mini strip docks to the monitor it was last on; if that monitor goes away it moves to the one the window is on. A crash handler gives its reserved space back, but a forced kill by Windows may leave it until the shell cleans up.</li>
                 </ul>
             </div>
         </div>
@@ -206,6 +212,7 @@
             <details><summary>Can PerfWindow change my hardware settings?</summary><p>No. PerfWindow only reads sensors. It doesn't overclock, undervolt, change fan curves or write to any hardware setting.</p></details>
             <details><summary>What is PawnIO and why does the installer add it?</summary><p><a href="https://pawnio.eu">PawnIO</a> is a small, signed kernel driver that LibreHardwareMonitor uses to read CPU temperature, clock and power registers. The installer adds it unless a current version is already installed. Without it, everything except those CPU readings still works.</p></details>
             <details><summary>Does PerfWindow collect any data?</summary><p>No. Its only connection is an anonymous update check against GitHub's public Releases API, at most once every six hours, which you can turn off in Settings. See the <a href="https://github.com/lukastojiljkovic/PerfWindow/blob/main/PRIVACY.md">privacy statement</a>.</p></details>
+            <details><summary>Can PerfWindow stay out of the way?</summary><p>Yes. The cards fill any window size, and in Settings you can make the window's backgrounds see-through from 100 % to 30 %. Press Ctrl+M, or click MINI in the title bar, to collapse the window into a one-line strip of live values docked to the top of a monitor, the way the taskbar is; the expand button or Ctrl+M brings the full window back.</p></details>
         </div>
     </section>
 </main>

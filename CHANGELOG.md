@@ -7,6 +7,52 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ## [Unreleased]
 
+## [2.0.0] — 2026-10-08
+
+PerfWindow now fits any window, its backgrounds can turn see-through, and it collapses into a taskbar-style strip of live readings. Update notes read as a short list of what changed, and the first launch of a new version opens its changelog once.
+
+### Added
+
+- **Mini strip.** PerfWindow can collapse into a one-line strip of live
+  readings docked to the top of a monitor. The strip reserves that space the
+  way the taskbar does, so other windows maximise below it instead of under
+  it. Press **Ctrl+M** or click the **MINI** chip in the title bar to enter it;
+  the expand button or **Ctrl+M** leaves it. It remembers which monitor it was
+  docked to and which readings it shows, both chosen in **Settings → Mini
+  strip**: CPU and GPU load and temperature, VRAM, RAM, network and battery. A
+  reading with no data shows a dash, a temperature the dashboard would
+  highlight keeps its colour, and a reading that does not fit the monitor's
+  width is dropped from the right.
+- **Background opacity.** A slider in **Settings → Display** makes the window's
+  backgrounds see-through, from 100 % down to 30 %. Text, values, graphs and
+  borders stay solid, so the readings stay legible over whatever is behind the
+  window. It works best together with **Keep window always on top**.
+
+### Changed
+
+- **Update notes are readable.** The update window shows the release's notes
+  grouped New, Improved and Fixed, says which version you have and
+  which one is ready to install, and shows the release date with a link to the
+  full notes on GitHub. It hugs its content, so the buttons sit right under the
+  notes. The first launch of a new version opens the changelog on that
+  version's section once, with a link to the whole log.
+- **The dashboard fits the window.** The cards scale to fill the window at any
+  size, from 720×500 up to a 4K screen, with no empty space and no scroll bar.
+  On small windows the least important readings step aside first, and a value
+  too wide for its column shrinks, then shortens with an ellipsis and shows its
+  full text on hover. The window opens at a size that suits the screen.
+- **Settings, the update window and the changelog share one title bar**, and
+  their close button no longer shows up as an empty box. The settings theme
+  cards line up as a 3 by 2 grid, the settings footer spans the window, and the
+  update banner centres its chips on the text.
+
+### Fixed
+
+- **The usage rings are clean circles.** The dark, clipped shape behind each
+  ring is gone, the track and the coloured arc are the same width, and the
+  centre matches its card at any Background opacity. The theme previews in
+  Settings got the same fix.
+
 ## [0.11.1] — 2026-10-07
 
 ### Changed
@@ -1053,7 +1099,8 @@ User-facing application behaviour is unchanged.
   matching uninstaller that removes the exclusions, the `R0sensord` driver
   service, the install directory and the per-user data directory.
 
-[Unreleased]: https://github.com/lukastojiljkovic/PerfWindow/compare/v0.11.1...HEAD
+[Unreleased]: https://github.com/lukastojiljkovic/PerfWindow/compare/v2.0.0...HEAD
+[2.0.0]: https://github.com/lukastojiljkovic/PerfWindow/compare/v0.11.1...v2.0.0
 [0.11.1]: https://github.com/lukastojiljkovic/PerfWindow/releases/tag/v0.11.1
 [0.11.0]: https://github.com/lukastojiljkovic/PerfWindow/releases/tag/v0.11.0
 [0.10.0]: https://github.com/lukastojiljkovic/PerfWindow/releases/tag/v0.10.0

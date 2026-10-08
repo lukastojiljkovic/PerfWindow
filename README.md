@@ -111,6 +111,12 @@ banner with **Later** suppresses it until the next launch. The check can
 be disabled from **Settings → Updates**, where there is also a manual
 **Check for updates now** action and the timestamp of the last check.
 
+The update window shows the release's notes grouped **New**, **Improved**
+and **Fixed**, says which version you have and which one is ready to
+install, and shows the release date, with a link to the full notes on
+GitHub. The first launch of a new version opens the changelog on that
+version's section once, with a link to the whole log.
+
 No telemetry is sent. The check is a single anonymous HTTPS request to
 GitHub's public Releases API.
 
@@ -229,6 +235,56 @@ switches between them with the system setting.
 
 A **pushpin chip** in the title bar (also exposed in Settings) toggles
 *always on top*, so the dashboard can stay above other windows when desired.
+
+## The window
+
+The dashboard fills whatever window it is given: the cards scale to fit, from
+the 720×500 minimum up to a 4K screen, with no empty space and no scroll bar.
+On a small window the least important readings step aside first; a value too
+wide for its column shrinks, then shortens with an ellipsis, and its full text
+stays on hover. The window opens at a size that suits the screen.
+
+**Background opacity** is a slider in **Settings → Display** that makes the
+window's backgrounds see-through, from 100 % down to 30 %. Text, values,
+graphs and borders stay solid, so the readings stay readable over whatever is
+behind the window; it works best with **Keep window always on top**, the
+switch right above it. The usage rings on the cards are drawn as clean
+circles, so nothing shows behind them at any opacity.
+
+## Mini strip
+
+**Ctrl+M**, or the **MINI** chip in the title bar, collapses PerfWindow into a
+one-line strip of live values docked to the top of a monitor; the expand
+button or **Ctrl+M** brings the full window back. The strip reserves its space
+the way the taskbar does, so other windows maximise below it instead of under
+it. **Settings → Mini strip** chooses which readings it shows — CPU and GPU
+load and temperature, VRAM, RAM, network and battery, left to right — and the
+strip remembers those and the monitor it was docked to. A reading with no data
+shows a dash, a temperature the dashboard would highlight keeps its colour,
+and a reading that does not fit the monitor's width is dropped from the right.
+
+## Limitations
+
+- **The mini strip docks to one monitor.** It remembers the monitor it was last
+  docked to, and there is no control in the app to move it to another one while
+  both are connected. If that monitor is unplugged or turned off, the strip
+  moves to the monitor the full window is on, and remembers that one instead.
+- **The strip shares its edge with the taskbar.** It docks to the top of its
+  monitor and reserves that space, so a monitor whose taskbar is also at the
+  top puts the strip below the taskbar. A fullscreen game is allowed to cover
+  the strip while it runs; the reserved space stays.
+- **A reserved strip comes back on every exit PerfWindow can see** — leaving
+  mini mode, closing the window, a relaunch, and a crash that reaches its
+  crash handler. If Windows ends the process outright (for example from Task
+  Manager) or the PC loses power, the app can't send that release itself, and
+  the space may stay reserved until the shell cleans it up, for example when
+  you sign out or restart.
+- **Background opacity applies to the full window.** The mini strip is always
+  fully opaque.
+- **The full window has a floor of 720×500.** Windows won't let it get smaller,
+  and at that size the layout is already down to its most important readings.
+- **The Settings, update and changelog windows scroll** on a short window; the
+  dashboard grid itself never does.
 
 ## Legal
 
