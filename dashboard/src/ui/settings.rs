@@ -444,36 +444,23 @@ fn theme_preview(ui: &mut egui::Ui, preview: &Theme) {
     preview_bars(&painter, preview, bars_x0, rect.center().y);
 }
 
-/// Draw the preview ring: a 28 px donut filled ~64 % with the previewed
-/// theme's `accent` over its `track`, centre masked with its `panel`.
+/// Draw the preview ring: a 28 px donut filled 64 % with the previewed theme's
+/// `accent` over its `track`, centre masked by its `panel` so the tile shows
+/// that colour. The track and arc share the dashboard gauges' geometry through
+/// [`crate::widgets::gauge::track_and_arc`].
 fn preview_ring(painter: &egui::Painter, preview: &Theme, center: Pos2) {
-    use std::f32::consts::TAU;
     let radius = PREVIEW_RING_D / 2.0;
-    let mid_r = radius - PREVIEW_RING_THICK / 2.0;
-
-    // Approximate each arc as a short polyline; 64 % filled.
-    let arc = |from: f32, to: f32, color: Color32| {
-        let n = (((to - from).abs() * 64.0).ceil() as usize + 1).max(2);
-        let pts: Vec<Pos2> = (0..n)
-            .map(|i| {
-                let t = from + (to - from) * (i as f32 / (n - 1) as f32);
-                let a = t * TAU - std::f32::consts::FRAC_PI_2;
-                center + Vec2::new(a.cos() * mid_r, a.sin() * mid_r)
-            })
-            .collect();
-        painter.add(egui::Shape::line(
-            pts,
-            Stroke::new(PREVIEW_RING_THICK, color),
-        ));
-    };
-    // The full track ring is a plain stroked circle — an open polyline would
-    // leave a hairline seam where its ends meet; the accent is a partial arc.
-    painter.circle_stroke(
+    crate::widgets::gauge::track_and_arc(
+        painter,
         center,
-        mid_r,
-        Stroke::new(PREVIEW_RING_THICK, preview.track),
+        radius,
+        PREVIEW_RING_THICK,
+        preview.track,
+        preview.accent,
+        0.64,
     );
-    arc(0.0, 0.64, preview.accent);
+    // The disc's radius meets the ring's inner edge exactly
+    // (`radius - PREVIEW_RING_THICK`), so no gap or overlap shows between them.
     painter.circle_filled(center, radius - PREVIEW_RING_THICK, preview.panel);
 }
 
