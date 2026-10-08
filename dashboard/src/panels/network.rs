@@ -29,7 +29,7 @@ pub fn network_panel(
     capacity: Capacity,
     min_h: f32,
 ) {
-    card(ui, theme, opacity, min_h, |ui| {
+    card(ui, theme, "NETWORK", opacity, min_h, |ui| {
         panel_title(ui, theme, "NETWORK", net.map(|n| n.adapter.as_str()));
 
         let Some(net) = net else {

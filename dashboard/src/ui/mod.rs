@@ -14,9 +14,17 @@
 pub mod capacity;
 pub mod changelog_modal;
 pub mod effects;
+pub mod fit;
 pub mod health_banner;
 pub mod loading_screen;
 pub mod modal;
+// The geometry recorder is a test-only instrument: production builds link the
+// empty stub so the shipping binary never pays for a rectangle it discards.
+#[cfg(any(test, feature = "test-support"))]
+pub mod recorder;
+#[cfg(not(any(test, feature = "test-support")))]
+#[path = "recorder_stub.rs"]
+pub mod recorder;
 pub mod settings;
 pub mod shell;
 pub mod stat_priority;
@@ -44,9 +52,6 @@ const GRID_GAP: f32 = 10.0;
 const GRID_BODY_PADDING: i8 = 13;
 /// Period, in seconds, of the wordmark's blinking block cursor.
 const CURSOR_BLINK_PERIOD: f64 = 1.1;
-/// Column-count breakpoints, in pixels of available grid width.
-const BREAKPOINT_4_COLS: f32 = 1100.0;
-const BREAKPOINT_3_COLS: f32 = 820.0;
 
 /// Draw the title bar: a `chrome`-filled strip with the wordmark on the left and
 /// a row of control chips on the right, closed by a 1 px `border` bottom rule.
@@ -351,6 +356,8 @@ fn foot_item(ui: &mut egui::Ui, theme: &Theme, text: &str) -> egui::Response {
 /// When the sensor feed has died ([`Status::SensordDown`]) the grid is replaced
 /// wholesale by [`error_overlay`] — the stale panels are not drawn behind it.
 pub fn card_grid(ui: &mut egui::Ui, app: &mut PerfApp) {
+    // A fresh frame of geometry for the test-only recorder.
+    recorder::begin();
     // Connecting: show the loading screen so the 5-15 s startup window reads
     // as deliberate progress rather than a "sensor feed stopped" failure.
     // `Status::Connecting(_)` is held by `poll_connect_events`; the guard in
@@ -392,91 +399,189 @@ pub fn card_grid(ui: &mut egui::Ui, app: &mut PerfApp) {
         return;
     }
 
-    // Everything below only reads, so demote to a shared borrow: `snap` can
-    // then alias `app.latest` directly instead of deep-cloning the snapshot
-    // every frame.
-    //
     // The `None` arm is a defensive safety net: every `Running`/no-snapshot
     // path is already absorbed by the loading-screen fallback above, so in
     // practice this branch is unreachable.
-    let app: &PerfApp = app;
-    let Some(snap) = app.latest.as_ref() else {
+    if app.latest.is_none() {
         waiting_note(ui, &app.theme);
         return;
+    }
+
+    // Gather the card set and its geometry before painting: the plan is
+    // cached on `app` (a mutable borrow), and painting then holds `app`
+    // shared. The metric vectors own their data, so no snapshot borrow
+    // survives the block.
+    let (cards, metrics, plan, shed) = {
+        let snap = app.latest.as_ref().expect("checked above");
+        let cards = card_list(snap);
+        let metrics: Vec<fit::CardMetrics> = cards.iter().map(|&c| c.metrics(snap)).collect();
+
+        // The zoom decision is measured against the window's *physical* size
+        // so that applying a zoom next frame cannot feed back into the
+        // decision; see `zoom_one_window`. The chrome (title bar, banners,
+        // footer) is part of the zoomed UI, so what remains for the grid is
+        // that size minus the chrome height, all in zoom-1.0 points.
+        let ctx = ui.ctx();
+        let physical = window_points(ctx) * ctx.pixels_per_point();
+        let native = ctx.native_pixels_per_point().unwrap_or(1.0);
+        let zoom1 = zoom_one_window(ctx);
+        // The chrome is measured in the points of the *current* zoom, so it is
+        // scaled back up to zoom-1.0 points before it is subtracted from the
+        // zoom-1.0 window height (mixing the two units would make the decision
+        // depend on the zoom it produces).
+        let chrome_h = (window_points(ctx).y - ui.available_height()).max(0.0) * ctx.zoom_factor();
+        let key = fit::FitKey::new(
+            physical.x,
+            physical.y,
+            native,
+            chrome_h,
+            card_set_signature(snap, &cards),
+        );
+        let plan = app.plan_for(key, &metrics, zoom1.x, (zoom1.y - chrome_h).max(1.0));
+        apply_zoom(ctx, plan.zoom);
+        // Fit the grid to the panel this frame actually got, not the planned
+        // one: `set_zoom_factor` only takes effect next pass. The panel's
+        // available height is already the grid's *outer* budget (padding
+        // included), which is what `grid_height` reports.
+        let panel_h = ui.available_height();
+        let shed = fit::shed_for(&metrics, plan.cols, panel_h);
+        (cards, metrics, plan, shed)
     };
+
+    // Painting only reads the app.
+    let app: &PerfApp = app;
+    let snap = app.latest.as_ref().expect("checked above");
+    let cols = plan.cols;
+    let spans = fit::effective_spans(&metrics, cols);
 
     let frame = egui::Frame::NONE.inner_margin(Margin::same(GRID_BODY_PADDING));
     frame.show(ui, |ui| {
-        // Build the ordered list of cards to draw. Each variant carries only an
-        // index; the panel data is read back out of `snap` / `app` at paint time.
-        let mut cards: Vec<Card> = Vec::new();
-        if snap.cpu.is_some() {
-            cards.push(Card::Cpu);
-        }
-        if let Some(gpus) = &snap.gpu {
-            for i in 0..gpus.len() {
-                cards.push(Card::Gpu(i));
-            }
-        }
-        if snap.igpu.is_some() {
-            cards.push(Card::Igpu);
-        }
-        if snap.ram.is_some() {
-            cards.push(Card::Ram);
-        }
-        cards.push(Card::Network);
-        if snap.battery.is_some() {
-            cards.push(Card::Battery);
-        }
-        if snap.storage.is_some() {
-            cards.push(Card::Storage);
-        }
-        if panels::sensors::has_content(
-            snap.board.as_ref(),
-            snap.fans.as_deref().unwrap_or(&[]),
-            snap.voltages.as_deref().unwrap_or(&[]),
-        ) {
-            cards.push(Card::Sensors);
-        }
-
+        // Widths are measured *inside* the grid frame, after its padding.
         let avail_w = ui.available_width();
-        let cols = column_count(avail_w);
         let col_width = ((avail_w - GRID_GAP * (cols as f32 - 1.0)) / cols as f32).max(1.0);
-
-        let spans = layout_spans(&cards, cols);
-        layout_cards(ui, app, snap, &cards, &spans, cols, col_width);
+        layout_cards(
+            ui, app, snap, &cards, &spans, &metrics, cols, col_width, shed,
+        );
+        crate::ui::recorder::grid(ui.min_rect());
     });
 }
 
-/// Fixed outer height of the "summary" cards in the top row (CPU, GPU, RAM,
-/// Network). Tuned so the GPU card's worst case — six stat rows per column
-/// (11 candidates: the v0.10.0 MEM CLK / VIDEO rows joined the list) plus
-/// legend and sparkline — fits with no chin, and every other card in the row
-/// pads up to match (their sparklines absorb the slack).
-const ROW_1_CARD_HEIGHT: f32 = 287.0;
-/// Baseline for the Storage card (title row + column header + padding).
+/// Build the ordered list of cards to draw from `snap`. Each variant carries
+/// only an index; the panel data is read back out of the snapshot at paint
+/// time.
+fn card_list(snap: &crate::ipc::Snapshot) -> Vec<Card> {
+    let mut cards: Vec<Card> = Vec::new();
+    if snap.cpu.is_some() {
+        cards.push(Card::Cpu);
+    }
+    if let Some(gpus) = &snap.gpu {
+        for i in 0..gpus.len() {
+            cards.push(Card::Gpu(i));
+        }
+    }
+    if snap.igpu.is_some() {
+        cards.push(Card::Igpu);
+    }
+    if snap.ram.is_some() {
+        cards.push(Card::Ram);
+    }
+    cards.push(Card::Network);
+    if snap.battery.is_some() {
+        cards.push(Card::Battery);
+    }
+    if snap.storage.is_some() {
+        cards.push(Card::Storage);
+    }
+    if panels::sensors::has_content(
+        snap.board.as_ref(),
+        snap.fans.as_deref().unwrap_or(&[]),
+        snap.voltages.as_deref().unwrap_or(&[]),
+    ) {
+        cards.push(Card::Sensors);
+    }
+    cards
+}
+
+/// FNV-1a signature of the ordered card set plus the one card whose height
+/// depends on its contents (storage, one rung per disk). Invalidates the
+/// cached fit when a GPU appears, a disk disappears, and so on.
+fn card_set_signature(snap: &crate::ipc::Snapshot, cards: &[Card]) -> u64 {
+    let mut hash = 0xcbf2_9ce4_8422_2325u64;
+    let mut mix = |value: u64| {
+        hash ^= value;
+        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+    };
+    for &card in cards {
+        mix(match card {
+            Card::Cpu => 1,
+            Card::Gpu(i) => 10 + i as u64,
+            Card::Igpu => 100,
+            Card::Ram => 200,
+            Card::Storage => 300,
+            Card::Sensors => 400,
+            Card::Network => 500,
+            Card::Battery => 600,
+        });
+    }
+    mix(snap.storage.as_ref().map_or(0, |s| s.len()) as u64);
+    hash
+}
+
+/// Outer height of a row-1 card (CPU, GPU, iGPU, RAM, Network) at full
+/// content: an eleven-candidate GPU block plus its legend, load donut and a
+/// comfortable sparkline. Every other card in the row pads up to it.
+const ROW_1_FULL_HEIGHT: f32 = 302.0;
+/// Row-1 height with the stat block capped at eight candidates.
+const ROW_1_MID_HEIGHT: f32 = 238.0;
+/// Row-1 floor: title, load donut, legend, padding and a minimum-height
+/// sparkline. Dropping further stat rows cannot shrink the card past the
+/// donut.
+const ROW_1_FLOOR_HEIGHT: f32 = 212.0;
+/// Outer height of the Battery card (title + charge donut + stat rows).
+const BATTERY_HEIGHT: f32 = 138.0;
+/// Sensors card heights, paired with [`SENSORS_ROWS`], fullest first.
+const SENSORS_HEIGHTS: [f32; 5] = [302.0, 238.0, 212.0, 140.0, 108.0];
+/// Stat-row budgets matching [`SENSORS_HEIGHTS`].
+const SENSORS_ROWS: [usize; 5] = [11, 8, 6, 4, 2];
+/// Baseline for the Storage card: title row, column header and padding.
 const STORAGE_BASE_HEIGHT: f32 = 72.0;
-/// Per-disk row height inside the Storage card.
-const STORAGE_DISK_ROW_HEIGHT: f32 = 42.0;
-/// Fixed outer height of the Sensors card when populated. Wide enough for
-/// up to ~6 readouts in two columns.
-const SENSORS_CARD_HEIGHT: f32 = 210.0;
-/// Fixed outer height of the Battery card (donut + four stat rows, no sparkline).
-const BATTERY_CARD_HEIGHT: f32 = 170.0;
+/// Vertical step per disk row inside the Storage card.
+const STORAGE_DISK_ROW_HEIGHT: f32 = 46.0;
 
 impl Card {
-    /// Predicted outer card height for this card given the snapshot data.
-    /// Used by `layout_cards` to align every card in the same row to a
-    /// single max height, deterministically (one pass, no memoisation).
-    fn intrinsic_height(self, snap: &crate::ipc::Snapshot) -> f32 {
-        match self {
-            Card::Cpu | Card::Gpu(_) | Card::Igpu | Card::Ram | Card::Network => ROW_1_CARD_HEIGHT,
+    /// Geometry the zoom-to-fit planner needs for this card: the ladder of
+    /// content heights, fullest first. Each rung's height is the outer card
+    /// height measured for the stat budget on the same rung, so the planner
+    /// picks a height at which the panel provably fits.
+    fn metrics(self, snap: &crate::ipc::Snapshot) -> fit::CardMetrics {
+        let row1 = |height: f32, rows: usize| fit::CardTier { height, rows };
+        let tiers = match self {
+            Card::Cpu | Card::Gpu(_) | Card::Igpu | Card::Ram | Card::Network => vec![
+                row1(ROW_1_FULL_HEIGHT, 11),
+                row1(ROW_1_MID_HEIGHT, 8),
+                row1(ROW_1_FLOOR_HEIGHT, 6),
+            ],
+            Card::Battery => vec![row1(BATTERY_HEIGHT, 2)],
+            Card::Sensors => SENSORS_HEIGHTS
+                .iter()
+                .zip(SENSORS_ROWS)
+                .map(|(&height, rows)| row1(height, rows))
+                .collect(),
             Card::Storage => {
-                let n = snap.storage.as_ref().map(|s| s.len()).unwrap_or(0) as f32;
-                STORAGE_BASE_HEIGHT + STORAGE_DISK_ROW_HEIGHT * n
+                // One rung per disk count, fullest first; the last rung keeps
+                // a single disk so the card still reports something.
+                let disks = snap.storage.as_ref().map(|s| s.len()).unwrap_or(0).max(1);
+                (1..=disks)
+                    .rev()
+                    .map(|n| row1(STORAGE_BASE_HEIGHT + STORAGE_DISK_ROW_HEIGHT * n as f32, n))
+                    .collect()
             }
-            Card::Sensors => SENSORS_CARD_HEIGHT,
-            Card::Battery => BATTERY_CARD_HEIGHT,
+        };
+        fit::CardMetrics {
+            span: self.base_span(),
+            elastic: matches!(self, Card::Storage),
+            reserves: matches!(self, Card::Network | Card::Battery | Card::Sensors),
+            tiers,
         }
     }
 }
@@ -509,45 +614,40 @@ impl Card {
     }
 }
 
-/// Compute the column span for each card given the column budget. Storage is
-/// elastic so it always fills the row width that the other "row 2" cards
-/// (Network, Battery, Sensors) leave behind:
-/// * `Network` is always present, so 1 column is always reserved for it.
-/// * Each of `Battery` and `Sensors` reserves another column when they exist.
-/// * Storage then takes the remainder, with a 2-column minimum so it does not
-///   collapse to a single thin column when many "row 2" cards are present.
-fn layout_spans(cards: &[Card], cols: usize) -> Vec<usize> {
-    let mut spans: Vec<usize> = cards.iter().map(|c| c.base_span().min(cols)).collect();
-    let has_network = cards.iter().any(|c| matches!(c, Card::Network));
-    let has_battery = cards.iter().any(|c| matches!(c, Card::Battery));
-    let has_sensors = cards.iter().any(|c| matches!(c, Card::Sensors));
-    let reserved = (has_network as usize) + (has_battery as usize) + (has_sensors as usize);
-
-    for i in 0..spans.len() {
-        if matches!(cards[i], Card::Storage) {
-            // If "row 2" cards are present, share the row with them; otherwise
-            // let Storage take the full width when nothing follows.
-            if reserved > 0 {
-                spans[i] = cols.saturating_sub(reserved).max(2);
-            } else {
-                let following_spans: usize = spans[i + 1..].iter().sum();
-                if following_spans == 0 {
-                    spans[i] = cols;
-                }
-            }
-        }
-    }
-    spans
+/// The window's content size in *points at the current zoom*, falling back to
+/// the input screen rect for backends (such as the test harness) that do not
+/// report a viewport rectangle.
+fn window_points(ctx: &egui::Context) -> Vec2 {
+    ctx.input(|i| {
+        i.viewport()
+            .inner_rect
+            .map(|r| r.size())
+            .unwrap_or_else(|| i.content_rect().size())
+    })
 }
 
-/// Choose a column count from the available grid width.
-fn column_count(avail: f32) -> usize {
-    if avail >= BREAKPOINT_4_COLS {
-        4
-    } else if avail >= BREAKPOINT_3_COLS {
-        3
-    } else {
-        2
+/// The window's content size in zoom-1.0 points.
+///
+/// Derived from the *physical* pixel size (current points times the current
+/// pixels-per-point), so it is invariant under the zoom the renderer applies:
+/// a decision taken from a size that the zoom itself had already divided would
+/// drift frame after frame.
+fn zoom_one_window(ctx: &egui::Context) -> Vec2 {
+    let pp = ctx.pixels_per_point().max(f32::MIN_POSITIVE);
+    let native = ctx
+        .native_pixels_per_point()
+        .unwrap_or(1.0)
+        .max(f32::MIN_POSITIVE);
+    window_points(ctx) * pp / native
+}
+
+/// Push the fitted zoom onto the context, but only when it differs from the
+/// current one by more than [`fit::ZOOM_EPSILON`]. Keeping the current zoom for
+/// sub-percent changes stops the scale factor from creeping every frame.
+fn apply_zoom(ctx: &egui::Context, zoom: f32) {
+    let current = ctx.zoom_factor();
+    if (zoom / current - 1.0).abs() > fit::ZOOM_EPSILON {
+        ctx.set_zoom_factor(zoom);
     }
 }
 
@@ -556,17 +656,36 @@ fn column_count(avail: f32) -> usize {
 /// Each row is one `ui.horizontal`; a single-width card is allocated
 /// `col_width`, the double-width Storage card `2*col_width + GRID_GAP`. A card
 /// that would not fit in the columns left on the current row starts a new row.
+///
+/// Row heights come from [`fit::row_heights`] at the chosen shed rung. Any
+/// height left over after the last row is shared equally, so every row grows
+/// together and the window has no empty band.
+#[allow(clippy::too_many_arguments)]
 fn layout_cards(
     ui: &mut egui::Ui,
     app: &PerfApp,
     snap: &crate::ipc::Snapshot,
     cards: &[Card],
     spans: &[usize],
+    metrics: &[fit::CardMetrics],
     cols: usize,
     col_width: f32,
+    shed: fit::Shed,
 ) {
     ui.spacing_mut().item_spacing = Vec2::splat(GRID_GAP);
 
+    let mut row_heights = fit::row_heights(metrics, cols, shed);
+    let content_avail_h = ui.available_height();
+    if !row_heights.is_empty() {
+        let gaps = GRID_GAP * (row_heights.len() as f32 - 1.0);
+        let natural = row_heights.iter().sum::<f32>() + gaps;
+        let share = ((content_avail_h - natural) / row_heights.len() as f32).max(0.0);
+        for h in &mut row_heights {
+            *h += share;
+        }
+    }
+
+    let mut row = 0usize;
     let mut idx = 0;
     while idx < cards.len() {
         // Greedily fill one row, respecting card spans and the column budget.
@@ -582,20 +701,18 @@ fn layout_cards(
             idx += 1;
         }
 
-        // Row height = the tallest intrinsic among the cards in this row.
-        // One-pass computation from the static heights — deterministic, no
-        // feedback loop, no frame-to-frame drift.
-        let row_h = row_indices
-            .iter()
-            .map(|&i| cards[i].intrinsic_height(snap))
-            .fold(0.0_f32, f32::max);
+        // Row height comes from the shed plan, pre-computed for every row
+        // before any card is painted, so the layout is deterministic and has
+        // no frame-to-frame feedback loop.
+        let row_h = row_heights.get(row).copied().unwrap_or(ROW_1_FULL_HEIGHT);
+        row += 1;
 
         ui.horizontal_top(|ui| {
             ui.spacing_mut().item_spacing.x = GRID_GAP;
             for &i in &row_indices {
                 let span = spans[i];
                 let card_w = col_width * span as f32 + GRID_GAP * (span as f32 - 1.0);
-                let capacity = crate::ui::capacity::Capacity::from_card_width(card_w);
+                let capacity = crate::ui::capacity::Capacity::from_card_size(card_w, row_h);
                 // Allocate sub-UI at the full row height so widgets inside
                 // (sparkline) see the true available_height and can grow to
                 // fill the card without leaving a chin at the bottom.
@@ -758,25 +875,34 @@ pub fn error_overlay(ui: &mut egui::Ui, app: &mut PerfApp, ctx: &egui::Context) 
             Layout::top_down(Align::Center),
             |ui| {
                 ui.set_width(ERROR_CARD_WIDTH);
-                panels::card(ui, &theme, app.config.background_opacity, 0.0, |ui| {
-                    // `hot` heading — the alarm line, in the display font.
-                    ui.label(
-                        RichText::new(letter_spaced("SENSOR FEED STOPPED"))
-                            .family(theme.font_display.egui())
-                            .size(13.0)
-                            .color(theme.hot),
-                    );
-                    // `dim` explanatory line, wrapped to the card width.
-                    ui.label(
-                        RichText::new("The sensor process exited. Hardware readings are paused.")
+                panels::card(
+                    ui,
+                    &theme,
+                    "ERROR",
+                    app.config.background_opacity,
+                    0.0,
+                    |ui| {
+                        // `hot` heading — the alarm line, in the display font.
+                        ui.label(
+                            RichText::new(letter_spaced("SENSOR FEED STOPPED"))
+                                .family(theme.font_display.egui())
+                                .size(13.0)
+                                .color(theme.hot),
+                        );
+                        // `dim` explanatory line, wrapped to the card width.
+                        ui.label(
+                            RichText::new(
+                                "The sensor process exited. Hardware readings are paused.",
+                            )
                             .family(theme.font_data.egui())
                             .size(11.0)
                             .color(theme.dim),
-                    );
-                    if respawn_button(ui, &theme).clicked() {
-                        respawn = true;
-                    }
-                });
+                        );
+                        if respawn_button(ui, &theme).clicked() {
+                            respawn = true;
+                        }
+                    },
+                );
             },
         );
     });

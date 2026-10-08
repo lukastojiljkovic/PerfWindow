@@ -59,6 +59,106 @@ fn main() -> eframe::Result {
 /// failures, and must not trigger the wgpu relaunch.
 const RENDERER_FALLBACK_WINDOW: std::time::Duration = std::time::Duration::from_secs(10);
 
+/// Design aspect ratio the startup window is sized to (width : height).
+const DESIGN_WINDOW: [f32; 2] = [1180.0, 600.0];
+/// The startup window fills at most this fraction of the monitor work area.
+const WORK_AREA_FRACTION: f32 = 0.8;
+/// Minimum inner size the user may shrink the window to.
+const MIN_INNER_SIZE: [f32; 2] = [720.0, 500.0];
+
+/// The primary monitor's work area, in logical points, as
+/// `(x, y, width, height)`.
+///
+/// `SystemParametersInfoW(SPI_GETWORKAREA)` reports physical pixels for this
+/// per-monitor-DPI-aware process, so the values are divided by the system DPI
+/// scale to get the logical points egui sizes windows in. Returns `None` when
+/// the API fails, in which case the caller falls back to the design size.
+fn primary_work_area_points() -> Option<(f32, f32, f32, f32)> {
+    const SPI_GETWORKAREA: u32 = 0x0030;
+
+    #[repr(C)]
+    struct Rect {
+        left: i32,
+        top: i32,
+        right: i32,
+        bottom: i32,
+    }
+
+    #[link(name = "user32")]
+    extern "system" {
+        fn SystemParametersInfoW(
+            action: u32,
+            param: u32,
+            value: *mut std::ffi::c_void,
+            win_ini: u32,
+        ) -> i32;
+        fn GetDpiForSystem() -> u32;
+    }
+
+    let mut rect = Rect {
+        left: 0,
+        top: 0,
+        right: 0,
+        bottom: 0,
+    };
+    // SAFETY: `rect` is a live, correctly-typed `RECT` and the action carries
+    // no other parameters.
+    let ok =
+        unsafe { SystemParametersInfoW(SPI_GETWORKAREA, 0, &mut rect as *mut Rect as *mut _, 0) };
+    if ok == 0 {
+        return None;
+    }
+    // SAFETY: `GetDpiForSystem` takes no arguments and cannot fail.
+    let dpi = unsafe { GetDpiForSystem() };
+    let dpi = if dpi == 0 { 96 } else { dpi };
+    let scale = dpi as f32 / 96.0;
+    Some((
+        rect.left as f32 / scale,
+        rect.top as f32 / scale,
+        (rect.right - rect.left) as f32 / scale,
+        (rect.bottom - rect.top) as f32 / scale,
+    ))
+}
+
+/// Compute the startup window's inner size and centre position, in logical
+/// points, from the primary monitor's work area.
+///
+/// The window keeps the design aspect ratio, grows to fill 80 % of the work
+/// area, is never smaller than the design size while the work area can hold
+/// it, and is never larger than the work area itself.
+fn startup_window_geometry() -> ([f32; 2], Option<[f32; 2]>) {
+    let Some((area_x, area_y, area_w, area_h)) = primary_work_area_points() else {
+        return (DESIGN_WINDOW, None);
+    };
+    let (size, position) = window_geometry_in_work_area(area_x, area_y, area_w, area_h);
+    (size, Some(position))
+}
+
+/// Pure form of [`startup_window_geometry`], for the sizes the maintainer can
+/// reason about without a monitor attached.
+fn window_geometry_in_work_area(
+    area_x: f32,
+    area_y: f32,
+    area_w: f32,
+    area_h: f32,
+) -> ([f32; 2], [f32; 2]) {
+    let scale = (WORK_AREA_FRACTION * area_w / DESIGN_WINDOW[0])
+        .min(WORK_AREA_FRACTION * area_h / DESIGN_WINDOW[1]);
+    let mut width = DESIGN_WINDOW[0] * scale;
+    let mut height = DESIGN_WINDOW[1] * scale;
+    if area_w >= DESIGN_WINDOW[0] && area_h >= DESIGN_WINDOW[1] {
+        width = width.max(DESIGN_WINDOW[0]);
+        height = height.max(DESIGN_WINDOW[1]);
+    }
+    width = width.min(area_w);
+    height = height.min(area_h);
+    let position = [
+        area_x + (area_w - width) / 2.0,
+        area_y + (area_h - height) / 2.0,
+    ];
+    ([width, height], position)
+}
+
 /// Last-resort visibility: both renderer attempts failed before a window ever
 /// appeared, so without this the app exits silently ("nothing happened"). A
 /// native message box needs no working GPU pipeline.
@@ -92,6 +192,11 @@ fn run_app(dev_mode: bool, renderer: eframe::Renderer) -> eframe::Result {
     // behind other windows on launch. `PerfApp::new` re-reads the config and
     // is the canonical owner; this peek is purely a cosmetic-startup fix.
     let initially_on_top = Config::load().always_on_top;
+    // Open as large as the monitor sensibly allows: the grid zooms to whatever
+    // window it gets, so a small default window would only make the dashboard
+    // cramped. The minimum stays small enough that the user can still shrink
+    // the window deliberately.
+    let (inner_size, position) = startup_window_geometry();
     let mut viewport = egui::ViewportBuilder::default()
         .with_title("PerfWindow")
         // The Background opacity setting dims the window's surface fills so
@@ -100,13 +205,11 @@ fn run_app(dev_mode: bool, renderer: eframe::Renderer) -> eframe::Result {
         // honour it; at 100 % every surface is painted opaque, so the window
         // looks exactly as it did before the setting existed.
         .with_transparent(true)
-        // Default size matches the grid's natural footprint so the window
-        // opens with no empty band. Min height equals the default height
-        // so the user cannot shrink the window into the cards; min width
-        // sits just below the 4-col breakpoint so the grid can collapse
-        // to 3 cols when the user shrinks the window deliberately.
-        .with_inner_size([1180.0, 600.0])
-        .with_min_inner_size([720.0, 500.0]);
+        .with_inner_size(inner_size)
+        .with_min_inner_size(MIN_INNER_SIZE);
+    if let Some(position) = position {
+        viewport = viewport.with_position(position);
+    }
     if initially_on_top {
         viewport = viewport.with_always_on_top();
     }
@@ -501,5 +604,33 @@ mod tests {
         rotate_if_oversized(&log);
         assert!(!log.exists());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_large_work_area_grows_the_window_past_the_design_size() {
+        // 1920x1080 at 100 %: 80 % is 1536x864, and the design aspect ratio
+        // caps the height at 600/1180 * 1536 = 781.
+        let (size, position) = window_geometry_in_work_area(0.0, 0.0, 1920.0, 1080.0);
+        assert!((size[0] - 1536.0).abs() < 0.5, "width was {}", size[0]);
+        assert!((size[1] - 780.5).abs() < 1.0, "height was {}", size[1]);
+        // Centred in the work area.
+        assert!((position[0] - (1920.0 - size[0]) / 2.0).abs() < 0.5);
+        assert!((position[1] - (1080.0 - size[1]) / 2.0).abs() < 0.5);
+    }
+
+    #[test]
+    fn a_work_area_that_fits_the_design_size_never_shrinks_below_it() {
+        // 1366x768 at 100 %: 80 % is 1092x614, but the work area can hold the
+        // full design size, so the window stays at least 1180x600.
+        let (size, _) = window_geometry_in_work_area(0.0, 0.0, 1366.0, 768.0);
+        assert!(size[0] >= 1180.0 && size[1] >= 600.0, "size was {size:?}");
+    }
+
+    #[test]
+    fn a_tiny_work_area_clamps_to_it_and_keeps_the_aspect_ratio() {
+        let (size, position) = window_geometry_in_work_area(100.0, 50.0, 640.0, 400.0);
+        assert!(size[0] <= 640.0 && size[1] <= 400.0);
+        assert!((size[0] / size[1] - 1180.0 / 600.0).abs() < 0.02);
+        assert!((position[0] - (100.0 + (640.0 - size[0]) / 2.0)).abs() < 0.5);
     }
 }

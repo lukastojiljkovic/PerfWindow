@@ -34,7 +34,7 @@ pub fn gpu_panel(
     let integrated = gpu.kind == "integrated";
     let title = if integrated { "iGPU" } else { "GPU" };
 
-    card(ui, theme, opacity, min_h, |ui| {
+    card(ui, theme, title, opacity, min_h, |ui| {
         panel_title(ui, theme, title, Some(&gpu.name));
 
         // Load donut on the left, priority-ranked stat rows on the right.

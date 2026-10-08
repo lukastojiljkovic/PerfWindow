@@ -22,6 +22,12 @@ const DISK_FR: f32 = 1.7;
 /// Height of one disk row (taller to fit a secondary `R\u{2193} … W\u{2191} …`
 /// throughput line under the disk name).
 const DISK_ROW_H: f32 = 38.0;
+/// Outer height of the card above its disk rows: card padding, title row and
+/// the column-header row. Mirrors `ui::STORAGE_BASE_HEIGHT`.
+const TABLE_HEAD_H: f32 = 72.0;
+/// Outer height each disk row adds, including the inter-item spacing. Mirrors
+/// `ui::STORAGE_DISK_ROW_HEIGHT`.
+const DISK_ROW_STEP: f32 = 46.0;
 /// Activity percentage at/above which the activity bar switches to its warn colour.
 const ACTIVITY_WARN: f64 = 80.0;
 
@@ -45,21 +51,29 @@ pub fn storage_panel(
     // `layout_spans` in ui/mod.rs), so its allocated width is always wide
     // enough to fit the TEMP column at every viable window size.
     let show_temp = true;
+    // The zoom-to-fit layout can hand the card less than its natural height;
+    // drop whole disk rows from the bottom rather than let one overflow the
+    // frame, and report the count that actually made it.
+    let shown = row_budget(min_h).min(disks.len());
 
-    card(ui, theme, opacity, min_h, |ui| {
-        panel_title(
-            ui,
-            theme,
-            "STORAGE",
-            Some(&format!("{} DISKS", disks.len())),
-        );
+    card(ui, theme, "STORAGE", opacity, min_h, |ui| {
+        panel_title(ui, theme, "STORAGE", Some(&format!("{shown} DISKS")));
 
         header_row(ui, theme, show_temp);
 
-        for disk in disks {
+        for disk in disks.iter().take(shown) {
             disk_row(ui, theme, disk, unit, show_temp);
         }
     });
+}
+
+/// How many disk rows fit in a card `min_h` points tall. Returns zero when the
+/// card only has room for its title and header.
+fn row_budget(min_h: f32) -> usize {
+    if !min_h.is_finite() || min_h <= TABLE_HEAD_H {
+        return 0;
+    }
+    (((min_h - TABLE_HEAD_H) / DISK_ROW_STEP).floor() as usize).max(1)
 }
 
 /// Split the available row width into the column widths honouring the
@@ -182,7 +196,7 @@ fn disk_row(ui: &mut egui::Ui, theme: &Theme, disk: &StorageInfo, unit: TempUnit
             format_bytes_per_sec(w),
         );
         let rw_font = FontId::new(9.0, theme.font_data.egui());
-        let rw_galley = painter.layout_no_wrap(rw_str, rw_font, theme.dim);
+        let rw_galley = painter.layout_job(ellipsised_job(&rw_str, rw_font, theme.dim, widths[0]));
         painter.galley(
             Pos2::new(rect.min.x, name_y + name_h + 2.0),
             rw_galley,

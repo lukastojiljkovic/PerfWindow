@@ -22,6 +22,8 @@ const CARD_PADDING: i8 = 11;
 const CARD_ITEM_SPACING: f32 = 10.0;
 /// Thickness of the accent line along the card's top edge.
 const TOP_ACCENT_THICKNESS: f32 = 2.0;
+/// Width of the card's border stroke.
+const CARD_STROKE: f32 = 1.0;
 /// Height of a panel's empty-state row — a single centred dimmed line.
 const EMPTY_NOTE_H: f32 = 22.0;
 
@@ -36,31 +38,38 @@ const EMPTY_NOTE_H: f32 = 22.0;
 /// desired outer card height; when intrinsic content is shorter the body is
 /// padded so all cards in a row come out the same height. Pass `0.0` for "no
 /// minimum".
+///
+/// `name` labels the card for the test-only geometry recorder.
 pub fn card(
     ui: &mut egui::Ui,
     theme: &Theme,
+    name: &str,
     opacity: u8,
     min_h: f32,
     contents: impl FnOnce(&mut egui::Ui),
 ) {
+    let slot = ui.max_rect();
     let frame = Frame::NONE
         .fill(theme.surface(theme.panel, opacity))
-        .stroke(Stroke::new(1.0_f32, theme.border))
+        .stroke(Stroke::new(CARD_STROKE, theme.border))
         .inner_margin(Margin::same(CARD_PADDING));
 
     let inner = frame.show(ui, |ui| {
         ui.spacing_mut().item_spacing.y = CARD_ITEM_SPACING;
-        contents(ui);
-        // Pad the body so the outer card frame reaches `min_h`. The frame's
-        // inner_margin contributes `CARD_PADDING * 2` to the outer height;
-        // subtract it before comparing.
+        // Pad the body so the outer card frame reaches `min_h`. Setting the
+        // inner Ui's minimum height (rather than adding trailing space) keeps
+        // the frame exactly `min_h` tall: the frame's rect is the inner rect
+        // plus the margin, so an explicit minimum makes it exact while the
+        // widgets above still read the true `available_height` for their own
+        // stretching.
         if min_h > 0.0 {
-            let body_target = (min_h - CARD_PADDING as f32 * 2.0).max(0.0);
-            let used = ui.min_rect().height();
-            if body_target > used {
-                ui.add_space(body_target - used);
-            }
+            // The frame's outer rect is the body plus the margin plus the
+            // stroke drawn on both sides, so both must come off the body's
+            // minimum for the card to land exactly on `min_h`.
+            let body_target = (min_h - CARD_PADDING as f32 * 2.0 - CARD_STROKE * 2.0).max(0.0);
+            ui.set_min_height(body_target);
         }
+        contents(ui);
     });
 
     // Paint the accent strip over the card's top edge. Drawn after the frame so
@@ -68,6 +77,7 @@ pub fn card(
     let rect = inner.response.rect;
     let top = egui::Rect::from_min_size(rect.min, Vec2::new(rect.width(), TOP_ACCENT_THICKNESS));
     ui.painter().rect_filled(top, 0.0, theme.accent);
+    crate::ui::recorder::card(name, slot, rect);
 }
 
 /// Draw a panel's title row: an upper-cased `title` on the left in the display
@@ -83,11 +93,16 @@ pub fn panel_title(ui: &mut egui::Ui, theme: &Theme, title: &str, sub: Option<&s
         );
         if let Some(sub) = sub {
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                ui.label(
-                    RichText::new(sub.to_uppercase())
-                        .family(theme.font_data.egui())
-                        .size(9.0)
-                        .color(theme.faint),
+                // Truncated to the room the title leaves, with the full text on hover: a
+                // long CPU or GPU name would otherwise run over the title on a narrow card.
+                ui.add(
+                    egui::Label::new(
+                        RichText::new(sub.to_uppercase())
+                            .family(theme.font_data.egui())
+                            .size(9.0)
+                            .color(theme.faint),
+                    )
+                    .truncate(),
                 );
             });
         }

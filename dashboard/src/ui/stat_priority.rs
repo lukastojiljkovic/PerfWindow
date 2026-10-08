@@ -11,7 +11,7 @@
 
 use crate::theme::Theme;
 use crate::ui::capacity::Capacity;
-use crate::ui::tooltips::tip;
+use crate::ui::tooltips::describe;
 use crate::widgets::stat::stat_row;
 use egui::Color32;
 
@@ -58,7 +58,7 @@ pub fn render(
     match capacity.columns {
         1 => {
             for c in selected {
-                attach_hover(stat_row(ui, theme, c.label, &c.value, c.color), c);
+                draw_row(ui, theme, c);
             }
         }
         _ => {
@@ -68,28 +68,26 @@ pub fn render(
             ui.columns(2, |cols| {
                 let left = &mut cols[0];
                 for c in &selected[..split] {
-                    attach_hover(stat_row(left, theme, c.label, &c.value, c.color), c);
+                    draw_row(left, theme, c);
                 }
                 let right = &mut cols[1];
                 for c in &selected[split..] {
-                    attach_hover(stat_row(right, theme, c.label, &c.value, c.color), c);
+                    draw_row(right, theme, c);
                 }
             });
         }
     }
 }
 
-/// Attach the candidate's hover text: a panel-supplied `hover_extra` wins
-/// over the static tooltip table.
-fn attach_hover(response: egui::Response, c: &StatCandidate) {
-    match &c.hover_extra {
-        Some(text) => {
-            response.on_hover_text(text.clone());
-        }
-        None => {
-            tip(response, c.tooltip_key);
-        }
-    }
+/// Draw one row and attach its hover text: a panel-supplied `hover_extra` wins
+/// over the static tooltip table, and an elided value is appended in either
+/// case so the full reading stays reachable.
+fn draw_row(ui: &mut egui::Ui, theme: &Theme, c: &StatCandidate) {
+    let base = c
+        .hover_extra
+        .clone()
+        .or_else(|| describe(c.tooltip_key).map(str::to_string));
+    stat_row(ui, theme, c.label, &c.value, c.color).with_hover(base);
 }
 
 #[cfg(test)]
