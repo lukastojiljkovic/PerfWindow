@@ -212,9 +212,9 @@ fn run_app(dev_mode: bool, renderer: eframe::Renderer) -> eframe::Result {
         viewport = viewport.with_always_on_top();
     }
     if startup.mini_strip {
-        // The first frame docks the strip (and records the rectangle it should
-        // restore on the way back); starting borderless avoids a decorated
-        // flash while that happens.
+        // The first frame places the strip over the monitor's top edge (and
+        // records the rectangle it should restore on the way back); starting
+        // borderless avoids a decorated flash while that happens.
         viewport = viewport.with_decorations(false);
     }
     let options = eframe::NativeOptions {
@@ -239,12 +239,6 @@ fn install_panic_log() {
     // that env var set, but a postmortem without a backtrace is useless.
     let default = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
-        // Best effort: hand the mini strip's reserved band back before the
-        // process goes down. Allocation-free, and a `no-op` when the strip was
-        // never docked, because this runs while the process is already in
-        // trouble. A process killed from outside never reaches this hook, and
-        // nothing in-process can cover that case.
-        perfwindow::appbar::emergency_remove();
         write_panic_entry(info);
         default(info);
     }));
@@ -477,11 +471,6 @@ fn install_seh_handler() {
 /// worse).
 unsafe extern "system" fn seh_filter(info: *mut ExceptionPointers) -> LONG {
     use std::io::Write;
-
-    // Same best-effort band release as the panic hook: a native crash never
-    // runs the panic hook, and a registered appbar that is never removed keeps
-    // the monitor's work area shrunk.
-    perfwindow::appbar::emergency_remove();
 
     // `catch_unwind` to make sure a panic inside this handler does not
     // escape the FFI boundary and abort with no log at all.

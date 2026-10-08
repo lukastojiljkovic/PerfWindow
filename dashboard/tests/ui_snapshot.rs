@@ -18,8 +18,9 @@
 //!
 //! Current suite size: 10 scenarios (5 modal + 5 loading screen) x 6 themes
 //! = 60 PNGs under `tests/snapshots/<theme>/`, plus the single-theme
-//! `loading_sensors_checklist`, the two background-opacity scenarios and the
-//! two mini-strip scenarios on the Slate and Light themes: 69 PNGs in total.
+//! `loading_sensors_checklist`, the grid-size captures, the two
+//! background-opacity scenarios and the three mini-strip scenarios on the
+//! Slate and Light themes.
 
 use egui_kittest::{Harness, SnapshotResults};
 use perfwindow::app::PerfApp;
@@ -532,15 +533,21 @@ fn strip_snapshot() -> perfwindow::ipc::Snapshot {
 }
 
 /// Snapshot the strip row alone, at `width` logical px and the strip's own
-/// height, for each theme in [`STRIP_THEMES`]. The strip is rendered through
-/// the same central panel production uses, so the chrome fill and the bottom
-/// rule land exactly where they do on screen.
-fn snapshot_strip(scenario: &str, width: f32) {
+/// height, for each theme in [`STRIP_THEMES`], drawn with `background_opacity`.
+/// The strip is rendered through the same central panel production uses — no
+/// outer fill; `strip_row` paints the surface itself — so the fill and the
+/// bottom rule land exactly where they do on screen.
+///
+/// `check_opacity` adds the alpha assertion the 60 % scenario needs: the
+/// background is genuinely see-through while the mark, the readings, the
+/// slider, the controls and the rules stay solid.
+fn snapshot_strip(scenario: &str, width: f32, background_opacity: u8, check_opacity: bool) {
     let mut results = SnapshotResults::new();
     for &id in STRIP_THEMES {
         let theme = Theme::for_id(id);
         let config = Config {
             theme: id,
+            background_opacity,
             // Show every reading, battery included, so the scenario covers the
             // longest possible row.
             mini_strip_values: perfwindow::config::MiniStripValues {
@@ -550,26 +557,53 @@ fn snapshot_strip(scenario: &str, width: f32) {
             ..Config::default()
         };
         let snapshot = strip_snapshot();
-        snapshot_scenario(
-            &mut results,
-            egui::vec2(width, perfwindow::ui::mini_strip::STRIP_HEIGHT),
-            id,
-            scenario,
-            move |ctx| {
-                #[allow(deprecated)]
-                egui::CentralPanel::default()
-                    .frame(egui::Frame::NONE.fill(theme.chrome))
-                    .show(ctx, |ui| {
-                        let _ = perfwindow::ui::mini_strip::strip_row(
-                            ui,
-                            &theme,
-                            Some(&snapshot),
-                            &config,
-                        );
-                    });
-            },
-        );
+        let size = egui::vec2(width, perfwindow::ui::mini_strip::STRIP_HEIGHT);
+        let body = move |ctx: &egui::Context| {
+            #[allow(deprecated)]
+            egui::CentralPanel::default()
+                .frame(egui::Frame::NONE)
+                .show(ctx, |ui| {
+                    let _ =
+                        perfwindow::ui::mini_strip::strip_row(ui, &theme, Some(&snapshot), &config);
+                });
+        };
+        if check_opacity {
+            snapshot_scenario_inspected(
+                &mut results,
+                size,
+                id,
+                scenario,
+                body,
+                move |raw, [w, h]| assert_strip_opacity_pixels(raw, w, h, background_opacity),
+            );
+        } else {
+            snapshot_scenario(&mut results, size, id, scenario, body);
+        }
     }
+}
+
+/// Alpha channels of a rendered strip: the background fill must sit near
+/// `percent` and something on the row (text, a rule, a control) must stay
+/// fully opaque.
+fn assert_strip_opacity_pixels(raw: &[u8], width: usize, height: usize, percent: u8) {
+    assert!(width > 0 && height > 0, "rendered image is empty");
+    let (mut background_alpha, mut solid_alpha) = (u8::MAX, 0u8);
+    for y in 0..height {
+        for x in 0..width {
+            let alpha = alpha_at(raw, width, x, y);
+            background_alpha = background_alpha.min(alpha);
+            solid_alpha = solid_alpha.max(alpha);
+        }
+    }
+    let expected = (u16::from(percent) * 255 / 100) as u8;
+    assert!(
+        background_alpha < 255 && background_alpha.abs_diff(expected) <= 24,
+        "strip background alpha {background_alpha} should sit near {expected} at {percent} %"
+    );
+    assert_eq!(
+        solid_alpha, 255,
+        "the mark, readings, slider and controls must stay solid at {percent} %"
+    );
 }
 
 // ---- Background opacity scenarios (v0.12.0) --------------------------
@@ -687,7 +721,7 @@ fn opacity_60_dashboard_matches_baseline() {
 /// Every reading, on a 1920 px monitor: the widest row the strip can draw.
 #[test]
 fn mini_strip_full_matches_baseline() {
-    snapshot_strip("mini_strip_full", 1920.0);
+    snapshot_strip("mini_strip_full", 1920.0, 100, false);
 }
 
 /// The same readings on a narrow monitor, where the row does not fit and the
@@ -699,7 +733,15 @@ fn mini_strip_full_matches_baseline() {
 /// actually exercises dropping from the right.
 #[test]
 fn mini_strip_narrow_matches_baseline() {
-    snapshot_strip("mini_strip_narrow", 900.0);
+    snapshot_strip("mini_strip_narrow", 900.0, 100, false);
+}
+
+/// The same wide strip at 60 % background opacity: the bar itself dims so the
+/// desktop behind it shows through, while the mark, the readings, the slider
+/// and the controls stay solid.
+#[test]
+fn mini_strip_opacity_60_matches_baseline() {
+    snapshot_strip("mini_strip_opacity_60", 1920.0, 60, true);
 }
 
 /// The settings modal at 60 % background opacity. The dashboard behind it is
