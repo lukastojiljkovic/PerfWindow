@@ -1,25 +1,26 @@
 use crate::theme::Theme;
-use egui::{FontId, Painter, Pos2, Rect, Response, Sense, Shape, Stroke, Vec2};
+use egui::{Color32, FontId, Painter, Pos2, Rect, Response, Sense, Shape, Stroke, Vec2};
 use std::f32::consts::TAU;
 
 /// Size of the gauge widget in pixels.
 const SIZE: f32 = 86.0;
-/// Outer radius of the ring.
-const OUTER_R: f32 = 43.0;
-/// Ring thickness.
+/// Outer radius of the ring. Kept one pixel inside `SIZE / 2` so the stroke's
+/// anti-aliasing feather (one physical pixel wide) still lands inside the
+/// 86×86 allocation instead of being clipped flat against its edge.
+const OUTER_R: f32 = SIZE / 2.0 - 1.0;
+/// Ring thickness. The track and the accent arc both cover the
+/// `OUTER_R - RING_THICK` .. `OUTER_R` band.
 const RING_THICK: f32 = 8.0;
-/// Mid-radius where the stroke is centred.
-const MID_R: f32 = OUTER_R - RING_THICK / 2.0;
-/// Number of segments to approximate the partial accent arc (smooth enough at
-/// this size). The full-circle track does not use this — it is a single
-/// `circle_stroke` shape.
+/// Number of points used to approximate a circle: both the full-circle track
+/// and the partial accent arc (smooth enough at this size).
 const SEGMENTS: usize = 120;
 
 /// Draw a donut-style gauge centred in an 86×86 allocation.
 ///
 /// `value` is 0–100 (clamped). The arc starts at 12 o'clock and advances
 /// clockwise, filled with `theme.accent`. The track is `theme.track`.
-/// Inner disc is `theme.panel` so only the ~8 px ring is visible.
+/// Both cover the same `OUTER_R - RING_THICK` .. `OUTER_R` band. The centre is
+/// left unpainted so the card shows through exactly as it does around the ring.
 /// Centre text shows the integer value and `unit`; `label` appears below.
 ///
 /// Returns the gauge's egui [`Response`] so callers can attach a hover
@@ -32,33 +33,70 @@ pub fn donut(ui: &mut egui::Ui, theme: &Theme, value: f32, unit: &str, label: &s
     }
 
     let painter = ui.painter_at(rect);
-    let center = rect.center();
 
-    // --- full-circle track: one circle shape instead of a 121-point polyline ---
-    painter.circle_stroke(center, MID_R, Stroke::new(RING_THICK, theme.track));
-
-    // --- accent arc (clockwise from top) ---
+    // 0 % draws no arc; a non-finite reading makes `fraction` NaN, which fails
+    // this comparison and leaves only the empty track behind the "--" text.
     let fraction = (value / 100.0).clamp(0.0, 1.0);
-    if fraction > 0.0 {
-        draw_arc(
-            &painter,
-            center,
-            MID_R,
-            0.0,
-            fraction,
-            RING_THICK,
-            theme.accent,
-        );
-    }
-
-    // --- inner panel disc to mask the centre (leaves only the ring visible) ---
-    let inner_r = OUTER_R - RING_THICK;
-    painter.circle_filled(center, inner_r, theme.panel);
+    track_and_arc(
+        &painter,
+        rect.center(),
+        OUTER_R,
+        RING_THICK,
+        theme.track,
+        theme.accent,
+        fraction,
+    );
 
     // --- centre text ---
     draw_center_text(&painter, rect, theme, value, unit, label);
 
     response
+}
+
+/// Draw a ring's full-circle `track` plus the `accent` arc over it. Both are
+/// centred-stroked paths on the `radius - thickness / 2` midline, so they cover
+/// exactly the `radius - thickness` .. `radius` band and the arc lies flush on
+/// the track. `fraction` is a 0.0–1.0 share of the circle, starting at 12
+/// o'clock and running clockwise; 0.0 draws no accent.
+///
+/// Shared by [`donut`] and the settings modal's theme-preview ring so the two
+/// cannot drift apart.
+///
+/// The track is a [`Shape::closed_line`], not a `Painter::circle_stroke`: in
+/// epaint 0.34 a circle's stroke is tessellated *outside* its radius
+/// (`tessellate_circle` uses `PathStroke::from(stroke).outside()`), while a path
+/// stroke is centred. A `circle_stroke` at `radius` would therefore cover
+/// `radius` .. `radius + thickness` and leave a `thickness / 2` gap against the
+/// arc. A closed line is centred like the arc and, being closed, has no seam
+/// where its ends meet.
+pub(crate) fn track_and_arc(
+    painter: &Painter,
+    center: Pos2,
+    radius: f32,
+    thickness: f32,
+    track: Color32,
+    accent: Color32,
+    fraction: f32,
+) {
+    let mid_r = radius - thickness / 2.0;
+    painter.add(Shape::closed_line(
+        circle_points(center, mid_r),
+        Stroke::new(thickness, track),
+    ));
+    if fraction > 0.0 {
+        draw_arc(painter, center, mid_r, 0.0, fraction, thickness, accent);
+    }
+}
+
+/// A full circle of `radius` around `center` as the point list
+/// [`Shape::closed_line`] expects. Angle 0 = 12 o'clock; direction = clockwise.
+fn circle_points(center: Pos2, radius: f32) -> Vec<Pos2> {
+    (0..SEGMENTS)
+        .map(|i| {
+            let angle = i as f32 / SEGMENTS as f32 * TAU - std::f32::consts::FRAC_PI_2;
+            center + Vec2::new(angle.cos() * radius, angle.sin() * radius)
+        })
+        .collect()
 }
 
 /// Draw an arc as a polyline of short segments with the given stroke width.
@@ -71,7 +109,7 @@ fn draw_arc(
     start_frac: f32,
     end_frac: f32,
     thickness: f32,
-    color: egui::Color32,
+    color: Color32,
 ) {
     let n = ((end_frac - start_frac).abs() * SEGMENTS as f32).ceil() as usize + 1;
     let n = n.max(2);
