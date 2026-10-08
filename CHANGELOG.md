@@ -9,24 +9,27 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ## [2.0.0] — 2026-10-08
 
-PerfWindow now fits any window, its backgrounds can turn see-through, and it collapses into a taskbar-style strip of live readings. Update notes read as a short list of what changed, and the first launch of a new version opens its changelog once.
+PerfWindow now fits any window, its backgrounds can turn see-through, and it collapses into a one-line strip of live readings over the top of the screen. Update notes read as a short list of what changed, and the first launch of a new version opens its changelog once.
 
 ### Added
 
 - **Mini strip.** PerfWindow can collapse into a one-line strip of live
-  readings docked to the top of a monitor. The strip reserves that space the
-  way the taskbar does, so other windows maximise below it instead of under
-  it. Press **Ctrl+M** or click the **MINI** chip in the title bar to enter it;
-  the expand button or **Ctrl+M** leaves it. It remembers which monitor it was
-  docked to and which readings it shows, both chosen in **Settings → Mini
-  strip**: CPU and GPU load and temperature, VRAM, RAM, network and battery. A
-  reading with no data shows a dash, a temperature the dashboard would
-  highlight keeps its colour, and a reading that does not fit the monitor's
-  width is dropped from the right.
-- **Background opacity.** A slider in **Settings → Display** makes the window's
-  backgrounds see-through, from 100 % down to 30 %. Text, values, graphs and
-  borders stay solid, so the readings stay legible over whatever is behind the
-  window. It works best together with **Keep window always on top**.
+  readings across the top of a monitor. It sits on top of other windows and
+  takes no screen space, so nothing moves or resizes and a game keeps the
+  full screen. Clicking it doesn't take focus from the app or game you're in,
+  and a slider at its right end sets the background opacity without opening
+  Settings. Press **Ctrl+M** or click the **MINI** chip in the title bar to
+  enter it; the expand button, or a double-click on the readings, leaves it.
+  It remembers the monitor it was on and the readings it shows, chosen in
+  **Settings → Mini strip**: CPU and GPU load and temperature, VRAM, RAM,
+  network and battery. A reading with no data shows a dash, a temperature the
+  dashboard would highlight keeps its colour, and a reading that does not fit
+  the monitor's width is dropped from the right.
+- **Background opacity.** A slider in **Settings → Display**, and its twin on
+  the mini strip, make the backgrounds see-through, from 100 % down to 30 %.
+  Text, values, graphs and borders stay solid, so the readings stay legible over
+  whatever is behind the window. It works best together with **Keep window
+  always on top**.
 
 ### Changed
 
