@@ -380,9 +380,15 @@ pub fn card_grid(ui: &mut egui::Ui, app: &mut PerfApp) {
     // "waiting for sensord..." placeholder between Ready and the first
     // snapshot, which on a slow machine can last several seconds and reads
     // like an outright stall.
+    //
+    // The same screen stays up until the first snapshot taken after sensord
+    // enabled its last sensor category: snapshots arrive between the stages,
+    // and a grid shown from the first one would re-fit as each card appeared.
     let connecting_phase = match &app.status {
         Status::Connecting(p) => Some(p.clone()),
-        Status::Running if app.latest.is_none() => Some(ConnectPhase::LoadingSensors),
+        Status::Running if app.latest.is_none() || app.latest_partial => {
+            Some(ConnectPhase::LoadingSensors)
+        }
         _ => None,
     };
     if let Some(phase) = connecting_phase {
@@ -429,18 +435,18 @@ pub fn card_grid(ui: &mut egui::Ui, app: &mut PerfApp) {
 
         // The zoom decision is measured against the window's *physical* size
         // so that applying a zoom next frame cannot feed back into the
-        // decision; see `zoom_one_window`. The chrome (title bar, banners,
-        // footer) is part of the zoomed UI, so what remains for the grid is
-        // that size minus the chrome height, all in zoom-1.0 points.
+        // decision; see `zoom_one_window`.
         let ctx = ui.ctx();
         let physical = window_points(ctx) * ctx.pixels_per_point();
         let native = ctx.native_pixels_per_point().unwrap_or(1.0);
         let zoom1 = zoom_one_window(ctx);
-        // The chrome is measured in the points of the *current* zoom, so it is
-        // scaled back up to zoom-1.0 points before it is subtracted from the
-        // zoom-1.0 window height (mixing the two units would make the decision
-        // depend on the zoom it produces).
-        let chrome_h = (window_points(ctx).y - ui.available_height()).max(0.0) * ctx.zoom_factor();
+        // The chrome (title bar, banners, footer) is zoomed with the grid, so
+        // its height in points is the same at every zoom; the planner scales it
+        // by the zoom it picks. Whole points, so pixel snapping at different
+        // zooms cannot change the key.
+        let chrome_h = (window_points(ctx).y - ui.available_height())
+            .max(0.0)
+            .round();
         let key = fit::FitKey::new(
             physical.x,
             physical.y,
@@ -448,7 +454,7 @@ pub fn card_grid(ui: &mut egui::Ui, app: &mut PerfApp) {
             chrome_h,
             card_set_signature(snap, &cards),
         );
-        let plan = app.plan_for(key, &metrics, zoom1.x, (zoom1.y - chrome_h).max(1.0));
+        let plan = app.plan_for(key, &metrics, zoom1.x, zoom1.y, chrome_h);
         apply_zoom(ctx, plan.zoom);
         // Fit the grid to the panel this frame actually got, not the planned
         // one: `set_zoom_factor` only takes effect next pass. The panel's
@@ -625,16 +631,20 @@ impl Card {
     }
 }
 
-/// The window's content size in *points at the current zoom*, falling back to
-/// the input screen rect for backends (such as the test harness) that do not
-/// report a viewport rectangle.
+/// The window's content size in *points at the current zoom*.
+///
+/// Read from the input's content rect, never from `viewport().inner_rect`.
+/// eframe measures the window before egui applies a pending zoom: egui-winit
+/// converts to points with `zoom_factor()`, which still returns the old zoom
+/// until `begin_pass` swaps it in. `begin_pass` then rescales the screen rect
+/// to the new zoom, but not the viewport rects. So on the pass that applies a
+/// zoom, `inner_rect` is in the old zoom's points while `pixels_per_point()` is
+/// already the new one, and the "physical" size derived from the two is off by
+/// their ratio. The fit planner read that as a resize and chose another zoom,
+/// whose first pass was off again: on startup, while cards and history arrive,
+/// the dashboard flickered between layouts for seconds.
 fn window_points(ctx: &egui::Context) -> Vec2 {
-    ctx.input(|i| {
-        i.viewport()
-            .inner_rect
-            .map(|r| r.size())
-            .unwrap_or_else(|| i.content_rect().size())
-    })
+    ctx.input(|i| i.content_rect().size())
 }
 
 /// The window's content size in zoom-1.0 points.
@@ -655,10 +665,15 @@ fn zoom_one_window(ctx: &egui::Context) -> Vec2 {
 /// Push the fitted zoom onto the context, but only when it differs from the
 /// current one by more than [`fit::ZOOM_EPSILON`]. Keeping the current zoom for
 /// sub-percent changes stops the scale factor from creeping every frame.
+///
+/// egui applies a zoom at the start of the next pass, so this one was laid out
+/// at the old zoom; discarding it reruns the frame at the new zoom before
+/// anything is shown.
 fn apply_zoom(ctx: &egui::Context, zoom: f32) {
     let current = ctx.zoom_factor();
     if (zoom / current - 1.0).abs() > fit::ZOOM_EPSILON {
         ctx.set_zoom_factor(zoom);
+        ctx.request_discard("zoom to fit");
     }
 }
 
@@ -976,5 +991,62 @@ fn next_theme(id: ThemeId) -> ThemeId {
         ThemeId::Light => ThemeId::Synthwave,
         ThemeId::Synthwave => ThemeId::Crimson,
         ThemeId::Crimson => ThemeId::Amber,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// eframe's order of events for one frame: measure the window in points
+    /// with the zoom `zoom_factor()` reports (as egui-winit does), then run the
+    /// pass, in which egui applies any zoom requested by the previous one.
+    fn eframe_pass(ctx: &egui::Context, physical: Vec2, ui: impl FnMut(&mut egui::Ui)) {
+        let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, physical / ctx.zoom_factor());
+        let mut input = egui::RawInput {
+            screen_rect: Some(rect),
+            ..Default::default()
+        };
+        let viewport = input.viewports.entry(egui::ViewportId::ROOT).or_default();
+        viewport.inner_rect = Some(rect);
+        viewport.native_pixels_per_point = Some(1.0);
+        let _ = ctx.run_ui(input, ui);
+    }
+
+    #[test]
+    fn a_new_zoom_is_applied_before_the_frame_is_shown() {
+        let ctx = egui::Context::default();
+        let physical = egui::vec2(1552.0, 789.0);
+        let mut passes = Vec::new();
+        eframe_pass(&ctx, physical, |ui| {
+            passes.push((ui.ctx().zoom_factor(), zoom_one_window(ui.ctx())));
+            apply_zoom(ui.ctx(), 1.5);
+        });
+        // The pass laid out at zoom 1.0 is discarded; the rerun at 1.5 is the
+        // one that gets painted, and it measures the same window.
+        assert_eq!(passes.len(), 2);
+        assert_eq!(passes[1].0, 1.5);
+        assert!((passes[1].1 - physical).length() < 0.5);
+    }
+
+    #[test]
+    fn the_window_size_holds_through_the_pass_that_applies_a_new_zoom() {
+        let ctx = egui::Context::default();
+        let physical = egui::vec2(1552.0, 789.0);
+        let mut seen = Vec::new();
+        for zoom in [Some(1.5), Some(0.8), None, None] {
+            eframe_pass(&ctx, physical, |ui| {
+                seen.push(zoom_one_window(ui.ctx()));
+                if let Some(zoom) = zoom {
+                    ui.ctx().set_zoom_factor(zoom);
+                }
+            });
+        }
+        for size in seen {
+            assert!(
+                (size - physical).length() < 0.5,
+                "the zoom-1.0 window read {size:?}, the window is {physical:?}"
+            );
+        }
     }
 }

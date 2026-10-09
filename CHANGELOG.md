@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ## [Unreleased]
 
+### Fixed
+
+- **No flicker on startup.** While the sensor service was starting, the
+  dashboard could jump between layouts for several seconds as its cards
+  arrived. It now keeps the loading checklist on screen until every sensor
+  category is ready, then opens once, already at its final size.
+
 ## [2.0.0] — 2026-10-09
 
 PerfWindow now fits any window, its backgrounds can turn see-through, and it collapses into a one-line strip of live readings over the top of the screen. Update notes read as a short list of what changed, and the first launch of a new version opens its changelog once.

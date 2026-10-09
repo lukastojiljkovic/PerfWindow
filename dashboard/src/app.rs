@@ -61,6 +61,10 @@ pub struct PerfApp {
     pub history: History,
     pub sensord: Option<SensordKind>,
     pub latest: Option<Snapshot>,
+    /// `latest` was taken while sensord was still enabling sensor categories;
+    /// see [`crate::ipc::SensorState::latest_partial`]. The grid waits for the
+    /// first full snapshot so it is laid out once, for every card.
+    pub latest_partial: bool,
     /// Active monitors, read in this process. `sensord` cannot see the
     /// interactive desktop from session 0, so the footer gets its display
     /// info from here instead of the snapshot.
@@ -301,6 +305,7 @@ impl PerfApp {
             history: History::default(),
             sensord,
             latest: None,
+            latest_partial: false,
             display_cache: crate::displays::DisplayCache::new(),
             status,
             connect_rx,
@@ -689,23 +694,24 @@ impl PerfApp {
     /// The zoom-to-fit plan for this frame, reusing the cached decision unless
     /// the physical window size, the OS scale factor or the card set changed.
     ///
-    /// `avail_w` / `avail_h` are the grid's available size in zoom-1.0 points;
-    /// see [`crate::ui::fit::plan`]. Caching here rather than in the renderer
-    /// keeps the planner from running on every repaint while the window's
-    /// geometry is unchanged.
+    /// `avail_w` / `window_h` are the window's content size in zoom-1.0 points
+    /// and `chrome` the chrome height in points; see [`crate::ui::fit::plan`].
+    /// Caching here rather than in the renderer keeps the planner from running
+    /// on every repaint while the window's geometry is unchanged.
     pub(crate) fn plan_for(
         &mut self,
         key: crate::ui::fit::FitKey,
         metrics: &[crate::ui::fit::CardMetrics],
         avail_w: f32,
-        avail_h: f32,
+        window_h: f32,
+        chrome: f32,
     ) -> crate::ui::fit::Plan {
         if let Some((cached, plan)) = self.grid_fit {
             if cached == key {
                 return plan;
             }
         }
-        let plan = crate::ui::fit::plan(metrics, avail_w, avail_h);
+        let plan = crate::ui::fit::plan(metrics, avail_w, window_h, chrome);
         self.grid_fit = Some((key, plan));
         plan
     }
@@ -748,6 +754,7 @@ impl PerfApp {
                 }
                 self.history.record(&snap);
                 self.latest = Some(snap);
+                self.latest_partial = state.latest_partial;
             }
         }
         // Silence watchdog: a session that never produced a snapshot is
@@ -767,8 +774,8 @@ impl PerfApp {
     }
 
     /// Latest staged-init progress reported by sensord, if any. The loading
-    /// screen consumes this while the first snapshot is still pending; `None`
-    /// against an old sensord that never emits progress lines.
+    /// screen shows it until the first full snapshot is in; `None` against an
+    /// old sensord that never emits progress lines.
     pub fn sensor_progress(&self) -> Option<crate::ipc::ProgressInfo> {
         self.sensord.as_ref()?.state().lock().ok()?.progress.clone()
     }
@@ -858,6 +865,7 @@ impl PerfApp {
             history: crate::history::History::default(),
             sensord: None,
             latest: None,
+            latest_partial: false,
             display_cache: crate::displays::DisplayCache::empty(),
             status: Status::Running,
             connect_rx: None,
