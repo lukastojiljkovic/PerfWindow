@@ -85,9 +85,9 @@ pub struct Plan {
 pub struct Shed(pub usize);
 
 /// Identity of a fit input: the physical window size in pixels, the OS scale
-/// factor, the height the chrome occupies (in zoom-1.0 points) and a signature
-/// of the card set. The renderer caches its plan under this key, so the
-/// planner runs only when one of those changes.
+/// factor, the chrome height (in points, the same at every zoom) and a
+/// signature of the card set. The renderer caches its plan under this key, so
+/// the planner runs only when one of those changes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct FitKey {
     physical_w: u32,
@@ -99,7 +99,7 @@ pub struct FitKey {
 
 impl FitKey {
     /// Build a key from the window's physical pixel size, its OS scale factor
-    /// (with the chrome height in zoom-1.0 points) and a caller-supplied
+    /// (with the chrome height in points) and a caller-supplied
     /// signature of the card set. The values are rounded so sub-pixel noise
     /// cannot spuriously invalidate a plan.
     pub fn new(physical_w: f32, physical_h: f32, native: f32, chrome: f32, cards: u64) -> Self {
@@ -221,14 +221,22 @@ pub fn shed_for(cards: &[CardMetrics], cols: usize, target: f32) -> Shed {
     chosen
 }
 
-/// Choose the column count and zoom that best fill `avail` (zoom-1.0 points),
-/// then report the height the grid may occupy at that zoom.
+/// Choose the column count and zoom that best fill the window, then report the
+/// height the grid may occupy at that zoom.
+///
+/// `avail_w` and `window_h` are the window's content size in zoom-1.0 points;
+/// `chrome` is the height of the title bar, banners and footer in points. The
+/// chrome is zoomed with the grid, so at zoom `z` it takes `chrome * z` of the
+/// window, and the grid fits when `z * (height + chrome)` does. Solving for `z`
+/// here, instead of subtracting the chrome as measured at the current zoom,
+/// keeps the decision independent of the zoom it produces.
 ///
 /// Candidates are 4 / 3 / 2 columns; a single column joins them only when two
 /// columns cannot even reach the minimum zoom without overflowing the width.
-pub fn plan(cards: &[CardMetrics], avail_w: f32, avail_h: f32) -> Plan {
+pub fn plan(cards: &[CardMetrics], avail_w: f32, window_h: f32, chrome: f32) -> Plan {
     let avail_w = avail_w.max(1.0);
-    let avail_h = avail_h.max(1.0);
+    let window_h = window_h.max(1.0);
+    let chrome = chrome.max(0.0);
 
     let mut candidates: Vec<usize> = COLUMN_CANDIDATES.to_vec();
     if avail_w / natural_width(2) < MIN_ZOOM {
@@ -239,7 +247,7 @@ pub fn plan(cards: &[CardMetrics], avail_w: f32, avail_h: f32) -> Plan {
     for &cols in &candidates {
         let width = natural_width(cols);
         let height = grid_height(cards, cols, Shed(0)).max(1.0);
-        let fit = (avail_w / width).min(avail_h / height);
+        let fit = (avail_w / width).min(window_h / (height + chrome));
         // Strictly greater keeps the earlier (wider) candidate on ties.
         if best.is_none_or(|(_, best_fit, _, _)| fit > best_fit) {
             best = Some((cols, fit, width, height));
@@ -252,7 +260,7 @@ pub fn plan(cards: &[CardMetrics], avail_w: f32, avail_h: f32) -> Plan {
         zoom,
         width,
         height,
-        target_height: avail_h / zoom,
+        target_height: (window_h / zoom - chrome).max(0.0),
     }
 }
 
@@ -312,30 +320,30 @@ mod tests {
 
     #[test]
     fn wide_window_prefers_four_columns() {
-        let plan = plan(&sample_cards(), 3000.0, 700.0);
+        let plan = plan(&sample_cards(), 3000.0, 700.0, 0.0);
         assert_eq!(plan.cols, 4);
     }
 
     #[test]
     fn square_window_prefers_three_columns() {
         // Four columns are wider than the square, so three fit it better.
-        let plan = plan(&sample_cards(), 1000.0, 900.0);
+        let plan = plan(&sample_cards(), 1000.0, 900.0, 0.0);
         assert_eq!(plan.cols, 3);
     }
 
     #[test]
     fn tall_window_prefers_two_columns() {
-        let plan = plan(&sample_cards(), 800.0, 1600.0);
+        let plan = plan(&sample_cards(), 800.0, 1600.0, 0.0);
         assert_eq!(plan.cols, 2);
     }
 
     #[test]
     fn zoom_is_clamped_to_its_bounds() {
         // A huge window would want a zoom far above the cap.
-        let big = plan(&sample_cards(), 20_000.0, 12_000.0);
+        let big = plan(&sample_cards(), 20_000.0, 12_000.0, 0.0);
         assert_eq!(big.zoom, MAX_ZOOM);
         // A cramped one would want a zoom below the floor.
-        let small = plan(&sample_cards(), 720.0, 420.0);
+        let small = plan(&sample_cards(), 720.0, 420.0, 0.0);
         assert_eq!(small.zoom, MIN_ZOOM);
     }
 
@@ -343,7 +351,7 @@ mod tests {
     fn zoom_never_leaves_the_band() {
         for w in [200.0, 720.0, 1180.0, 1920.0, 3840.0] {
             for h in [300.0, 500.0, 1080.0, 2160.0] {
-                let plan = plan(&sample_cards(), w, h);
+                let plan = plan(&sample_cards(), w, h, 0.0);
                 assert!(
                     (MIN_ZOOM..=MAX_ZOOM).contains(&plan.zoom),
                     "zoom {} out of band at {w}x{h}",
@@ -354,11 +362,25 @@ mod tests {
     }
 
     #[test]
+    fn the_zoom_leaves_room_for_the_zoomed_chrome() {
+        // A very wide window, so the height sets the zoom; it is twice the
+        // four-column grid plus the chrome, so zoom 2.0 fills it exactly. A
+        // plan that ignored the chrome's own scaling would overshoot.
+        let cards = sample_cards();
+        let chrome = 73.0;
+        let h = 2.0 * (grid_height(&cards, 4, Shed(0)) + chrome);
+        let plan = plan(&cards, 20_000.0, h, chrome);
+        assert_eq!(plan.cols, 4);
+        assert!((plan.zoom - 2.0).abs() < 1e-4, "zoom {}", plan.zoom);
+        assert!((plan.target_height - plan.height).abs() < 0.01);
+    }
+
+    #[test]
     fn ties_resolve_to_more_columns() {
         let cards = sample_cards();
         let w4 = natural_width(4);
         let h4 = grid_height(&cards, 4, Shed(0));
-        assert_eq!(plan(&cards, w4, h4).cols, 4);
+        assert_eq!(plan(&cards, w4, h4, 0.0).cols, 4);
     }
 
     #[test]

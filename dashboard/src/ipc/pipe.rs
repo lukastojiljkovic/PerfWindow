@@ -1,4 +1,4 @@
-use crate::ipc::{parse_line, spawn_control_writer, ControlMsg, Line, SensorState, SharedState};
+use crate::ipc::{parse_line, spawn_control_writer, ControlMsg, SensorState, SharedState};
 use std::fs::{File, OpenOptions};
 use std::io::{BufRead, BufReader};
 use std::sync::{Arc, Mutex};
@@ -117,11 +117,7 @@ impl PipeSensord {
                     continue;
                 };
                 if let Ok(mut s) = reader_state.lock() {
-                    s.last_line_at = Some(std::time::Instant::now());
-                    match parsed {
-                        Line::Snap(snap) => s.latest = Some(*snap),
-                        Line::Progress(p) => s.progress = Some(p),
-                    }
+                    s.apply(parsed);
                 }
                 repaint();
             }

@@ -17,6 +17,24 @@ pub struct SensorState {
     /// startup watchdog in `PerfApp::ingest` treats a fresh value as proof
     /// of life even before the first snapshot arrives.
     pub last_line_at: Option<std::time::Instant>,
+    /// True when `latest` was taken while sensord was still enabling sensor
+    /// categories: the last progress line before it named one as `loading`.
+    pub latest_partial: bool,
+}
+
+impl SensorState {
+    /// Store one line off the feed, marking a snapshot partial when it was
+    /// taken mid staged-init.
+    pub fn apply(&mut self, line: Line) {
+        self.last_line_at = Some(std::time::Instant::now());
+        match line {
+            Line::Snap(snap) => {
+                self.latest_partial = self.progress.as_ref().is_some_and(|p| p.loading.is_some());
+                self.latest = Some(*snap);
+            }
+            Line::Progress(p) => self.progress = Some(p),
+        }
+    }
 }
 
 pub type SharedState = Arc<Mutex<SensorState>>;
@@ -65,11 +83,7 @@ impl Sensord {
                     continue;
                 };
                 if let Ok(mut s) = reader_state.lock() {
-                    s.last_line_at = Some(std::time::Instant::now());
-                    match parsed {
-                        Line::Snap(snap) => s.latest = Some(*snap),
-                        Line::Progress(p) => s.progress = Some(p),
-                    }
+                    s.apply(parsed);
                 }
                 repaint();
             }
@@ -176,6 +190,29 @@ impl Drop for Sensord {
 mod tests {
     use super::*;
     use std::sync::{Arc, Mutex};
+
+    #[test]
+    fn a_snapshot_taken_mid_staged_init_is_partial() {
+        let line = |json: &str| parse_line(json).expect("a recognised line");
+        let snap = r#"{"v":1,"ts":1747645200}"#;
+        let mut s = SensorState::default();
+        // A sensord too old to send progress lines: every snapshot is full.
+        s.apply(line(snap));
+        assert!(!s.latest_partial);
+        s.apply(line(
+            r#"{"progress":{"loading":"gpu","done":["cpu","ram"],"pending":["battery"]}}"#,
+        ));
+        s.apply(line(snap));
+        assert!(s.latest_partial);
+        // The final progress line arrives before the snapshot that carries
+        // the last category, so only the snapshot after it is full.
+        s.apply(line(
+            r#"{"progress":{"loading":null,"done":["cpu","ram","gpu","battery"],"pending":[]}}"#,
+        ));
+        assert!(s.latest_partial);
+        s.apply(line(snap));
+        assert!(!s.latest_partial);
+    }
 
     #[test]
     fn fresh_state_is_not_alive_by_default() {
