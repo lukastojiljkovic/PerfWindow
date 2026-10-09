@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ## [Unreleased]
 
+## [2.0.1] — 2026-10-09
+
+The dashboard now opens once, at its final size, instead of jumping between layouts while its sensors start.
+
 ### Fixed
 
 - **No flicker on startup.** While the sensor service was starting, the
@@ -1109,7 +1113,8 @@ User-facing application behaviour is unchanged.
   matching uninstaller that removes the exclusions, the `R0sensord` driver
   service, the install directory and the per-user data directory.
 
-[Unreleased]: https://github.com/lukastojiljkovic/PerfWindow/compare/v2.0.0...HEAD
+[Unreleased]: https://github.com/lukastojiljkovic/PerfWindow/compare/v2.0.1...HEAD
+[2.0.1]: https://github.com/lukastojiljkovic/PerfWindow/compare/v2.0.0...v2.0.1
 [2.0.0]: https://github.com/lukastojiljkovic/PerfWindow/compare/v0.11.1...v2.0.0
 [0.11.1]: https://github.com/lukastojiljkovic/PerfWindow/releases/tag/v0.11.1
 [0.11.0]: https://github.com/lukastojiljkovic/PerfWindow/releases/tag/v0.11.0
