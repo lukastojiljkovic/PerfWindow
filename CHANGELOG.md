@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ## [Unreleased]
 
+## [2.0.2] — 2026-10-14
+
+Readings on the mini strip and the footer hold their place as their values change.
+
 ### Fixed
 
 - **Readings stay put.** On the mini strip and the footer, a value that gained
@@ -1120,7 +1124,8 @@ User-facing application behaviour is unchanged.
   matching uninstaller that removes the exclusions, the `R0sensord` driver
   service, the install directory and the per-user data directory.
 
-[Unreleased]: https://github.com/lukastojiljkovic/PerfWindow/compare/v2.0.1...HEAD
+[Unreleased]: https://github.com/lukastojiljkovic/PerfWindow/compare/v2.0.2...HEAD
+[2.0.2]: https://github.com/lukastojiljkovic/PerfWindow/compare/v2.0.1...v2.0.2
 [2.0.1]: https://github.com/lukastojiljkovic/PerfWindow/compare/v2.0.0...v2.0.1
 [2.0.0]: https://github.com/lukastojiljkovic/PerfWindow/compare/v0.11.1...v2.0.0
 [0.11.1]: https://github.com/lukastojiljkovic/PerfWindow/releases/tag/v0.11.1
