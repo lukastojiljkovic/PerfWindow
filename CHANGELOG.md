@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ## [Unreleased]
 
+### Fixed
+
+- **Readings stay put.** On the mini strip and the footer, a value that gained
+  or lost a digit — 9% to 10%, 99° to 100°, KB/s to MB/s — pushed everything
+  after it sideways. Each value now has a fixed-width slot sized for the widest
+  figure it can show, right-aligned, so the rest of the row stays put.
+
 ## [2.0.1] — 2026-10-09
 
 The dashboard now opens once, at its final size, instead of jumping between layouts while its sensors start.

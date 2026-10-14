@@ -114,6 +114,26 @@ pub fn format_uptime(secs: i64) -> String {
     }
 }
 
+/// Characters a percentage reading can take: `"100%"`.
+pub const PERCENT_FIELD: usize = 4;
+/// Characters a temperature reading with its unit letter can take: `"100°C"`.
+pub const TEMP_FIELD: usize = 5;
+/// Characters a transfer rate can take: `"999.9 MB/s"`.
+pub const RATE_FIELD: usize = 10;
+/// Characters an uptime can take: `"23h 59m"`.
+pub const UPTIME_FIELD: usize = 7;
+/// Characters a fan speed can take: `"9999"` RPM.
+pub const RPM_FIELD: usize = 4;
+
+/// `text` right-aligned in a field `width` characters wide, and never cut.
+///
+/// The data faces are monospaced, so a reading padded to the widest value it
+/// can show keeps its own width — and everything after it keeps its place — as
+/// its digits come and go.
+pub fn fixed_width(text: &str, width: usize) -> String {
+    format!("{text:>width$}")
+}
+
 /// Insert thin spaces between characters to approximate CSS `letter-spacing`
 /// on the wordmark, chips and arrow labels.
 pub fn letter_spaced(text: &str) -> String {
@@ -131,6 +151,39 @@ pub fn letter_spaced(text: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_fixed_width_field_pads_on_the_left_and_never_cuts() {
+        assert_eq!(fixed_width("5%", PERCENT_FIELD), "  5%");
+        assert_eq!(fixed_width("100%", PERCENT_FIELD), "100%");
+        assert_eq!(fixed_width("58°C", TEMP_FIELD), " 58°C");
+        assert_eq!(fixed_width("1023.9 MB/s", RATE_FIELD), "1023.9 MB/s");
+        // The em dash of a missing reading takes the same field.
+        assert_eq!(
+            fixed_width("—", PERCENT_FIELD).chars().count(),
+            PERCENT_FIELD
+        );
+    }
+
+    #[test]
+    fn the_fields_hold_the_widest_values_their_formatters_produce() {
+        assert_eq!(
+            format!("{}%", format_percent(Some(100.0))).len(),
+            PERCENT_FIELD
+        );
+        assert_eq!(
+            format_temp(Some(100.0), TempUnit::Fahrenheit)
+                .chars()
+                .count()
+                + 1,
+            TEMP_FIELD
+        );
+        assert_eq!(
+            format_bytes_per_sec(999.9 * 1024.0 * 1024.0).len(),
+            RATE_FIELD
+        );
+        assert_eq!(format_uptime(23 * 3_600 + 59 * 60).len(), UPTIME_FIELD);
+    }
 
     #[test]
     fn converts_celsius_to_fahrenheit() {

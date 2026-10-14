@@ -37,7 +37,8 @@ pub mod update_modal;
 use crate::app::{PerfApp, Status};
 use crate::config::ThemeId;
 use crate::format::{
-    finite, format_bytes_per_sec, format_percent, format_uptime, letter_spaced, TempUnit,
+    finite, fixed_width, format_bytes_per_sec, format_percent, format_uptime, letter_spaced,
+    TempUnit, PERCENT_FIELD, RATE_FIELD, RPM_FIELD, UPTIME_FIELD,
 };
 use crate::ipc::connect::ConnectPhase;
 use crate::panels;
@@ -300,22 +301,29 @@ pub fn footer(ui: &mut egui::Ui, app: &mut PerfApp) {
                 if let Some(secs) = snap.uptime_sec {
                     // Keyed "UPTIME" — "UP" belongs to the network panel.
                     tooltips::tip(
-                        foot_item(ui, &theme, &format!("UP {}", format_uptime(secs))),
+                        foot_item(
+                            ui,
+                            &theme,
+                            &format!("UP {}", fixed_width(&format_uptime(secs), UPTIME_FIELD)),
+                        ),
                         "UPTIME",
                     );
                 }
                 if let Some(cpu) = &snap.cpu {
-                    foot_item(ui, &theme, &format!("CPU {}%", format_percent(cpu.load)));
+                    foot_item(ui, &theme, &format!("CPU {}", percent_field(cpu.load)));
                 }
                 if let Some(gpus) = &snap.gpu {
                     if let Some(gpu) = gpus.first() {
-                        foot_item(ui, &theme, &format!("GPU {}%", format_percent(gpu.load)));
+                        foot_item(ui, &theme, &format!("GPU {}", percent_field(gpu.load)));
                     }
                 }
                 if let Some(net) = &snap.net {
-                    let down = format_bytes_per_sec(finite(net.down_bps).unwrap_or(0.0));
-                    let up = format_bytes_per_sec(finite(net.up_bps).unwrap_or(0.0));
-                    foot_item(ui, &theme, &format!("NET \u{2193}{down} \u{2191}{up}"));
+                    let rate = |arrow: char, bps: Option<f64>| {
+                        let text = format_bytes_per_sec(finite(bps).unwrap_or(0.0));
+                        fixed_width(&format!("{arrow}{text}"), 1 + RATE_FIELD)
+                    };
+                    let (down, up) = (rate('\u{2193}', net.down_bps), rate('\u{2191}', net.up_bps));
+                    foot_item(ui, &theme, &format!("NET {down} {up}"));
                 }
                 // ATK fans (ASUS-only). Each fan reads as one footer chip
                 // labelled with its short name and current value. Skipped
@@ -328,7 +336,8 @@ pub fn footer(ui: &mut egui::Ui, app: &mut PerfApp) {
                                 .strip_suffix(" Fan")
                                 .unwrap_or(&fan.name)
                                 .to_uppercase();
-                            foot_item(ui, &theme, &format!("{short} FAN {}", rpm.round() as i64));
+                            let rpm = fixed_width(&(rpm.round() as i64).to_string(), RPM_FIELD);
+                            foot_item(ui, &theme, &format!("{short} FAN {rpm}"));
                         }
                     }
                 }
@@ -343,6 +352,11 @@ pub fn footer(ui: &mut egui::Ui, app: &mut PerfApp) {
             }
         });
     });
+}
+
+/// `" 23%"`: a footer percentage right-aligned in the field `100%` fills.
+fn percent_field(load: Option<f64>) -> String {
+    fixed_width(&format!("{}%", format_percent(load)), PERCENT_FIELD)
 }
 
 /// One dimmed ~10 px footer figure. Returns the label's response so a caller

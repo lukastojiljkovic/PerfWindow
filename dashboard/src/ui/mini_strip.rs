@@ -18,8 +18,8 @@
 
 use crate::config::{Config, MiniStripValues};
 use crate::format::{
-    finite, format_bytes_per_sec, format_gb_pair, format_percent, format_temp, letter_spaced,
-    TempUnit,
+    finite, fixed_width, format_bytes_per_sec, format_gb_pair, format_percent, format_temp,
+    letter_spaced, TempUnit, PERCENT_FIELD, RATE_FIELD, TEMP_FIELD,
 };
 use crate::ipc::Snapshot;
 use crate::theme::Theme;
@@ -74,10 +74,14 @@ pub struct StripItem {
     pub parts: Vec<StripPart>,
 }
 
-/// One value fragment: its text plus the colour it is painted in.
+/// One value fragment: its text, the colour it is painted in, and the
+/// characters it reserves — the widest value it can show, so the readings
+/// after it keep their place as its digits change. The text is right-aligned
+/// in that field when it is laid out.
 pub struct StripPart {
     pub text: String,
     pub color: Color32,
+    pub width: usize,
 }
 
 /// Which control the user pressed on the strip.
@@ -148,33 +152,29 @@ pub fn items(
     if values.vram {
         readings.push(StripItem {
             label: "VRAM",
-            parts: vec![StripPart {
-                text: format_gb_pair(
-                    gpu.and_then(|g| g.vram_used_mb),
-                    gpu.and_then(|g| g.vram_total_mb),
-                ),
-                color: theme.ink,
-            }],
+            parts: vec![gb_pair_part(
+                gpu.and_then(|g| g.vram_used_mb),
+                gpu.and_then(|g| g.vram_total_mb),
+                theme,
+            )],
         });
     }
 
     if values.ram {
         readings.push(StripItem {
             label: "RAM",
-            parts: vec![StripPart {
-                text: format_gb_pair(ram.and_then(|r| r.used_mb), ram.and_then(|r| r.total_mb)),
-                color: theme.ink,
-            }],
+            parts: vec![gb_pair_part(
+                ram.and_then(|r| r.used_mb),
+                ram.and_then(|r| r.total_mb),
+                theme,
+            )],
         });
     }
 
     if values.network {
         readings.push(StripItem {
             label: "NET",
-            parts: vec![StripPart {
-                text: net_value(net),
-                color: theme.ink,
-            }],
+            parts: net_parts(net, theme),
         });
     }
 
@@ -182,10 +182,7 @@ pub fn items(
         if let Some(battery) = battery {
             readings.push(StripItem {
                 label: "BAT",
-                parts: vec![StripPart {
-                    text: percent_value(battery.charge_pct),
-                    color: theme.ink,
-                }],
+                parts: vec![percent_part(battery.charge_pct, theme)],
             });
         }
     }
@@ -197,15 +194,22 @@ pub fn items(
 /// non-finite — never a confident `"—%"`.
 fn percent_part(load: Option<f64>, theme: &Theme) -> StripPart {
     StripPart {
-        text: percent_value(load),
+        text: match finite(load) {
+            Some(v) => format!("{}%", format_percent(Some(v))),
+            None => MISSING.to_string(),
+        },
         color: theme.ink,
+        width: PERCENT_FIELD,
     }
 }
 
-fn percent_value(load: Option<f64>) -> String {
-    match finite(load) {
-        Some(v) => format!("{}%", format_percent(Some(v))),
-        None => MISSING.to_string(),
+/// `"6.1 / 8.0 GB"`, in a field as wide as the pair with the memory full: the
+/// total does not change, so that is the widest the used figure can grow.
+fn gb_pair_part(used_mb: Option<f64>, total_mb: Option<f64>, theme: &Theme) -> StripPart {
+    StripPart {
+        text: format_gb_pair(used_mb, total_mb),
+        color: theme.ink,
+        width: format_gb_pair(total_mb, total_mb).chars().count(),
     }
 }
 
@@ -218,10 +222,12 @@ fn temp_part(celsius: Option<f64>, unit: TempUnit, theme: &Theme) -> StripPart {
         Some(c) => StripPart {
             text: format!("{}{}", format_temp(Some(c), unit), unit_letter(unit)),
             color: temp_alert_color(c, TempKind::Processor, theme).unwrap_or(theme.ink),
+            width: TEMP_FIELD,
         },
         None => StripPart {
             text: MISSING.to_string(),
             color: theme.ink,
+            width: TEMP_FIELD,
         },
     }
 }
@@ -233,17 +239,25 @@ fn unit_letter(unit: TempUnit) -> char {
     }
 }
 
-/// `"↓1.2 MB/s ↑120 KB/s"`, matching the footer's `NET` figures. An absent
-/// reading falls back to the footer's `0 KB/s`; a machine with no network
-/// section at all renders [`MISSING`].
-fn net_value(net: Option<&crate::ipc::NetInfo>) -> String {
+/// `"↓1.2 MB/s"` and `"↑120 KB/s"`, matching the footer's `NET` figures, each
+/// in a field of its own so a change of unit on one does not move the other.
+/// An absent reading falls back to the footer's `0 KB/s`; a machine with no
+/// network section at all renders one [`MISSING`].
+fn net_parts(net: Option<&crate::ipc::NetInfo>, theme: &Theme) -> Vec<StripPart> {
+    let part = |text: String| StripPart {
+        text,
+        color: theme.ink,
+        width: 1 + RATE_FIELD,
+    };
+    let rate = |arrow: char, bps: Option<f64>| {
+        part(format!(
+            "{arrow}{}",
+            format_bytes_per_sec(finite(bps).unwrap_or(0.0))
+        ))
+    };
     match net {
-        Some(net) => {
-            let down = format_bytes_per_sec(finite(net.down_bps).unwrap_or(0.0));
-            let up = format_bytes_per_sec(finite(net.up_bps).unwrap_or(0.0));
-            format!("\u{2193}{down} \u{2191}{up}")
-        }
-        None => MISSING.to_string(),
+        Some(net) => vec![rate('\u{2193}', net.down_bps), rate('\u{2191}', net.up_bps)],
+        None => vec![part(MISSING.to_string())],
     }
 }
 
@@ -562,7 +576,8 @@ fn measure(
     let mut parts = Vec::with_capacity(item.parts.len());
     let mut width = label.size().x;
     for (i, part) in item.parts.iter().enumerate() {
-        let galley = painter.layout_no_wrap(part.text.clone(), font.clone(), part.color);
+        let text = fixed_width(&part.text, part.width);
+        let galley = painter.layout_no_wrap(text, font.clone(), part.color);
         width += if i == 0 { LABEL_GAP } else { VALUE_GAP };
         width += galley.size().x;
         parts.push((galley, part.color));
@@ -726,7 +741,39 @@ mod tests {
         assert_eq!(texts(&readings[1]), ["41%", "62°C"]);
         assert_eq!(texts(&readings[2]), ["6.1 / 8.0 GB"]);
         assert_eq!(texts(&readings[3]), ["14.2 / 32.0 GB"]);
-        assert_eq!(texts(&readings[4]), ["↓1.2 MB/s ↑120 KB/s"]);
+        assert_eq!(texts(&readings[4]), ["↓1.2 MB/s", "↑120 KB/s"]);
+    }
+
+    #[test]
+    fn a_reading_keeps_its_width_as_its_digits_change() {
+        // Fields are counted in characters and the data faces are monospaced,
+        // so an equal count is an equal width: nothing after a reading moves.
+        let snapshot = |load: f64, temp: f64, bps: f64, used_mb: f64| {
+            parse_snapshot(&format!(
+                r#"{{"v":1,"ts":1,
+                   "cpu":{{"name":"X","load":{load},"temp":{temp}}},
+                   "gpu":[{{"name":"G","kind":"discrete","load":{load},"temp":{temp},
+                            "vram_used_mb":{used_mb},"vram_total_mb":16384.0}}],
+                   "ram":{{"used_mb":{used_mb},"total_mb":32768}},
+                   "net":{{"adapter":"E","down_bps":{bps},"up_bps":{bps}}},
+                   "battery":{{"charge_pct":{load}}}}}"#
+            ))
+            .expect("parses")
+        };
+        let values = MiniStripValues {
+            battery: true,
+            ..MiniStripValues::default()
+        };
+        let widths = |snapshot: &Snapshot| -> Vec<usize> {
+            items(Some(snapshot), &values, TempUnit::Fahrenheit, &theme())
+                .iter()
+                .flat_map(|item| &item.parts)
+                .map(|part| fixed_width(&part.text, part.width).chars().count())
+                .collect()
+        };
+        let quiet = widths(&snapshot(3.0, 9.0, 512.0, 900.0));
+        let busy = widths(&snapshot(100.0, 100.0, 999.0 * 1024.0 * 1024.0, 16000.0));
+        assert_eq!(quiet, busy);
     }
 
     #[test]
