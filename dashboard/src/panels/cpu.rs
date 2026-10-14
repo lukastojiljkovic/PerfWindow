@@ -81,19 +81,20 @@ pub fn cpu_panel(
                     hover_extra: None,
                 });
 
-                // TJMAX (Distance to TjMax). Only present when sensord reports
-                // the per-core MSR. Lower headroom = closer to throttling, so
-                // re-use the temp ramp by treating "headroom remaining" as its
-                // inverse: 5 °C of headroom ≈ ~90 °C silicon.
+                // HEADROOM (Distance to TjMax), named for what it measures:
+                // "TJMAX" read as the throttle point itself. Only present when
+                // sensord reports the per-core MSR. Lower headroom = closer to
+                // throttling, so re-use the temp ramp by treating "headroom
+                // remaining" as its inverse: 5 °C of headroom ≈ ~90 °C silicon.
                 if let Some(d) = finite(cpu.distance_to_tjmax_c) {
                     let pseudo_temp = (95.0_f64 - d).clamp(0.0, 105.0);
                     let col = temp_color(pseudo_temp, TempKind::Processor, theme);
                     cands.push(StatCandidate {
                         priority: 3,
-                        label: "TJMAX",
+                        label: "HEADROOM",
                         value: format!("{d:.0} \u{00B0}C"),
                         color: Some(col),
-                        tooltip_key: "TJMAX",
+                        tooltip_key: "HEADROOM",
                         hover_extra: None,
                     });
                 }

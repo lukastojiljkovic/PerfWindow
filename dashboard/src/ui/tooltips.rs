@@ -41,7 +41,7 @@ const DESCRIPTIONS: &[(&str, &str)] = &[
     ("CLOCK",    "Highest current core frequency, in GHz. Modern CPUs and GPUs boost above their base clock when there is thermal and power headroom."),
     ("POWER",    "Component power draw, in watts. Combines every on-die power domain reported by the silicon (cores, cache, memory controller, platform)."),
     ("VCORE",    "CPU core voltage rail. Typical idle/load range is 0.8–1.4 V. Unstable voltage causes crashes and graphical artefacts."),
-    ("TJMAX",    "Headroom to the CPU's thermal throttle point (TjMax), in °C. 0 = throttling right now. Smaller numbers mean the cooler is at its limit."),
+    ("HEADROOM", "Headroom to the CPU's thermal throttle point (TjMax), in °C. 0 = throttling right now. Smaller numbers mean the cooler is at its limit."),
 
     // ---- GPU panel ----
     ("HOTSPOT",  "GPU die hot spot — the warmest single point on the GPU silicon. Usually 10–15 °C above the averaged core temperature."),

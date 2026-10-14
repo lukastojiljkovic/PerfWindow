@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ## [Unreleased]
 
+### Fixed
+
+- **The CPU card says HEADROOM.** The reading showed how many degrees were
+  left before the CPU throttles, but its label, TJMAX, read like the throttle
+  point itself. It is labelled HEADROOM now, and its tooltip is unchanged.
+
 ## [2.0.2] — 2026-10-14
 
 Readings on the mini strip and the footer hold their place as their values change.
