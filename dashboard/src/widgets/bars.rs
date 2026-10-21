@@ -272,14 +272,8 @@ pub fn core_grid(
     for (i, &load) in loads.iter().take(plan.shown).enumerate() {
         let cell_rect = cell_rect_at(i);
 
-        // Background colour: ramp track → accent → hot as load grows.
-        let load_frac = (load / 100.0).clamp(0.0, 1.0);
-        let bg = if load_frac < 0.5 {
-            lerp_color(theme.track, theme.accent, load_frac * 2.0)
-        } else {
-            lerp_color(theme.accent, theme.hot, (load_frac - 0.5) * 2.0)
-        };
-        painter.rect_filled(cell_rect, 0.0, bg);
+        let (fill, fg) = heat_cell(theme, load);
+        painter.rect_filled(cell_rect, 0.0, fill);
 
         // On hybrid CPUs, P-Core cells get an accent-tinted border so the
         // performance cluster reads at a glance; E-Cores keep the standard
@@ -301,13 +295,6 @@ pub fn core_grid(
         let label = match temps.get(i).copied().flatten() {
             Some(t) => crate::format::format_temp_compact(Some(t as f64), unit),
             None => format!("{}%", load.round() as i64),
-        };
-        // Foreground colour: bg fill is in the accent family — read against
-        // the theme's ink/bg pair to keep contrast as the cell heats.
-        let fg = if load_frac >= 0.5 {
-            theme.bg
-        } else {
-            theme.ink
         };
         let galley = painter.layout_no_wrap(label, label_font.clone(), fg);
         let text_pos = egui::Pos2::new(
@@ -404,6 +391,25 @@ fn cell_hover_text(
         out.push_str(&format!(" \u{00b7} {:.2} GHz", mhz / 1000.0));
     }
     out
+}
+
+/// A heat-map cell's fill and label colours for a core's load in percent.
+/// The fill ramps track → accent → hot as load grows; the label reads against
+/// it in the theme's ink, or its background once the fill is in the accent
+/// family, to keep contrast as the cell heats.
+pub(crate) fn heat_cell(theme: &Theme, load: f32) -> (egui::Color32, egui::Color32) {
+    let load_frac = (load / 100.0).clamp(0.0, 1.0);
+    if load_frac < 0.5 {
+        (
+            lerp_color(theme.track, theme.accent, load_frac * 2.0),
+            theme.ink,
+        )
+    } else {
+        (
+            lerp_color(theme.accent, theme.hot, (load_frac - 0.5) * 2.0),
+            theme.bg,
+        )
+    }
 }
 
 /// Linearly interpolate two `Color32` values channel-wise. `t` in `[0,1]`.

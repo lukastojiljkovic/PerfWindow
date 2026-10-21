@@ -1089,8 +1089,8 @@ fn command_line_section(ui: &mut egui::Ui, theme: &Theme, on: bool, change: &mut
         section_hint(
             ui,
             theme,
-            "Run perfwindow-cli in a new terminal for a text report of every reading, or \
-             perfwindow-cli --json for scripts and AI agents. Windows asks to start the \
+            "Run perfwindow-cli in a new terminal for a live dashboard of every reading, \
+             or perfwindow-cli --json for scripts and AI agents. Windows asks to start the \
              sensor service, as it does for this window, and only one of the two can read \
              at a time.",
         );

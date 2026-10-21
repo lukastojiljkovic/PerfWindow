@@ -31,6 +31,9 @@ webbrowser = "1"
 # SHA-256 for the installer download. `ring` is already in the dependency
 # graph through rustls (`ureq`'s TLS backend), so this only names it directly.
 ring = "0.17"
+# perfwindow-cli's live terminal dashboard, drawn through its crossterm
+# backend (re-exported as `ratatui::crossterm`).
+ratatui = { version = "0.30.2", default-features = false, features = ["crossterm", "layout-cache"] }
 
 [target.'cfg(windows)'.dependencies]
 # `displays.rs` reads the active monitor modes in the dashboard process with
@@ -40,6 +43,10 @@ windows = { version = "0.62", features = [
     "Win32_Devices_Display",
     "Win32_Foundation",
     "Win32_Graphics_Gdi",
+    # perfwindow-cli: escape codes on the console, and the local time of a
+    # sample.
+    "Win32_System_Console",
+    "Win32_System_Time",
     # Mini strip: the per-monitor DPI scale, the extended style and
     # `SetWindowPos`.
     "Win32_UI_HiDpi",

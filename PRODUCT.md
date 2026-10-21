@@ -65,6 +65,9 @@ Capabilities, from the README's *What it monitors*:
   rate, and a version number that opens an in-app changelog viewer.
 - Refresh interval of 0.5, 1, 2 or 5 seconds; Celsius or Fahrenheit; six themes
   with an optional follow-Windows mode; always-on-top.
+- `perfwindow-cli`, off until it is turned on in Settings: the same readings as
+  a live terminal dashboard in the user's theme, or, for scripts and AI agents,
+  a plain ASCII report with one reading per line, or JSON.
 
 Constraints, from the README and the Terms of Use:
 

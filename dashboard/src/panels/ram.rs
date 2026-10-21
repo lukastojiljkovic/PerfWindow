@@ -16,6 +16,8 @@ use egui::{FontId, Sense, Vec2};
 
 /// Height of the SWAP row.
 const SWAP_ROW_H: f32 = 24.0;
+/// Pagefile use, as a fraction, at/above which the SWAP bar turns warn.
+pub(crate) const SWAP_WARN: f64 = 0.9;
 
 /// Render the RAM card: title, a usage donut beside used/free/cached stats, a
 /// pagefile (SWAP) bar and a usage-history sparkline.
@@ -219,7 +221,7 @@ fn swap_row(ui: &mut egui::Ui, theme: &Theme, used_mb: Option<f64>, total_mb: Op
 
             if active {
                 let fraction = (used / total).clamp(0.0, 1.0) as f32;
-                let warn = fraction >= 0.9;
+                let warn = fraction >= SWAP_WARN as f32;
                 bar_meter(ui, theme, fraction, warn);
             } else {
                 // Inactive: an empty track-coloured bar, no fill. Same

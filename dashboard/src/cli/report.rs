@@ -1,7 +1,8 @@
-//! The report `perfwindow-cli` prints: plain text for people and LLM agents,
-//! and JSON for scripts. Both carry what the window shows, section by section
-//! in the window's order. A reading the sensors did not send is left out
-//! rather than written as a dash, and a section with no readings is omitted.
+//! The report `perfwindow-cli` prints: aligned text for people and LLM
+//! agents, and JSON for scripts. Both carry what the window shows, section by
+//! section in the window's order. A reading the sensors did not send is left
+//! out rather than written as a dash, and a section with no readings is
+//! omitted.
 
 use crate::displays::DisplayMode;
 use crate::format::{
@@ -11,51 +12,171 @@ use crate::format::{
 use crate::ipc::{
     BatteryInfo, BoardInfo, CpuInfo, GpuInfo, NetInfo, RamInfo, RamModule, Snapshot, StorageInfo,
 };
+use crate::panels::cpu::headroom_as_temp;
 use crate::panels::network::wifi_value;
-use crate::panels::ram::hottest_dimm;
+use crate::panels::ram::{hottest_dimm, SWAP_WARN};
 use crate::panels::sensors::has_content;
 use crate::panels::storage::{
-    format_capacity, format_data_volume, format_power_on_hours, kind_label,
+    disk_temp_severity, format_capacity, format_data_volume, format_power_on_hours, kind_label,
+    ACTIVITY_WARN,
 };
+use crate::widgets::{health_severity, temp_severity, Severity, TempKind};
 use serde_json::{json, Value};
-use std::fmt::Display;
+use std::fmt::{Display, Write};
 
-/// The plain-text report: a header line, then one block per section.
-pub fn text(snapshot: &Snapshot, displays: &[DisplayMode], unit: TempUnit) -> String {
-    let mut blocks: Vec<String> = Vec::new();
-    blocks.extend(snapshot.cpu.as_ref().and_then(|cpu| cpu_block(cpu, unit)));
-    blocks.extend(
+/// How the text report is drawn.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Style {
+    /// Pure ASCII without escape codes, for pipes, files and LLM agents. A
+    /// reader that decodes stdout in a legacy code page, as Windows
+    /// PowerShell 5.1 does, gets no mojibake.
+    Ascii,
+    /// Unicode glyphs without escape codes: a terminal with colour off.
+    Plain,
+    /// Unicode glyphs, bold titles, dim labels and the window's warning
+    /// colours.
+    Color,
+}
+
+/// SGR parameters the [`Style::Color`] report uses.
+const BOLD: &str = "1";
+const DIM: &str = "2";
+const YELLOW: &str = "33";
+const RED: &str = "31";
+
+impl Style {
+    /// `text` as this style writes it: in ASCII by [`ascii`], or as it is.
+    fn text(self, text: &str) -> String {
+        match self {
+            Style::Ascii => ascii(text),
+            Style::Plain | Style::Color => text.to_string(),
+        }
+    }
+
+    /// `text` wrapped in the SGR parameter `sgr` when this style colours.
+    fn paint(self, text: &str, sgr: Option<&str>) -> String {
+        match (self, sgr) {
+            (Style::Color, Some(sgr)) => format!("\x1b[{sgr}m{text}\x1b[0m"),
+            _ => text.to_string(),
+        }
+    }
+}
+
+/// The SGR colour of a reading at `severity`: the window's warn is amber,
+/// its hot is red.
+fn severity_sgr(severity: Severity) -> &'static str {
+    match severity {
+        Severity::Warn => YELLOW,
+        Severity::Hot => RED,
+    }
+}
+
+/// One reading: its label, its value and, where the window colours it, how
+/// far past normal it is.
+struct Row {
+    label: String,
+    value: String,
+    severity: Option<Severity>,
+}
+
+/// One section: its title and its readings.
+struct Section {
+    title: String,
+    rows: Vec<Row>,
+}
+
+/// The plain-text report: a header line naming the version and when the
+/// sample was taken, then one section per component in the window's order.
+pub fn text(snapshot: &Snapshot, displays: &[DisplayMode], unit: TempUnit, style: Style) -> String {
+    let mut sections: Vec<Section> = Vec::new();
+    sections.extend(snapshot.cpu.as_ref().and_then(|cpu| cpu_section(cpu, unit)));
+    sections.extend(
         snapshot
             .gpu
             .iter()
             .flatten()
-            .filter_map(|gpu| gpu_block(gpu_title(gpu), gpu, unit)),
+            .filter_map(|gpu| gpu_section(gpu_title(gpu), gpu, unit)),
     );
-    blocks.extend(
+    sections.extend(
         snapshot
             .igpu
             .as_ref()
-            .and_then(|gpu| gpu_block("iGPU", gpu, unit)),
+            .and_then(|gpu| gpu_section("iGPU", gpu, unit)),
     );
-    blocks.extend(snapshot.ram.as_ref().and_then(|ram| ram_block(ram, unit)));
-    blocks.extend(
+    sections.extend(snapshot.ram.as_ref().and_then(|ram| ram_section(ram, unit)));
+    sections.extend(snapshot.net.as_ref().and_then(network_section));
+    sections.extend(snapshot.battery.as_ref().and_then(battery_section));
+    sections.extend(
         snapshot
             .storage
             .iter()
             .flatten()
-            .filter_map(|disk| storage_block(disk, unit)),
+            .filter_map(|disk| storage_section(disk, unit)),
     );
-    blocks.extend(snapshot.net.as_ref().and_then(network_block));
-    blocks.extend(snapshot.battery.as_ref().and_then(battery_block));
-    blocks.extend(sensors_block(snapshot, unit));
-    blocks.extend(system_block(snapshot));
-    blocks.extend(displays_block(displays));
+    sections.extend(sensors_section(snapshot, unit));
+    sections.extend(system_section(snapshot));
+    sections.extend(displays_section(displays));
 
-    let header = format!("PerfWindow {} — sensor readings", env!("CARGO_PKG_VERSION"));
-    std::iter::once(header)
-        .chain(blocks)
-        .collect::<Vec<_>>()
-        .join("\n\n")
+    let taken = local_time(snapshot)
+        .map(|(fields, offset)| format!(" at {}", timestamp(fields, offset)))
+        .unwrap_or_default();
+    let product = format!("PerfWindow {}", env!("CARGO_PKG_VERSION"));
+    let header = style.paint(&product, Some(BOLD))
+        + &style.paint(
+            &style.text(&format!(" — sensor readings{taken}")),
+            Some(DIM),
+        );
+    render(header, &sections, style)
+}
+
+/// `header`, then each section after a blank line: its title, then one
+/// reading per line, indented, with every label padded to the section's
+/// widest so the values line up.
+fn render(header: String, sections: &[Section], style: Style) -> String {
+    let mut out = header;
+    for section in sections {
+        let labels: Vec<String> = section
+            .rows
+            .iter()
+            .map(|row| style.text(&format!("{}:", row.label)))
+            .collect();
+        let width = labels.iter().map(|l| l.chars().count()).max().unwrap_or(0);
+        let title = style.paint(&style.text(&section.title), Some(BOLD));
+        let _ = write!(out, "\n\n{title}");
+        for (row, label) in section.rows.iter().zip(&labels) {
+            let pad = width - label.chars().count();
+            let label = style.paint(label, Some(DIM));
+            let value = style.paint(&style.text(&row.value), row.severity.map(severity_sgr));
+            let _ = write!(out, "\n  {label}{:pad$} {value}", "");
+        }
+    }
+    out
+}
+
+/// `text` in pure ASCII. The report's own glyphs get ASCII stand-ins (`°`
+/// drops out of `58 °C`, `—` reads `-`, ` · ` reads `, `, `≈` reads `~`), and
+/// any other character outside ASCII, from a name the sensors sent, reads
+/// `?`; `--json` carries such names exactly.
+fn ascii(text: &str) -> String {
+    text.replace(" · ", ", ")
+        .chars()
+        .filter(|&c| c != '°')
+        .map(|c| match c {
+            '—' => '-',
+            '≈' => '~',
+            c if c.is_ascii() => c,
+            _ => '?',
+        })
+        .collect()
+}
+
+/// `text` without control characters (C0 such as ESC, CR and LF, and C1).
+/// Every title, label and value goes through it, because names come from the
+/// sensors and from Windows: a Wi-Fi network can name itself with escape
+/// sequences, or with a newline and a fake `Label: value` line, which would
+/// otherwise reach the terminal or an agent reading the report.
+pub(super) fn clean(text: &str) -> String {
+    text.chars().filter(|c| !c.is_control()).collect()
 }
 
 /// The JSON report. The snapshot is serialized as the sensors sent it, with
@@ -69,16 +190,129 @@ pub fn json(snapshot: &Snapshot, displays: &[DisplayMode]) -> Value {
     })
 }
 
-/// A section: its title line and its readings. `None` when no reading is
-/// present, so the section drops out of the report.
-fn block(title: impl Display, rows: Vec<Option<String>>) -> Option<String> {
-    let rows: Vec<String> = rows.into_iter().flatten().collect();
-    (!rows.is_empty()).then(|| format!("{title}\n{}", rows.join("\n")))
+/// The JSON report as text: indented, or compact on one line for `--watch`,
+/// in ASCII by [`escape_non_ascii`].
+pub fn json_text(snapshot: &Snapshot, displays: &[DisplayMode], pretty: bool) -> String {
+    let value = json(snapshot, displays);
+    let text = if pretty {
+        serde_json::to_string_pretty(&value).unwrap_or_default()
+    } else {
+        value.to_string()
+    };
+    escape_non_ascii(&text)
 }
 
-/// One `  Label: value` line, or `None` when the reading is absent.
-fn row(label: impl Into<String>, value: Option<String>) -> Option<String> {
-    value.map(|value| format!("  {}: {value}", label.into()))
+/// `json` with every character outside ASCII written as a `\uXXXX` escape.
+/// Such characters only occur inside JSON strings, where the escape stands
+/// for the same character, so every JSON reader gets the same document, and
+/// one that decodes stdout in a legacy code page gets no mojibake.
+fn escape_non_ascii(json: &str) -> String {
+    let mut out = String::with_capacity(json.len());
+    for c in json.chars() {
+        if c.is_ascii() {
+            out.push(c);
+        } else {
+            for unit in c.encode_utf16(&mut [0; 2]) {
+                let _ = write!(out, "\\u{unit:04x}");
+            }
+        }
+    }
+    out
+}
+
+/// When `snapshot` was taken, in local time: `[year, month, day, hour,
+/// minute, second]` and the offset from UTC in minutes. `None` when Windows
+/// cannot convert it.
+#[cfg(windows)]
+pub(super) fn local_time(snapshot: &Snapshot) -> Option<([u16; 6], i64)> {
+    use windows::Win32::Foundation::{FILETIME, SYSTEMTIME};
+    use windows::Win32::System::Time::{
+        FileTimeToSystemTime, SystemTimeToFileTime, SystemTimeToTzSpecificLocalTime,
+    };
+    /// 100 ns ticks from 1601-01-01, where a `FILETIME` counts from, to 1970-01-01.
+    const UNIX_EPOCH_TICKS: i64 = 116_444_736_000_000_000;
+    const TICKS_PER_MINUTE: i64 = 600_000_000;
+
+    let unix_ms = snapshot.ts_ms.unwrap_or(snapshot.ts.saturating_mul(1000));
+    let ticks = unix_ms
+        .checked_mul(10_000)?
+        .checked_add(UNIX_EPOCH_TICKS)
+        .filter(|t| *t >= 0)?;
+    let utc_file = FILETIME {
+        dwLowDateTime: ticks as u32,
+        dwHighDateTime: (ticks >> 32) as u32,
+    };
+    let (mut utc, mut local, mut local_file) = (
+        SYSTEMTIME::default(),
+        SYSTEMTIME::default(),
+        FILETIME::default(),
+    );
+    // SAFETY: each call reads and writes only the locals it is handed.
+    unsafe {
+        FileTimeToSystemTime(&utc_file, &mut utc).ok()?;
+        SystemTimeToTzSpecificLocalTime(None, &utc, &mut local).ok()?;
+        SystemTimeToFileTime(&local, &mut local_file).ok()?;
+    }
+    let local_ticks = ((local_file.dwHighDateTime as i64) << 32) | local_file.dwLowDateTime as i64;
+    let fields = [
+        local.wYear,
+        local.wMonth,
+        local.wDay,
+        local.wHour,
+        local.wMinute,
+        local.wSecond,
+    ];
+    Some((fields, (local_ticks - ticks) / TICKS_PER_MINUTE))
+}
+
+#[cfg(not(windows))]
+pub(super) fn local_time(_snapshot: &Snapshot) -> Option<([u16; 6], i64)> {
+    None
+}
+
+/// `2025-05-19 11:00:00 +02:00`: local time fields and the offset from UTC.
+fn timestamp([year, month, day, hour, minute, second]: [u16; 6], offset_min: i64) -> String {
+    let sign = if offset_min < 0 { '-' } else { '+' };
+    let offset = offset_min.abs();
+    format!(
+        "{year:04}-{month:02}-{day:02} {hour:02}:{minute:02}:{second:02} {sign}{:02}:{:02}",
+        offset / 60,
+        offset % 60
+    )
+}
+
+/// A section, or `None` when none of its readings is present, so it drops
+/// out of the report.
+fn section(title: impl Display, rows: Vec<Option<Row>>) -> Option<Section> {
+    let rows: Vec<Row> = rows.into_iter().flatten().collect();
+    (!rows.is_empty()).then(|| Section {
+        title: clean(&title.to_string()),
+        rows,
+    })
+}
+
+/// A reading, or `None` when it is absent.
+fn row(label: impl AsRef<str>, value: Option<String>) -> Option<Row> {
+    rated(label, value, None)
+}
+
+/// A reading the window colours at `severity`, or `None` when it is absent.
+fn rated(label: impl AsRef<str>, value: Option<String>, severity: Option<Severity>) -> Option<Row> {
+    value.map(|value| Row {
+        label: clean(label.as_ref()),
+        value: clean(&value),
+        severity,
+    })
+}
+
+/// A temperature in `unit`, rated on the window's bands for `kind`.
+fn temp_row(label: &str, celsius: Option<f64>, kind: TempKind, unit: TempUnit) -> Option<Row> {
+    let celsius = finite(celsius);
+    rated(
+        label,
+        temp(celsius, unit),
+        celsius.and_then(|c| temp_severity(c, kind)),
+    )
 }
 
 /// A per-core list, `38 %, n/a, 40 %`. An absent entry reads `n/a`.
@@ -92,11 +326,13 @@ fn list(values: Vec<Option<String>>) -> Option<String> {
     })
 }
 
-fn percent(value: Option<f64>) -> Option<String> {
+/// `34 %`: a percentage, whole.
+pub(super) fn percent(value: Option<f64>) -> Option<String> {
     finite(value).map(|v| format!("{v:.0} %"))
 }
 
-fn temp(celsius: Option<f64>, unit: TempUnit) -> Option<String> {
+/// `58 °C`: a Celsius reading in `unit`, whole degrees.
+pub(super) fn temp(celsius: Option<f64>, unit: TempUnit) -> Option<String> {
     let symbol = match unit {
         TempUnit::Celsius => "°C",
         TempUnit::Fahrenheit => "°F",
@@ -104,27 +340,33 @@ fn temp(celsius: Option<f64>, unit: TempUnit) -> Option<String> {
     finite(celsius).map(|c| format!("{:.0} {symbol}", unit.convert(c)))
 }
 
-fn megahertz(value: Option<f64>) -> Option<String> {
+/// `4400 MHz`.
+pub(super) fn megahertz(value: Option<f64>) -> Option<String> {
     finite(value).map(|v| format!("{v:.0} MHz"))
 }
 
-fn watts(value: Option<f64>) -> Option<String> {
+/// `52.0 W`.
+pub(super) fn watts(value: Option<f64>) -> Option<String> {
     finite(value).map(|v| format!("{v:.1} W"))
 }
 
-fn volts(value: Option<f64>) -> Option<String> {
+/// `1.250 V`.
+pub(super) fn volts(value: Option<f64>) -> Option<String> {
     finite(value).map(|v| format!("{v:.3} V"))
 }
 
-fn rpm(value: Option<f64>) -> Option<String> {
+/// `920 RPM`.
+pub(super) fn rpm(value: Option<f64>) -> Option<String> {
     finite(value).map(|v| format!("{v:.0} RPM"))
 }
 
-fn rate(bytes_per_sec: Option<f64>) -> Option<String> {
+/// `2.0 MB/s`: bytes per second, as the window writes them.
+pub(super) fn rate(bytes_per_sec: Option<f64>) -> Option<String> {
     finite(bytes_per_sec).map(format_bytes_per_sec)
 }
 
-fn gigabytes(mb: Option<f64>) -> Option<String> {
+/// `16.9 GB`: megabytes as gigabytes, as the window writes them.
+pub(super) fn gigabytes(mb: Option<f64>) -> Option<String> {
     finite(mb).map(|_| format!("{} GB", format_gb_from_mb(mb)))
 }
 
@@ -134,15 +376,17 @@ fn non_empty(text: Option<&str>) -> Option<String> {
         .map(str::to_string)
 }
 
-fn cpu_block(cpu: &CpuInfo, unit: TempUnit) -> Option<String> {
-    block(
+fn cpu_section(cpu: &CpuInfo, unit: TempUnit) -> Option<Section> {
+    let headroom = finite(cpu.distance_to_tjmax_c);
+    section(
         format!("CPU — {}", cpu.name),
         vec![
             row("Load", percent(cpu.load)),
-            row("Temperature", temp(cpu.temp, unit)),
-            row(
+            temp_row("Temperature", cpu.temp, TempKind::Processor, unit),
+            rated(
                 "Headroom to TjMax",
-                finite(cpu.distance_to_tjmax_c).map(|d| format!("{d:.0} °C")),
+                headroom.map(|d| format!("{d:.0} °C")),
+                headroom.and_then(|d| temp_severity(headroom_as_temp(d), TempKind::Processor)),
             ),
             row("Clock", megahertz(cpu.clock_mhz)),
             row("Bus clock", megahertz(cpu.bus_clock_mhz)),
@@ -171,7 +415,7 @@ fn cpu_block(cpu: &CpuInfo, unit: TempUnit) -> Option<String> {
 }
 
 /// The window titles an integrated GPU `iGPU` and every other one `GPU`.
-fn gpu_title(gpu: &GpuInfo) -> &'static str {
+pub(super) fn gpu_title(gpu: &GpuInfo) -> &'static str {
     if gpu.kind == "integrated" {
         "iGPU"
     } else {
@@ -179,7 +423,7 @@ fn gpu_title(gpu: &GpuInfo) -> &'static str {
     }
 }
 
-fn gpu_block(title: &str, gpu: &GpuInfo, unit: TempUnit) -> Option<String> {
+fn gpu_section(title: &str, gpu: &GpuInfo, unit: TempUnit) -> Option<Section> {
     let integrated = gpu.kind == "integrated";
     let vram = if integrated {
         finite(gpu.shared_vram_used_mb).map(|mb| format!("{mb:.0} MB shared"))
@@ -200,13 +444,18 @@ fn gpu_block(title: &str, gpu: &GpuInfo, unit: TempUnit) -> Option<String> {
         .map(|e| format!("{} {:.0} %", e.name, e.load))
         .collect::<Vec<_>>();
 
-    block(
+    section(
         format!("{title} — {}", gpu.name),
         vec![
             row("Load", percent(gpu.load)),
-            row("Temperature", temp(gpu.temp, unit)),
-            row("Hot spot", temp(gpu.hot_spot_temp, unit)),
-            row("Memory junction", temp(gpu.memory_junction_temp_c, unit)),
+            temp_row("Temperature", gpu.temp, TempKind::Processor, unit),
+            temp_row("Hot spot", gpu.hot_spot_temp, TempKind::Processor, unit),
+            temp_row(
+                "Memory junction",
+                gpu.memory_junction_temp_c,
+                TempKind::Processor,
+                unit,
+            ),
             row("VRAM", vram),
             row("Power", watts(gpu.power_w)),
             row("Clock", megahertz(gpu.clock_mhz)),
@@ -220,37 +469,52 @@ fn gpu_block(title: &str, gpu: &GpuInfo, unit: TempUnit) -> Option<String> {
     )
 }
 
-fn ram_block(ram: &RamInfo, unit: TempUnit) -> Option<String> {
-    let swap = match (finite(ram.pagefile_used_mb), finite(ram.pagefile_total_mb)) {
-        (Some(_), Some(total)) if total > 0.0 => {
-            Some(format_gb_pair(ram.pagefile_used_mb, ram.pagefile_total_mb))
+/// The pagefile in use as `2.1 / 8.0 GB`, warn from the window's SWAP bar
+/// threshold. `None` when no pagefile is configured.
+pub(super) fn swap(ram: &RamInfo) -> Option<(String, f64, Option<Severity>)> {
+    match (finite(ram.pagefile_used_mb), finite(ram.pagefile_total_mb)) {
+        (Some(used), Some(total)) if total > 0.0 => {
+            let fraction = (used / total).clamp(0.0, 1.0);
+            Some((
+                format_gb_pair(ram.pagefile_used_mb, ram.pagefile_total_mb),
+                fraction,
+                (fraction >= SWAP_WARN).then_some(Severity::Warn),
+            ))
         }
         _ => None,
-    };
-    let hottest = hottest_dimm(ram.dimm_temps.as_deref().unwrap_or(&[]))
-        .and_then(|(celsius, _)| temp(Some(celsius), unit));
+    }
+}
+
+fn ram_section(ram: &RamInfo, unit: TempUnit) -> Option<Section> {
+    let swap = swap(ram);
+    let hottest = hottest_dimm(ram.dimm_temps.as_deref().unwrap_or(&[])).map(|(c, _)| c);
 
     let mut rows = vec![
         row("Load", percent(ram.load)),
         row("Used", gigabytes(ram.used_mb)),
         row("Free", gigabytes(ram.available_mb)),
         row("Cached", gigabytes(ram.cached_mb)),
-        row("Hottest DIMM", hottest),
-        row("Swap", swap),
+        temp_row("Hottest DIMM", hottest, TempKind::Processor, unit),
+        rated(
+            "Swap",
+            swap.as_ref().map(|(text, ..)| text.clone()),
+            swap.and_then(|(.., severity)| severity),
+        ),
     ];
     rows.extend(
         ram.modules
             .iter()
             .flatten()
-            .map(|module| module_row(module, unit)),
+            .map(|module| row("Module", module_value(module, unit))),
     );
-    block("RAM", rows)
+    section("RAM", rows)
 }
 
 /// One installed module: its label, then capacity, temperature and timings
-/// where the sensors report them.
-fn module_row(module: &RamModule, unit: TempUnit) -> Option<String> {
+/// where the sensors report them, `Kingston KF556S40 #0 · 16 GB · 44 °C`.
+pub(super) fn module_value(module: &RamModule, unit: TempUnit) -> Option<String> {
     let parts: Vec<String> = [
+        non_empty(Some(&module.label)),
         finite(module.capacity_gb).map(|gb| format!("{gb:.0} GB")),
         temp(module.temp_c, unit),
         non_empty(module.timings.as_deref()),
@@ -258,20 +522,30 @@ fn module_row(module: &RamModule, unit: TempUnit) -> Option<String> {
     .into_iter()
     .flatten()
     .collect();
-    row(
-        format!("Module {}", module.label.trim()),
-        (!parts.is_empty()).then(|| parts.join(" · ")),
-    )
+    (!parts.is_empty()).then(|| parts.join(" · "))
 }
 
-fn storage_block(disk: &StorageInfo, unit: TempUnit) -> Option<String> {
-    block(
+fn storage_section(disk: &StorageInfo, unit: TempUnit) -> Option<Section> {
+    let celsius = finite(disk.temp);
+    let activity = finite(disk.activity);
+    let health = finite(disk.health);
+    section(
         format!("Storage — {}", disk.name),
         vec![
             row("Type", Some(kind_label(&disk.kind))),
-            row("Temperature", temp(disk.temp, unit)),
-            row("Activity", percent(disk.activity)),
-            row("Health", percent(disk.health)),
+            rated(
+                "Temperature",
+                temp(celsius, unit),
+                celsius.and_then(|c| disk_temp_severity(c, disk.temp_warn_c, disk.temp_crit_c)),
+            ),
+            rated(
+                "Activity",
+                percent(activity),
+                activity
+                    .filter(|a| *a >= ACTIVITY_WARN)
+                    .map(|_| Severity::Warn),
+            ),
+            rated("Health", percent(health), health.and_then(health_severity)),
             row(
                 "Capacity",
                 finite(disk.used_gb)
@@ -302,53 +576,70 @@ fn storage_block(disk: &StorageInfo, unit: TempUnit) -> Option<String> {
     )
 }
 
-fn network_block(net: &NetInfo) -> Option<String> {
+/// The window's LINK slot: the Wi-Fi association on a wireless adapter, the
+/// link speed otherwise, with the row label each one takes.
+pub(super) fn link(net: &NetInfo) -> Option<(&'static str, String)> {
+    match net.wifi.as_ref().and_then(wifi_value) {
+        Some(wifi) => Some(("Wi-Fi", wifi)),
+        None => net.link_bps.map(|_| ("Link", format_link(net.link_bps))),
+    }
+}
+
+fn network_section(net: &NetInfo) -> Option<Section> {
     let use_percent = [net.down_pct, net.up_pct]
         .into_iter()
         .filter_map(finite)
         .reduce(f64::max);
-    // The window's LINK slot carries the Wi-Fi association on a wireless adapter.
-    let link = match net.wifi.as_ref().and_then(wifi_value) {
-        Some(wifi) => row("Wi-Fi", Some(wifi)),
-        None => row("Link", net.link_bps.map(|_| format_link(net.link_bps))),
-    };
-    block(
+    let link = link(net);
+    section(
         format!("Network — {}", net.adapter),
         vec![
             row("Use", percent(use_percent)),
             row("Download", rate(net.down_bps)),
             row("Upload", rate(net.up_bps)),
-            link,
+            link.and_then(|(label, value)| row(label, Some(value))),
         ],
     )
 }
 
-fn battery_block(battery: &BatteryInfo) -> Option<String> {
-    // Same thresholds as the window's STATE row.
-    let state = finite(battery.rate_w).map(|w| {
-        if w > 0.05 {
-            "CHARGING"
-        } else if w < -0.05 {
-            "DISCHARGING"
-        } else {
-            "IDLE"
-        }
-    });
-    let health = match (
+/// The window's STATE for a battery charge rate in watts, and its colour: a
+/// battery running down is the one state it paints warn.
+pub(super) fn battery_state(rate_w: f64) -> (&'static str, Option<Severity>) {
+    if rate_w > 0.05 {
+        ("CHARGING", None)
+    } else if rate_w < -0.05 {
+        ("DISCHARGING", Some(Severity::Warn))
+    } else {
+        ("IDLE", None)
+    }
+}
+
+/// The battery's full-charge capacity against its design capacity, in
+/// percent: the window's HEALTH.
+pub(super) fn battery_health(battery: &BatteryInfo) -> Option<f64> {
+    match (
         finite(battery.design_capacity_mwh),
         finite(battery.full_capacity_mwh),
     ) {
-        (Some(design), Some(full)) if design > 0.0 => Some(format!(
-            "{:.1} %",
-            (full / design * 100.0).clamp(0.0, 100.0)
-        )),
+        (Some(design), Some(full)) if design > 0.0 => {
+            Some((full / design * 100.0).clamp(0.0, 100.0))
+        }
         _ => None,
-    };
-    block(
+    }
+}
+
+fn battery_section(battery: &BatteryInfo) -> Option<Section> {
+    let state = finite(battery.rate_w).map(battery_state);
+    let health = battery_health(battery);
+    section(
         "Battery",
         vec![
             row("Charge", percent(battery.charge_pct)),
-            row("State", state.map(str::to_string)),
+            rated(
+                "State",
+                state.map(|(name, _)| name.to_string()),
+                state.and_then(|(_, severity)| severity),
+            ),
             // Positive while charging, negative while discharging.
             row("Rate", finite(battery.rate_w).map(|w| format!("{w:+.1} W"))),
             row(
@@ -358,12 +649,16 @@ fn battery_block(battery: &BatteryInfo) -> Option<String> {
                     .filter(|s| *s > 0)
                     .map(format_uptime),
             ),
-            row("Health", health),
+            rated(
+                "Health",
+                health.map(|h| format!("{h:.1} %")),
+                health.and_then(health_severity),
+            ),
         ],
     )
 }
 
-fn sensors_block(snapshot: &Snapshot, unit: TempUnit) -> Option<String> {
+fn sensors_section(snapshot: &Snapshot, unit: TempUnit) -> Option<Section> {
     let board = snapshot.board.as_ref();
     let fans = snapshot.fans.as_deref().unwrap_or(&[]);
     let voltages = snapshot.voltages.as_deref().unwrap_or(&[]);
@@ -375,10 +670,17 @@ fn sensors_block(snapshot: &Snapshot, unit: TempUnit) -> Option<String> {
     let mut rows = vec![
         row("Board", board.and_then(|b| non_empty(b.name.as_deref()))),
         row("BIOS", board.and_then(bios)),
-        row("Board temperature", board.and_then(|b| temp(b.temp, unit))),
-        row(
+        temp_row(
+            "Board temperature",
+            board.and_then(|b| b.temp),
+            TempKind::Board,
+            unit,
+        ),
+        temp_row(
             "VRM temperature",
-            board.and_then(|b| temp(b.vrm_temp, unit)),
+            board.and_then(|b| b.vrm_temp),
+            TempKind::Board,
+            unit,
         ),
     ];
     rows.extend(fans.iter().map(|fan| row(&fan.name, rpm(fan.rpm))));
@@ -394,7 +696,7 @@ fn sensors_block(snapshot: &Snapshot, unit: TempUnit) -> Option<String> {
             .iter()
             .map(|volt| row(&volt.name, volts(volt.volts))),
     );
-    block("Sensors", rows)
+    section("Sensors", rows)
 }
 
 /// `16.0302 (2023-11-15)`: the BIOS version, with its date when it has one.
@@ -406,16 +708,17 @@ fn bios(board: &BoardInfo) -> Option<String> {
     })
 }
 
-fn system_block(snapshot: &Snapshot) -> Option<String> {
+fn system_section(snapshot: &Snapshot) -> Option<Section> {
     let health = snapshot.health.as_ref();
-    block(
+    section(
         "System",
         vec![
             row("Uptime", snapshot.uptime_sec.map(format_uptime)),
             row("PawnIO driver", health.map(|h| h.pawnio.clone())),
-            row(
+            rated(
                 "Degraded",
                 health.map(|h| if h.degraded { "yes" } else { "no" }.to_string()),
+                health.filter(|h| h.degraded).map(|_| Severity::Warn),
             ),
             row(
                 "Health notes",
@@ -425,8 +728,8 @@ fn system_block(snapshot: &Snapshot) -> Option<String> {
     )
 }
 
-fn displays_block(displays: &[DisplayMode]) -> Option<String> {
-    block(
+fn displays_section(displays: &[DisplayMode]) -> Option<Section> {
+    section(
         "Displays",
         displays
             .iter()
@@ -451,139 +754,135 @@ fn displays_block(displays: &[DisplayMode]) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::displays::RefreshRate;
-    use crate::ipc::parse_snapshot;
+    use crate::cli::fixtures::{display, snapshot, FULL};
 
-    /// One sample of every section the window shows: two discrete GPUs and an
-    /// iGPU, RAM with modules, two drives, a Wi-Fi link, a battery, fans,
-    /// voltages and a degraded-free health block.
-    const FULL: &str = r#"{"v":1,"ts":1747645200,"ts_ms":1747645200123,
-      "cpu":{"name":"Test CPU","load":34.2,"cores":[38.1,55.0],"temp":58.0,"clock_mhz":4400,
-             "power_w":52.0,"core_temps":[60.0,null],"distance_to_tjmax_c":12.0,"voltage_v":1.25,
-             "bus_clock_mhz":99.8,"core_clocks_mhz":[4400.0,null]},
-      "gpu":[{"name":"RTX 4070","kind":"discrete","load":51.0,"temp":71.0,"vram_used_mb":6348,
-              "vram_total_mb":12288,"clock_mhz":2610,"power_w":140.0,"memory_load":42.7,
-              "memory_clock_mhz":10501.0,"pcie_rx_bps":1048576,"pcie_tx_bps":524288,
-              "video_engine_load":12.5,"d3d_engines":[{"name":"3D","load":47.0},{"name":"Copy","load":0.2}]},
-             {"name":"RTX 3060","kind":"discrete","load":4.0,"temp":45.0,"vram_used_mb":512,"vram_total_mb":12288}],
-      "igpu":{"name":"Intel UHD 770","kind":"integrated","load":3.0,"shared_vram_used_mb":332},
-      "ram":{"used_mb":15462,"total_mb":32768,"available_mb":17306,"load":47.2,"cached_mb":4403,
-             "pagefile_used_mb":2150,"pagefile_total_mb":8192,
-             "dimm_temps":[{"label":"DIMM 0","temp_c":41.0},{"label":"DIMM 1","temp_c":44.2}],
-             "modules":[{"label":"Kingston KF556S40 #0","capacity_gb":16.0,"temp_c":44.2,"timings":"CL40-39-39 @ 5600 MT/s"},
-                        {"label":"Kingston KF556S40 #1","capacity_gb":null,"temp_c":null,"timings":null}]},
-      "storage":[{"name":"Samsung 980 Pro","kind":"nvme","temp":48.0,"activity":22.0,"health":97.0,
-                  "used_gb":412.0,"total_gb":931.5,"read_bps":1048576,"write_bps":2097152,
-                  "power_on_hours":1200,"power_on_count":310,"percentage_used_pct":3.0,
-                  "available_spare_pct":100.0,"data_written_gb":20480.0},
-                 {"name":"WD Blue","kind":"hdd","temp":36.0,"activity":1.0,"health":88.0,
-                  "used_gb":1200.0,"total_gb":2000.0}],
-      "board":{"temp":38.0,"vrm_temp":61.0,"name":"ASUS FX507VI","bios_version":"16.0302","bios_date":"2023-11-15"},
-      "fans":[{"name":"CPU Fan","rpm":920}],
-      "atk_fans":[{"name":"Chassis Fan","rpm":1500}],
-      "voltages":[{"name":"+12V","volts":12.08}],
-      "net":{"adapter":"Wi-Fi","down_bps":4404019,"up_bps":629145,"link_bps":866000000,
-             "down_pct":35.2,"up_pct":5.0,
-             "wifi":{"ssid":"HomeNet","signal_pct":86.0,"phy_mbps":866.7,"band":"5 GHz"}},
-      "battery":{"charge_pct":64.0,"rate_w":-8.1,"design_capacity_mwh":50000.0,
-                 "full_capacity_mwh":46000.0,"time_remaining_sec":11640},
-      "uptime_sec":273600,
-      "health":{"pawnio":"ok","degraded":false}}"#;
-
-    fn snapshot(json: &str) -> Snapshot {
-        parse_snapshot(json).expect("fixture parses")
+    fn full(style: Style) -> String {
+        text(&snapshot(FULL), &[display()], TempUnit::Celsius, style)
     }
 
-    fn display() -> DisplayMode {
-        DisplayMode {
-            gdi_name: r"\\.\DISPLAY1".to_string(),
-            model: Some("ROG XG27AQ".to_string()),
-            width: 2560,
-            height: 1440,
-            refresh: RefreshRate {
-                numerator: 170,
-                denominator: 1,
-            },
-            position: (0, 0),
-            primary: true,
+    /// Every indented `Label: value` reading of a report, with the padding
+    /// between label and value taken out.
+    fn readings(report: &str) -> Vec<(String, String)> {
+        report
+            .lines()
+            .filter_map(|line| line.strip_prefix("  "))
+            .filter_map(|line| line.split_once(": "))
+            .map(|(label, value)| (label.to_string(), value.trim_start().to_string()))
+            .collect()
+    }
+
+    fn assert_readings(report: &str, expected: &[(&str, &str)]) {
+        let found = readings(report);
+        for (label, value) in expected {
+            assert!(
+                found.iter().any(|(l, v)| l == label && v == value),
+                "missing {label}: {value} in:\n{report}"
+            );
         }
     }
 
     #[test]
     fn text_has_a_header_and_every_section_in_window_order() {
-        let report = text(&snapshot(FULL), &[display()], TempUnit::Celsius);
-        assert!(report.starts_with(&format!(
-            "PerfWindow {} — sensor readings",
-            env!("CARGO_PKG_VERSION")
-        )));
-        let headers = [
-            "CPU — Test CPU",
-            "GPU — RTX 4070",
-            "GPU — RTX 3060",
-            "iGPU — Intel UHD 770",
-            "RAM\n",
-            "Storage — Samsung 980 Pro",
-            "Storage — WD Blue",
-            "Network — Wi-Fi",
-            "Battery\n",
-            "Sensors\n",
-            "System\n",
-            "Displays\n",
+        let report = full(Style::Plain);
+        assert!(
+            report.starts_with(&format!(
+                "PerfWindow {} — sensor readings at 2025-05-1",
+                env!("CARGO_PKG_VERSION")
+            )),
+            "{report}"
+        );
+        let titles = [
+            "\nCPU — Test CPU\n",
+            "\nGPU — RTX 4070\n",
+            "\nGPU — RTX 3060\n",
+            "\niGPU — Intel UHD 770\n",
+            "\nRAM\n",
+            "\nNetwork — Wi-Fi\n",
+            "\nBattery\n",
+            "\nStorage — Samsung 980 Pro\n",
+            "\nStorage — WD Blue\n",
+            "\nSensors\n",
+            "\nSystem\n",
+            "\nDisplays\n",
         ];
-        let positions: Vec<usize> = headers
+        let positions: Vec<usize> = titles
             .iter()
-            .map(|h| report.find(h).unwrap_or_else(|| panic!("missing {h:?}")))
+            .map(|t| report.find(t).unwrap_or_else(|| panic!("missing {t:?}")))
             .collect();
         assert!(positions.windows(2).all(|w| w[0] < w[1]), "{positions:?}");
     }
 
     #[test]
     fn text_writes_labelled_lines_with_units() {
-        let report = text(&snapshot(FULL), &[], TempUnit::Celsius);
-        for line in [
-            "  Load: 34 %",
-            "  Temperature: 58 °C",
-            "  Headroom to TjMax: 12 °C",
-            "  Clock: 4400 MHz",
-            "  Bus clock: 100 MHz",
-            "  Power: 52.0 W",
-            "  Core voltage: 1.250 V",
-            "  Per-core load: 38 %, 55 %",
-            "  Per-core clock: 4400 MHz, n/a",
-            "  Per-core temperature: 60 °C, n/a",
-            "  VRAM: 6.2 / 12.0 GB",
-            "  Engines: 3D 47 %",
-            "  PCIe: 1.5 MB/s",
-            "  Memory controller load: 43 %",
-            "  VRAM: 332 MB shared",
-            "  Used: 15.1 GB",
-            "  Module Kingston KF556S40 #0: 16 GB · 44 °C · CL40-39-39 @ 5600 MT/s",
-            "  Swap: 2.1 / 8.0 GB",
-            "  Read: 1.0 MB/s",
-            "  Power-on hours: 1200 h",
-            "  NVMe wear: 3 %",
-            "  Wi-Fi: HomeNet · 86 % · 867 Mbps",
-            "  Download: 4.2 MB/s",
-            "  Rate: -8.1 W",
-            "  State: DISCHARGING",
-            "  Time remaining: 3h 14m",
-            "  Health: 92.0 %",
-            "  CPU Fan: 920 RPM",
-            "  ATK Chassis Fan: 1500 RPM",
-            "  +12V: 12.080 V",
-            "  BIOS: 16.0302 (2023-11-15)",
-            "  Uptime: 3d 4h",
-            "  PawnIO driver: ok",
-            "  Degraded: no",
-        ] {
-            assert!(report.contains(line), "missing {line:?} in:\n{report}");
-        }
+        assert_readings(
+            &full(Style::Plain),
+            &[
+                ("Load", "34 %"),
+                ("Temperature", "58 °C"),
+                ("Headroom to TjMax", "12 °C"),
+                ("Clock", "4400 MHz"),
+                ("Bus clock", "100 MHz"),
+                ("Power", "52.0 W"),
+                ("Core voltage", "1.250 V"),
+                ("Per-core load", "38 %, 55 %"),
+                ("Per-core clock", "4400 MHz, n/a"),
+                ("Per-core temperature", "60 °C, n/a"),
+                ("VRAM", "6.2 / 12.0 GB"),
+                ("Engines", "3D 47 %"),
+                ("PCIe", "1.5 MB/s"),
+                ("Memory controller load", "43 %"),
+                ("VRAM", "332 MB shared"),
+                ("Used", "15.1 GB"),
+                (
+                    "Module",
+                    "Kingston KF556S40 #0 · 16 GB · 44 °C · CL40-39-39 @ 5600 MT/s",
+                ),
+                ("Module", "Kingston KF556S40 #1"),
+                ("Swap", "2.1 / 8.0 GB"),
+                ("Read", "1.0 MB/s"),
+                ("Power-on hours", "1200 h  (≈ 0 y 50 d)"),
+                ("NVMe wear", "3 %"),
+                ("Wi-Fi", "HomeNet · 86 % · 867 Mbps"),
+                ("Download", "4.2 MB/s"),
+                ("Rate", "-8.1 W"),
+                ("State", "DISCHARGING"),
+                ("Time remaining", "3h 14m"),
+                ("Health", "92.0 %"),
+                ("CPU Fan", "920 RPM"),
+                ("ATK Chassis Fan", "1500 RPM"),
+                ("+12V", "12.080 V"),
+                ("BIOS", "16.0302 (2023-11-15)"),
+                ("Uptime", "3d 4h"),
+                ("PawnIO driver", "ok"),
+                ("Degraded", "no"),
+            ],
+        );
+    }
+
+    #[test]
+    fn labels_are_padded_to_the_widest_in_their_section() {
+        let report = full(Style::Plain);
+        let cpu = report
+            .split("\n\n")
+            .find(|s| s.starts_with("CPU"))
+            .expect("CPU section");
+        let columns: Vec<usize> = cpu
+            .lines()
+            .skip(1)
+            .map(|line| {
+                let after = &line[line.find(':').expect("a label") + 1..];
+                line.len() - after.trim_start().len()
+            })
+            .collect();
+        // "  Per-core temperature: " is the widest label and sets the column.
+        assert_eq!(columns.len(), 10, "{cpu}");
+        assert!(columns.iter().all(|&c| c == 24), "{columns:?}\n{cpu}");
     }
 
     #[test]
     fn text_reports_temperatures_in_the_chosen_unit() {
-        let report = text(&snapshot(FULL), &[], TempUnit::Fahrenheit);
-        assert!(report.contains("  Temperature: 136 °F"), "{report}");
+        let report = text(&snapshot(FULL), &[], TempUnit::Fahrenheit, Style::Plain);
+        assert_readings(&report, &[("Temperature", "136 °F")]);
     }
 
     #[test]
@@ -592,8 +891,9 @@ mod tests {
             &snapshot(r#"{"v":1,"ts":1,"cpu":{"name":"X","load":10.0}}"#),
             &[],
             TempUnit::Celsius,
+            Style::Plain,
         );
-        assert!(report.contains("CPU — X\n  Load: 10 %"), "{report}");
+        assert!(report.contains("\n\nCPU — X\n  Load: 10 %"), "{report}");
         assert!(!report.contains("Temperature"), "{report}");
         assert!(!report.contains("Sensors"), "{report}");
         assert!(!report.contains("Displays"), "{report}");
@@ -602,16 +902,102 @@ mod tests {
             &snapshot(r#"{"v":1,"ts":1,"cpu":{"name":"X","load":null}}"#),
             &[],
             TempUnit::Celsius,
+            Style::Plain,
         );
         assert!(!empty.contains("CPU"), "{empty}");
     }
 
     #[test]
     fn text_lists_displays_with_resolution_refresh_and_primary() {
-        let report = text(&snapshot(FULL), &[display()], TempUnit::Celsius);
+        assert!(full(Style::Plain)
+            .contains(r"  ROG XG27AQ (\\.\DISPLAY1): 2560 x 1440 @ 170 Hz, primary"));
+    }
+
+    #[test]
+    fn the_ascii_style_is_pure_ascii_with_the_same_readings() {
+        let report = full(Style::Ascii);
+        assert!(report.is_ascii(), "{report}");
+        assert!(report.starts_with(&format!(
+            "PerfWindow {} - sensor readings at 2025-05-1",
+            env!("CARGO_PKG_VERSION")
+        )));
+        assert!(report.contains("\n\nCPU - Test CPU\n"), "{report}");
+        assert_readings(
+            &report,
+            &[
+                ("Temperature", "58 C"),
+                ("Headroom to TjMax", "12 C"),
+                ("Wi-Fi", "HomeNet, 86 %, 867 Mbps"),
+                (
+                    "Module",
+                    "Kingston KF556S40 #0, 16 GB, 44 C, CL40-39-39 @ 5600 MT/s",
+                ),
+                ("Power-on hours", "1200 h  (~ 0 y 50 d)"),
+            ],
+        );
+    }
+
+    #[test]
+    fn a_name_outside_ascii_reads_as_question_marks_in_the_ascii_style() {
+        let sample = snapshot(r#"{"v":1,"ts":1,"cpu":{"name":"Ryzen™ 7","load":10.0}}"#);
+        let report = text(&sample, &[], TempUnit::Celsius, Style::Ascii);
+        assert!(report.contains("\nCPU - Ryzen? 7\n"), "{report}");
+    }
+
+    #[test]
+    fn only_the_color_style_writes_escape_codes() {
+        assert!(!full(Style::Plain).contains('\x1b'));
+        assert!(!full(Style::Ascii).contains('\x1b'));
+        let color = full(Style::Color);
+        assert!(color.starts_with("\x1b[1mPerfWindow "), "{color:?}");
         assert!(
-            report.contains(r"  ROG XG27AQ (\\.\DISPLAY1): 2560 x 1440 @ 170 Hz, primary"),
-            "{report}"
+            color.contains("\n\n\x1b[1mCPU — Test CPU\x1b[0m\n"),
+            "{color:?}"
+        );
+        assert!(color.contains("\n  \x1b[2mLoad:\x1b[0m"), "{color:?}");
+    }
+
+    #[test]
+    fn readings_the_window_flags_carry_its_warning_colours() {
+        let color = full(Style::Color);
+        // 12 °C of headroom reads as 83 °C silicon, in the window's warn band.
+        assert!(color.contains(" \x1b[33m12 °C\x1b[0m\n"), "{color:?}");
+        assert!(color.contains(" \x1b[33mDISCHARGING\x1b[0m\n"), "{color:?}");
+        // The VRM is past the board's 60 °C warn line; the board itself is calm.
+        assert!(color.contains(" \x1b[33m61 °C\x1b[0m\n"), "{color:?}");
+        assert!(color.contains(" 38 °C\n"), "{color:?}");
+
+        let hot = text(
+            &snapshot(r#"{"v":1,"ts":1,"cpu":{"name":"X","temp":95.0}}"#),
+            &[],
+            TempUnit::Celsius,
+            Style::Color,
+        );
+        assert!(hot.contains(" \x1b[31m95 °C\x1b[0m"), "{hot:?}");
+    }
+
+    #[test]
+    fn control_characters_from_the_sensors_are_stripped() {
+        let sample = snapshot(
+            r#"{"v":1,"ts":1,"net":{"adapter":"Wi\u0007Fi\u009b","down_bps":1024.0,
+                "wifi":{"ssid":"Evil\u001b[2J\nFake: 1","signal_pct":50.0}}}"#,
+        );
+        let report = text(&sample, &[], TempUnit::Celsius, Style::Plain);
+        // The report's own line breaks are the only control characters left.
+        assert!(
+            !report.chars().any(|c| c.is_control() && c != '\n'),
+            "{report:?}"
+        );
+        assert!(report.contains("\n\nNetwork — WiFi\n"), "{report:?}");
+        assert!(
+            report.contains("Wi-Fi:    Evil[2JFake: 1 · 50 %"),
+            "{report:?}"
+        );
+        assert!(
+            !report
+                .lines()
+                .any(|line| line.trim_start().starts_with("Fake")),
+            "{report:?}"
         );
     }
 
@@ -632,10 +1018,55 @@ mod tests {
     fn the_json_snapshot_parses_back_into_the_same_sample() {
         let original = snapshot(FULL);
         let value = json(&original, &[display()]);
-        let parsed = parse_snapshot(&value["snapshot"].to_string()).expect("round trip");
+        let parsed =
+            crate::ipc::parse_snapshot(&value["snapshot"].to_string()).expect("round trip");
         assert_eq!(parsed.ts, original.ts);
         assert_eq!(parsed.ts_ms, original.ts_ms);
         assert_eq!(parsed.cpu.unwrap().name, "Test CPU");
         assert_eq!(value["displays"][0]["primary"], true);
+    }
+
+    #[test]
+    fn json_text_is_ascii_and_reads_back_as_the_same_document() {
+        let sample = snapshot(r#"{"v":1,"ts":1,"cpu":{"name":"Ryzen™ 7 — 😀","load":10.0}}"#);
+        for pretty in [true, false] {
+            let text = json_text(&sample, &[], pretty);
+            assert!(text.is_ascii(), "{text}");
+            let value: Value = serde_json::from_str(&text).expect("valid JSON");
+            assert_eq!(value, json(&sample, &[]));
+            assert!(
+                text.contains(r"Ryzen\u2122 7 \u2014 \ud83d\ude00"),
+                "{text}"
+            );
+        }
+        assert!(!json_text(&sample, &[], false).contains('\n'));
+        assert!(json_text(&sample, &[], true).contains('\n'));
+    }
+
+    #[test]
+    fn a_timestamp_names_the_local_time_and_its_offset() {
+        assert_eq!(
+            timestamp([2025, 5, 19, 11, 0, 7], 120),
+            "2025-05-19 11:00:07 +02:00"
+        );
+        assert_eq!(
+            timestamp([2025, 1, 2, 3, 4, 5], -330),
+            "2025-01-02 03:04:05 -05:30"
+        );
+        assert_eq!(
+            timestamp([2025, 1, 2, 3, 4, 5], 0),
+            "2025-01-02 03:04:05 +00:00"
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn local_time_converts_the_sample_stamp_in_any_zone() {
+        // FULL was taken at 2025-05-19 09:00:00.123 UTC.
+        let ([year, month, _, hour, minute, second], offset) =
+            local_time(&snapshot(FULL)).expect("converts");
+        assert_eq!((year, month, second), (2025, 5, 0));
+        let utc_minutes = (i64::from(hour) * 60 + i64::from(minute) - offset).rem_euclid(1440);
+        assert_eq!(utc_minutes, 9 * 60);
     }
 }

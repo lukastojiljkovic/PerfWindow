@@ -139,7 +139,7 @@ fn format_state(rate_w: Option<f64>, theme: &Theme) -> (String, Option<egui::Col
 
 /// Positive rate → `"\u{2191}12.4 W"`, negative → `"\u{2193}12.4 W"`,
 /// idle (on AC, no charge/discharge) → `"0 W"`, absent → `"—"`.
-fn format_rate(rate_w: Option<f64>) -> String {
+pub(crate) fn format_rate(rate_w: Option<f64>) -> String {
     match finite(rate_w) {
         Some(w) if w > 0.05 => format!("\u{2191}{:.1} W", w),
         Some(w) if w < -0.05 => format!("\u{2193}{:.1} W", -w),

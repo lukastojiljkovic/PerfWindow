@@ -6,7 +6,7 @@ use crate::ipc::StorageInfo;
 use crate::theme::Theme;
 use crate::ui::capacity::Capacity;
 use crate::widgets::bars::bar_meter;
-use crate::widgets::{health_color, temp_color, TempKind};
+use crate::widgets::{health_color, temp_severity, Severity, TempKind};
 use egui::{Color32, FontId, Pos2, Sense, Stroke, Vec2};
 
 /// Fixed width of the TEMP column.
@@ -29,7 +29,7 @@ const TABLE_HEAD_H: f32 = 72.0;
 /// `ui::STORAGE_DISK_ROW_HEIGHT`.
 const DISK_ROW_STEP: f32 = 46.0;
 /// Activity percentage at/above which the activity bar switches to its warn colour.
-const ACTIVITY_WARN: f64 = 80.0;
+pub(crate) const ACTIVITY_WARN: f64 = 80.0;
 
 /// Render the STORAGE card: a title, a faint column header and one row per disk.
 ///
@@ -277,27 +277,36 @@ fn disk_row(ui: &mut egui::Ui, theme: &Theme, disk: &StorageInfo, unit: TempUnit
     );
 }
 
-/// ok / warn / hot colour for a disk temperature. When the drive publishes
-/// its own thermal thresholds (and they are coherent: warn < crit), classify
-/// against those — ok below warn, warn band up to crit, hot at/after crit.
-/// Otherwise fall back to the fixed [`TempKind::Disk`] bands.
+/// ok / warn / hot colour for a disk temperature, by [`disk_temp_severity`].
 fn disk_temp_color(
     celsius: f64,
     warn_c: Option<f64>,
     crit_c: Option<f64>,
     theme: &Theme,
 ) -> Color32 {
+    disk_temp_severity(celsius, warn_c, crit_c).map_or(theme.ok, |s| s.color(theme))
+}
+
+/// The severity band of a disk temperature. When the drive publishes its own
+/// thermal thresholds (and they are coherent: warn < crit), classify against
+/// those — ok below warn, warn band up to crit, hot at/after crit. Otherwise
+/// fall back to the fixed [`TempKind::Disk`] bands.
+pub(crate) fn disk_temp_severity(
+    celsius: f64,
+    warn_c: Option<f64>,
+    crit_c: Option<f64>,
+) -> Option<Severity> {
     match (finite(warn_c), finite(crit_c)) {
         (Some(warn), Some(crit)) if warn < crit => {
             if celsius >= crit {
-                theme.hot
+                Some(Severity::Hot)
             } else if celsius >= warn {
-                theme.warn
+                Some(Severity::Warn)
             } else {
-                theme.ok
+                None
             }
         }
-        _ => temp_color(celsius, TempKind::Disk, theme),
+        _ => temp_severity(celsius, TempKind::Disk),
     }
 }
 

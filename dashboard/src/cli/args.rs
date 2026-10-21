@@ -14,6 +14,11 @@ pub struct Options {
     pub format: Format,
     /// Seconds between reports with `--watch`; `None` prints one report.
     pub watch: Option<u32>,
+    /// `--once`: one text report even in a terminal, where a plain run opens
+    /// the live dashboard.
+    pub once: bool,
+    /// `--no-color`: no colour in the report or the dashboard.
+    pub no_color: bool,
 }
 
 /// The parsed command line.
@@ -31,28 +36,44 @@ const DEFAULT_WATCH_S: u32 = 2;
 /// than clamped.
 const WATCH_RANGE_S: std::ops::RangeInclusive<u32> = 1..=60;
 
-/// The help text: usage, every flag, the exit codes and where the command is
-/// switched on.
+/// The help text: what the command does, usage, every flag, examples, the
+/// exit codes and where the command is switched on. ASCII only, so it reads
+/// the same piped into any code page.
 pub const USAGE: &str = "\
-Usage: perfwindow-cli [--json] [--watch [SECONDS]]
+perfwindow-cli: every sensor reading the PerfWindow window shows.
+
+Usage: perfwindow-cli [--once | --watch [SECONDS]] [--json] [--no-color]
        perfwindow-cli --help | --version
 
-Prints every sensor reading the PerfWindow window shows, then exits.
+In a terminal it opens a live dashboard that redraws on every new sample;
+q, Esc or Ctrl+C leaves it. When stdin or stdout is not a terminal (piped,
+redirected, or run by a script or an AI agent) it prints one text report
+instead: plain ASCII, one \"Label: value\" reading per line.
 
 Options:
-  --json             JSON instead of text, for scripts and AI agents
+  --once             print one text report and exit, even in a terminal
+  --json             print the readings as JSON (temperatures in Celsius)
   --watch [SECONDS]  print a new report every SECONDS (1 to 60, default 2)
-                     until stopped with Ctrl+C
+                     until stopped with Ctrl+C; JSON is one object per line
+  --no-color         no colour (also with NO_COLOR set, or TERM=dumb)
   -h, --help         show this help
   -V, --version      show the version
 
+Examples:
+  perfwindow-cli                   the live dashboard
+  perfwindow-cli --once            one text report
+  perfwindow-cli --json            one JSON report, for scripts and AI agents
+  perfwindow-cli --watch 5 --json  a JSON object every 5 seconds (NDJSON)
+
 Exit codes:
-  0  report printed
+  0  success
   2  bad arguments
   3  command-line readings are off
-  4  the sensor service is unavailable
+  4  the sensor service is unavailable or stopped
 
-The command must be turned on in PerfWindow -> Settings -> Command line.
+Turn the command on in PerfWindow -> Settings -> Command line. It starts the
+sensor service as the window does, so Windows asks for approval, and it
+cannot read the sensors while the window is open.
 ";
 
 /// Parse the arguments after `argv[0]`.
@@ -63,10 +84,14 @@ The command must be turned on in PerfWindow -> Settings -> Command line.
 pub fn parse<I: IntoIterator<Item = String>>(args: I) -> Result<Command, String> {
     let mut format = Format::Text;
     let mut watch = None;
+    let mut once = false;
+    let mut no_color = false;
     let mut args = args.into_iter().peekable();
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--json" => format = Format::Json,
+            "--once" => once = true,
+            "--no-color" => no_color = true,
             "--watch" => {
                 let seconds = match args.next_if(|next| !next.starts_with('-')) {
                     Some(value) => parse_seconds(&value)?,
@@ -79,7 +104,15 @@ pub fn parse<I: IntoIterator<Item = String>>(args: I) -> Result<Command, String>
             other => return Err(format!("unknown argument \"{other}\"")),
         }
     }
-    Ok(Command::Run(Options { format, watch }))
+    if once && watch.is_some() {
+        return Err("--once and --watch cannot be used together".to_string());
+    }
+    Ok(Command::Run(Options {
+        format,
+        watch,
+        once,
+        no_color,
+    }))
 }
 
 fn parse_seconds(value: &str) -> Result<u32, String> {
@@ -107,12 +140,14 @@ mod tests {
     }
 
     #[test]
-    fn no_arguments_prints_one_text_report() {
+    fn no_arguments_is_a_plain_text_run() {
         assert_eq!(
             run(&[]),
             Options {
                 format: Format::Text,
-                watch: None
+                watch: None,
+                once: false,
+                no_color: false,
             }
         );
     }
@@ -120,6 +155,22 @@ mod tests {
     #[test]
     fn json_switches_the_format() {
         assert_eq!(run(&["--json"]).format, Format::Json);
+    }
+
+    #[test]
+    fn once_and_no_color_are_switches() {
+        let options = run(&["--once", "--no-color"]);
+        assert!(options.once && options.no_color);
+        assert_eq!(options.watch, None);
+    }
+
+    #[test]
+    fn once_and_watch_contradict_each_other() {
+        let error = parse(args(&["--once", "--watch", "5"])).unwrap_err();
+        assert!(
+            error.contains("--once") && error.contains("--watch"),
+            "{error}"
+        );
     }
 
     #[test]
@@ -176,16 +227,22 @@ mod tests {
     #[test]
     fn usage_documents_every_flag_and_exit_code() {
         for needle in [
+            "--once",
             "--json",
             "--watch",
+            "--no-color",
             "--help",
             "--version",
+            "0  success",
             "2  bad",
             "3  ",
             "4  ",
+            "perfwindow-cli --json ",
         ] {
             assert!(USAGE.contains(needle), "USAGE is missing {needle}");
         }
         assert!(USAGE.contains("PerfWindow -> Settings -> Command line"));
+        assert!(USAGE.is_ascii());
+        assert!(USAGE.lines().all(|line| line.len() <= 80));
     }
 }
