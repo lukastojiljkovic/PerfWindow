@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ## [Unreleased]
 
+## [2.1.0] — 2026-10-21
+
+PerfWindow comes to the terminal: perfwindow-cli shows every reading as a live dashboard, or as a plain report or JSON for scripts and AI agents.
+
 ### Added
 
 - **PerfWindow in the terminal.** `perfwindow-cli` opens a live dashboard of
@@ -1150,7 +1154,8 @@ User-facing application behaviour is unchanged.
   matching uninstaller that removes the exclusions, the `R0sensord` driver
   service, the install directory and the per-user data directory.
 
-[Unreleased]: https://github.com/lukastojiljkovic/PerfWindow/compare/v2.0.3...HEAD
+[Unreleased]: https://github.com/lukastojiljkovic/PerfWindow/compare/v2.1.0...HEAD
+[2.1.0]: https://github.com/lukastojiljkovic/PerfWindow/compare/v2.0.3...v2.1.0
 [2.0.3]: https://github.com/lukastojiljkovic/PerfWindow/compare/v2.0.2...v2.0.3
 [2.0.2]: https://github.com/lukastojiljkovic/PerfWindow/compare/v2.0.1...v2.0.2
 [2.0.1]: https://github.com/lukastojiljkovic/PerfWindow/compare/v2.0.0...v2.0.1
