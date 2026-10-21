@@ -18,6 +18,8 @@ use crate::theme::Theme;
 use egui::{
     Align2, Color32, FontId, Margin, Pos2, Rect, Response, Sense, Stroke, StrokeKind, Vec2,
 };
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Mutex, PoisonError};
 
 /// Fixed outer width of the settings window.
 const WINDOW_WIDTH: f32 = 600.0;
@@ -85,6 +87,9 @@ enum Change {
     /// Show or hide one mini-strip reading.
     MiniValue(MiniValue, bool),
     Opacity(u8),
+    /// Let `perfwindow-cli` read the sensors, and put its folder on the user's
+    /// `PATH` so it runs from any terminal.
+    CommandLine(bool),
     ManualCheck,
 }
 
@@ -231,6 +236,7 @@ pub fn settings_modal(ctx: &egui::Context, app: &mut PerfApp) {
                                 &mut change,
                             );
                             mini_section(ui, &theme, app, &mut change);
+                            command_line_section(ui, &theme, app.config.cli_enabled, &mut change);
                             updates_section(ui, &theme, app, &mut change);
                         });
                 });
@@ -259,6 +265,10 @@ pub fn settings_modal(ctx: &egui::Context, app: &mut PerfApp) {
             }
             Change::MiniValue(kind, on) => kind.set(&mut app.config.mini_strip_values, on),
             Change::Opacity(percent) => app.config.background_opacity = percent,
+            Change::CommandLine(on) => {
+                app.config.cli_enabled = on;
+                update_command_line_path(on);
+            }
             Change::ManualCheck => app.manual_update_check(ctx),
         }
         if needs_save {
@@ -1056,6 +1066,66 @@ fn toggle_switch(ui: &mut egui::Ui, theme: &Theme, on: bool) -> Response {
         ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
     }
     response
+}
+
+/// The COMMAND LINE section: the switch that lets `perfwindow-cli` read the
+/// sensors. Queues a [`Change::CommandLine`].
+fn command_line_section(ui: &mut egui::Ui, theme: &Theme, on: bool, change: &mut Option<Change>) {
+    ui.vertical(|ui| {
+        ui.spacing_mut().item_spacing.y = SECTION_INNER_GAP;
+        section_label(ui, theme, "COMMAND LINE");
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 11.0;
+            if toggle_switch(ui, theme, on).clicked() {
+                *change = Some(Change::CommandLine(!on));
+            }
+            ui.label(
+                egui::RichText::new("Allow command-line readings")
+                    .family(theme.font_data.egui())
+                    .size(11.0)
+                    .color(theme.ink),
+            );
+        });
+        section_hint(
+            ui,
+            theme,
+            "Run perfwindow-cli in a new terminal for a live dashboard of every reading, \
+             or perfwindow-cli --json for scripts and AI agents. Windows asks to start the \
+             sensor service, as it does for this window, and only one of the two can read \
+             at a time.",
+        );
+    });
+}
+
+/// The PATH state the switch last asked for. Each worker applies this rather
+/// than the value it was spawned with, so a quick on-off-on leaves PATH
+/// matching the switch whichever worker runs last.
+static PATH_WANTED: AtomicBool = AtomicBool::new(false);
+/// One PATH read-modify-write at a time.
+static PATH_LOCK: Mutex<()> = Mutex::new(());
+
+/// Update the user's `PATH` for the switch, off the UI thread: the
+/// `WM_SETTINGCHANGE` broadcast waits on every top-level window. The setting
+/// stands even if PATH cannot be updated, since the command still works by its
+/// full path.
+fn update_command_line_path(on: bool) {
+    PATH_WANTED.store(on, Ordering::SeqCst);
+    std::thread::spawn(|| {
+        let _one_at_a_time = PATH_LOCK.lock().unwrap_or_else(PoisonError::into_inner);
+        if let Err(e) = command_line_path(PATH_WANTED.load(Ordering::SeqCst)) {
+            eprintln!("PerfWindow: could not update PATH for perfwindow-cli: {e}");
+        }
+    });
+}
+
+/// Put the folder of the running executable on the user's `PATH`, or take it
+/// off, so `perfwindow-cli` resolves from any terminal.
+fn command_line_path(on: bool) -> std::io::Result<()> {
+    let exe = std::env::current_exe()?;
+    let dir = exe
+        .parent()
+        .ok_or_else(|| std::io::Error::other("the program has no folder"))?;
+    crate::cli::path::set_on_user_path(dir, on)
 }
 
 /// The UPDATES section: current version, opt-out toggle, manual check,

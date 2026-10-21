@@ -16,6 +16,8 @@ use egui::{FontId, Sense, Vec2};
 
 /// Height of the SWAP row.
 const SWAP_ROW_H: f32 = 24.0;
+/// Pagefile use, as a fraction, at/above which the SWAP bar turns warn.
+pub(crate) const SWAP_WARN: f64 = 0.9;
 
 /// Render the RAM card: title, a usage donut beside used/free/cached stats, a
 /// pagefile (SWAP) bar and a usage-history sparkline.
@@ -128,7 +130,7 @@ fn gb(mb: Option<f64>) -> String {
 /// Hottest finite DIMM reading plus the count of finite readings. `None` when
 /// every reading is absent or non-finite, so an all-NaN snapshot hides the
 /// row instead of rendering a `f64::MIN` fold as `"-9223372036854775808°"`.
-fn hottest_dimm(dimms: &[DimmTemp]) -> Option<(f64, usize)> {
+pub(crate) fn hottest_dimm(dimms: &[DimmTemp]) -> Option<(f64, usize)> {
     let mut hottest: Option<f64> = None;
     let mut finite_count = 0usize;
     for t in dimms.iter().map(|d| d.temp_c).filter(|t| t.is_finite()) {
@@ -219,7 +221,7 @@ fn swap_row(ui: &mut egui::Ui, theme: &Theme, used_mb: Option<f64>, total_mb: Op
 
             if active {
                 let fraction = (used / total).clamp(0.0, 1.0) as f32;
-                let warn = fraction >= 0.9;
+                let warn = fraction >= SWAP_WARN as f32;
                 bar_meter(ui, theme, fraction, warn);
             } else {
                 // Inactive: an empty track-coloured bar, no fill. Same

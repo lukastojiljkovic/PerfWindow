@@ -11,6 +11,7 @@
 //! are built, ordered and turned into footer text is a pure function so it can
 //! be unit-tested without a desktop.
 
+use serde::Serialize;
 use std::time::{Duration, Instant};
 
 #[cfg(windows)]
@@ -30,7 +31,7 @@ pub const MAX_EXPANDED_DISPLAYS: usize = 2;
 
 /// A monitor's refresh rate as the rational CCD reports it (e.g. 7497/100 for
 /// a "75 Hz" panel, 5994/100 for 59.94 Hz).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub struct RefreshRate {
     pub numerator: u32,
     pub denominator: u32,
@@ -64,7 +65,7 @@ impl RefreshRate {
 }
 
 /// One active monitor, as the footer needs it.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct DisplayMode {
     /// GDI device name, e.g. `\\.\DISPLAY5`.
     pub gdi_name: String,

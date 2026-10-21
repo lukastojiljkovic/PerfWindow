@@ -12,6 +12,13 @@ use crate::widgets::gauge::donut;
 use crate::widgets::sparkline::{sparkline, MIN_HEIGHT as SPARKLINE_MIN_HEIGHT};
 use crate::widgets::{temp_color, TempKind};
 
+/// The temperature the HEADROOM row (distance to TjMax) is coloured as. Less
+/// headroom is closer to throttling, so it reads as the inverse on the
+/// processor bands: 5 °C of headroom is about 90 °C silicon.
+pub(crate) fn headroom_as_temp(distance_c: f64) -> f64 {
+    (95.0 - distance_c).clamp(0.0, 105.0)
+}
+
 /// Render the CPU card: title, a load donut beside temp/clock/power stats,
 /// either a per-core load strip or a per-core heat-map (selected by
 /// `show_heat_map`), and a load-history sparkline.
@@ -87,8 +94,7 @@ pub fn cpu_panel(
                 // throttling, so re-use the temp ramp by treating "headroom
                 // remaining" as its inverse: 5 °C of headroom ≈ ~90 °C silicon.
                 if let Some(d) = finite(cpu.distance_to_tjmax_c) {
-                    let pseudo_temp = (95.0_f64 - d).clamp(0.0, 105.0);
-                    let col = temp_color(pseudo_temp, TempKind::Processor, theme);
+                    let col = temp_color(headroom_as_temp(d), TempKind::Processor, theme);
                     cands.push(StatCandidate {
                         priority: 3,
                         label: "HEADROOM",

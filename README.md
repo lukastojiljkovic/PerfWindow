@@ -267,6 +267,40 @@ remembers those and the monitor it was on. A reading with no data shows a
 dash, a temperature the dashboard would highlight keeps its colour, and a
 reading that does not fit the monitor's width is dropped from the right.
 
+## Command line
+
+`perfwindow-cli` brings every reading the window shows to a terminal, a script
+or an AI agent. It is off until you turn it on in **Settings → Command
+line**, which also puts the install folder on your user `PATH`, so new terminals
+find the command.
+
+In a terminal it opens a live dashboard: the window's cards in your theme, with
+their load and temperature history, redrawn on every sample and fitted to the
+terminal's size. `q`, `Esc` or `Ctrl+C` leaves it. When its input or output is
+not a terminal (piped, redirected, or run by a script or an AI agent), it prints
+one text report instead: plain ASCII, one `Label: value` reading per line.
+Scripts and AI agents should ask for `--json` or `--once`.
+
+```
+perfwindow-cli                   the live dashboard (a text report when piped)
+perfwindow-cli --once            one text report, then exit
+perfwindow-cli --json            the readings as JSON (temperatures in °C)
+perfwindow-cli --watch 5         a new report every 5 seconds until Ctrl+C (1 to 60)
+perfwindow-cli --watch 5 --json  one JSON object per line, every 5 seconds
+perfwindow-cli --no-color        no colour, as with NO_COLOR set or TERM=dumb
+```
+
+JSON writes every character outside ASCII as a `\u` escape, so Windows
+PowerShell 5.1 reads names such as `Ryzen™` intact through a pipe.
+
+It connects to the sensor service the way the window does, so Windows asks for
+the same approval. The window and the command line cannot read the sensors at
+the same time: close the window before running the command, or the other way
+round.
+
+Exit codes: 0 success, 2 bad arguments, 3 command-line readings are off in
+Settings, 4 the sensor service is unavailable or stopped.
+
 ## Limitations
 
 - **The mini strip stays on one monitor.** It remembers the monitor it was last

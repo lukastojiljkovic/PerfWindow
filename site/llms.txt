@@ -8,6 +8,7 @@ Key facts:
 - GPU: discrete NVIDIA and AMD cards and Intel integrated graphics, with hot spot and memory junction temperatures, clocks, encoder load, fan, power and VRAM.
 - Memory and storage: per-module DIMM temperatures where reported, drive temperatures against each drive's own limits, and SMART lifetime (power-on hours, NVMe wear, data written).
 - Six themes (Amber Mainframe, Cyber Slate, Phosphor Tactical, Synthwave Neon, Crimson Terminal and Light) that can follow Windows' light and dark setting. Refresh every 0.5, 1, 2 or 5 seconds, in °C or °F.
+- Command line: `perfwindow-cli` opens a live terminal dashboard of the same readings in the user's theme; piped or run by a script or an AI agent it prints a plain ASCII report, one `Label: value` reading per line, or JSON with `--json`. It is off until turned on in Settings → Command line.
 - Architecture: a Rust and egui dashboard that runs as the user, and a .NET sensor service running as LocalSystem that starts on demand (one UAC prompt per launch) and exits when the dashboard closes. They talk over a named pipe.
 - The installer adds the signed PawnIO driver for CPU temperature, clock and power registers, and the Visual C++ runtime when missing.
 - Reads sensors only: no overclocking, undervolting or fan control. No telemetry; the only network request is an optional, anonymous update check against GitHub at most once every six hours.

@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ## [Unreleased]
 
+### Added
+
+- **PerfWindow in the terminal.** `perfwindow-cli` opens a live dashboard of
+  every reading the window shows: its cards in your theme, with load and
+  temperature history, fitted to the terminal's size. Piped, or run by a script
+  or an AI agent, it prints one plain text report instead, one reading per line;
+  `--json` gives the readings as JSON, and `--watch` repeats either every few
+  seconds. It is off until it is turned on in Settings → Command line, which
+  also adds it to your `PATH`.
+
+### Fixed
+
+- **The update check trusts only current certificates.** The lockfile picks up
+  `rustls-webpki` 0.103.16 and `webpki-roots` 1.0.10, the fixes `cargo audit`
+  flags for certificate authorities that are no longer trusted.
+
 ## [2.0.3] — 2026-10-15
 
 The CPU card labels its distance to TjMax HEADROOM, so the reading no longer looks like the throttle point itself.

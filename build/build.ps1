@@ -142,9 +142,10 @@ if ($LASTEXITCODE -ne 0) { throw 'dashboard build failed' }
 # it (sensord.dll is the managed payload the sensord.exe apphost loads).
 $releaseDir = "$root\dashboard\target\release"
 $perfExe    = Join-Path $releaseDir 'PerfWindow.exe'
+$cliExe     = Join-Path $releaseDir 'perfwindow-cli.exe'
 $sensordExe = Join-Path $releaseDir 'sensord.exe'
 $sensordDll = Join-Path $releaseDir 'sensord.dll'
-foreach ($f in @($perfExe, $sensordExe, $sensordDll)) {
+foreach ($f in @($perfExe, $cliExe, $sensordExe, $sensordDll)) {
     if (-not (Test-Path $f)) { throw "expected build output missing: $f" }
 }
 
@@ -179,5 +180,5 @@ if ($LASTEXITCODE -ne 0) { throw 'installer compilation failed' }
 
 $setup = "$root\dist\PerfWindow-Setup.exe"
 Write-Host '== Done =='
-Get-Item $perfExe, $sensordExe, $setup |
+Get-Item $perfExe, $cliExe, $sensordExe, $setup |
     Select-Object Name, @{ N = 'MB'; E = { [math]::Round($_.Length / 1MB, 2) } }

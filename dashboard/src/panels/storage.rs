@@ -6,7 +6,7 @@ use crate::ipc::StorageInfo;
 use crate::theme::Theme;
 use crate::ui::capacity::Capacity;
 use crate::widgets::bars::bar_meter;
-use crate::widgets::{health_color, temp_color, TempKind};
+use crate::widgets::{health_color, temp_severity, Severity, TempKind};
 use egui::{Color32, FontId, Pos2, Sense, Stroke, Vec2};
 
 /// Fixed width of the TEMP column.
@@ -29,7 +29,7 @@ const TABLE_HEAD_H: f32 = 72.0;
 /// `ui::STORAGE_DISK_ROW_HEIGHT`.
 const DISK_ROW_STEP: f32 = 46.0;
 /// Activity percentage at/above which the activity bar switches to its warn colour.
-const ACTIVITY_WARN: f64 = 80.0;
+pub(crate) const ACTIVITY_WARN: f64 = 80.0;
 
 /// Render the STORAGE card: a title, a faint column header and one row per disk.
 ///
@@ -277,27 +277,36 @@ fn disk_row(ui: &mut egui::Ui, theme: &Theme, disk: &StorageInfo, unit: TempUnit
     );
 }
 
-/// ok / warn / hot colour for a disk temperature. When the drive publishes
-/// its own thermal thresholds (and they are coherent: warn < crit), classify
-/// against those — ok below warn, warn band up to crit, hot at/after crit.
-/// Otherwise fall back to the fixed [`TempKind::Disk`] bands.
+/// ok / warn / hot colour for a disk temperature, by [`disk_temp_severity`].
 fn disk_temp_color(
     celsius: f64,
     warn_c: Option<f64>,
     crit_c: Option<f64>,
     theme: &Theme,
 ) -> Color32 {
+    disk_temp_severity(celsius, warn_c, crit_c).map_or(theme.ok, |s| s.color(theme))
+}
+
+/// The severity band of a disk temperature. When the drive publishes its own
+/// thermal thresholds (and they are coherent: warn < crit), classify against
+/// those — ok below warn, warn band up to crit, hot at/after crit. Otherwise
+/// fall back to the fixed [`TempKind::Disk`] bands.
+pub(crate) fn disk_temp_severity(
+    celsius: f64,
+    warn_c: Option<f64>,
+    crit_c: Option<f64>,
+) -> Option<Severity> {
     match (finite(warn_c), finite(crit_c)) {
         (Some(warn), Some(crit)) if warn < crit => {
             if celsius >= crit {
-                theme.hot
+                Some(Severity::Hot)
             } else if celsius >= warn {
-                theme.warn
+                Some(Severity::Warn)
             } else {
-                theme.ok
+                None
             }
         }
-        _ => temp_color(celsius, TempKind::Disk, theme),
+        _ => temp_severity(celsius, TempKind::Disk),
     }
 }
 
@@ -345,7 +354,7 @@ fn lifetime_tooltip(disk: &StorageInfo) -> Option<String> {
 
 /// Format a lifetime data volume given in GB: terabytes with one decimal once
 /// the figure crosses 1000 GB, whole gigabytes below.
-fn format_data_volume(gb: f64) -> String {
+pub(crate) fn format_data_volume(gb: f64) -> String {
     if gb >= 1000.0 {
         format!("{:.1} TB", gb / 1000.0)
     } else {
@@ -355,7 +364,7 @@ fn format_data_volume(gb: f64) -> String {
 
 /// Format cumulative power-on hours with a parenthetical year/day breakdown
 /// once the figure exceeds a year. `5057 h (≈ 0 y 211 d)`.
-fn format_power_on_hours(hours: i64) -> String {
+pub(crate) fn format_power_on_hours(hours: i64) -> String {
     if hours <= 0 {
         return format!("{} h", hours);
     }
@@ -369,7 +378,7 @@ fn format_power_on_hours(hours: i64) -> String {
 ///
 /// Drives above 1000 GB are shown in terabytes (`"1.42 / 1.81 TB"`), smaller
 /// ones in gigabytes (`"412 / 931 GB"`). A missing value yields `"—"`.
-fn format_capacity(used_gb: Option<f64>, total_gb: Option<f64>) -> String {
+pub(crate) fn format_capacity(used_gb: Option<f64>, total_gb: Option<f64>) -> String {
     match (used_gb, total_gb) {
         (Some(used), Some(total)) => {
             if total >= 1000.0 {
@@ -385,7 +394,7 @@ fn format_capacity(used_gb: Option<f64>, total_gb: Option<f64>) -> String {
 /// Display form of a disk `kind` tag. `sensord` emits lower-case tags
 /// (`"nvme"`, `"ssd"`, `"hdd"`); this restores their conventional casing.
 /// An unrecognised tag is upper-cased as a fallback.
-fn kind_label(kind: &str) -> String {
+pub(crate) fn kind_label(kind: &str) -> String {
     match kind.to_ascii_lowercase().as_str() {
         "nvme" => "NVMe".to_string(),
         "ssd" => "SSD".to_string(),
