@@ -430,6 +430,21 @@ mod tests {
     }
 
     #[test]
+    fn a_disk_name_too_long_for_its_column_ends_in_an_ellipsis() {
+        let mut model = model();
+        if let Some(disk) = model.snapshot.storage.iter_mut().flatten().next() {
+            disk.name = "Samsung SSD 970 EVO Plus 1TB ".repeat(3);
+        }
+        let frame = render(&model, 120, 40);
+        let row = frame
+            .lines()
+            .find(|line| line.contains("Samsung SSD"))
+            .expect("the disk's row");
+        assert!(row.contains("Samsung SSD 970 "), "{row}");
+        assert!(row.contains('…'), "{row}");
+    }
+
+    #[test]
     fn an_80_by_24_terminal_keeps_the_most_important_cards() {
         let frame = render(&model(), 80, 24);
         assert_shows(
