@@ -932,6 +932,12 @@ impl PerfApp {
 }
 
 impl eframe::App for PerfApp {
+    /// Runs before every `ui` pass, and also while the window is minimized,
+    /// when eframe skips `ui`, so history keeps recording the feed.
+    fn logic(&mut self, _ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        self.ingest();
+    }
+
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
         // Follow-Windows must track a live OS light/dark switch; the poll is
@@ -940,7 +946,6 @@ impl eframe::App for PerfApp {
             self.os_is_light = light;
             self.apply_config_change(&ctx);
         }
-        self.ingest();
         self.display_cache.maybe_refresh(std::time::Instant::now());
         self.poll_connect_events();
         self.poll_download_outcome();
@@ -1283,6 +1288,21 @@ mod tests {
         // A feed that stays silent after the wake still counts as stopped.
         ingest_each_second(&mut app, woke + std::time::Duration::from_secs(29), 2);
         assert!(matches!(app.status, Status::SensordDown));
+    }
+
+    #[test]
+    fn logic_ingests_without_a_ui_pass() {
+        // eframe skips `ui` while the window is minimized but still calls
+        // `logic` on every repaint the reader thread requests.
+        let (mut app, state) = app_with_feed(true);
+        state.lock().unwrap().latest = Some(test_snapshot(1, 1.0));
+        eframe::App::logic(
+            &mut app,
+            &egui::Context::default(),
+            &mut eframe::Frame::_new_kittest(),
+        );
+        assert!(app.latest.is_some());
+        assert_eq!(app.history.cpu.as_ref().map(|cpu| cpu.len()), Some(1));
     }
 
     #[test]
