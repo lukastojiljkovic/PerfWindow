@@ -14,8 +14,9 @@ pub struct SensorState {
     /// Latest staged-init progress line, if sensord has emitted any.
     pub progress: Option<ProgressInfo>,
     /// When the reader last parsed ANY line (snapshot or progress). The
-    /// startup watchdog in `PerfApp::ingest` treats a fresh value as proof
-    /// of life even before the first snapshot arrives.
+    /// silence watchdog in `PerfApp::ingest` times the feed from it; while
+    /// the sensors load, a fresh value is proof of life even before the
+    /// first snapshot arrives.
     pub last_line_at: Option<std::time::Instant>,
     /// True when `latest` was taken while sensord was still enabling sensor
     /// categories: the last progress line before it named one as `loading`.
