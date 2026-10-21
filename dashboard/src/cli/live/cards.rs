@@ -294,7 +294,7 @@ pub(super) fn network(frame: &mut Frame, area: Rect, model: &Model, net: &NetInf
             Line::styled(rate(bps).unwrap_or_default(), p.value()),
         ];
         frame.render_widget(Paragraph::new(lines), text);
-        sparkline(frame, spark, buffer, p.fg(color));
+        sparkline(frame, spark, buffer, p.fg(color), p);
     }
     if let Some((label, value)) = link {
         let stat = Stat::new(&label.to_uppercase(), &value, p.value());

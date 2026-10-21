@@ -1,8 +1,9 @@
-//! The terminal around `perfwindow-cli`: what stdout can take, escape codes
-//! on the Windows console, and the status line on stderr while the sensors
-//! load.
+//! The terminal around `perfwindow-cli`: what stdout can take, the glyphs
+//! its font can draw, escape codes on the Windows console, and the status
+//! line on stderr while the sensors load.
 
 use super::report::Style;
+use ratatui::symbols::bar;
 use std::ffi::OsStr;
 use std::io::IsTerminal;
 
@@ -60,6 +61,44 @@ pub fn truecolor() -> bool {
 /// The pure decision behind [`truecolor`].
 fn supports_truecolor(colorterm: Option<&OsStr>, windows_terminal: bool) -> bool {
     windows_terminal || colorterm.is_some_and(|value| value == "truecolor" || value == "24bit")
+}
+
+/// The block glyphs the live dashboard draws with.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Glyphs {
+    /// The steps a sparkline's bars rise in.
+    pub bars: bar::Set<'static>,
+    /// The mark before the wordmark in the footer.
+    pub mark: &'static str,
+}
+
+impl Glyphs {
+    /// Every block element: the eighth blocks and the window's `▚` mark.
+    pub const FULL: Glyphs = Glyphs {
+        bars: bar::NINE_LEVELS,
+        mark: "▚",
+    };
+    /// Only code page 437's block elements: classic conhost's default font
+    /// has no others, and draws them as missing-glyph boxes.
+    pub const CP437: Glyphs = Glyphs {
+        bars: bar::THREE_LEVELS,
+        mark: "▌",
+    };
+}
+
+/// The glyphs the terminal's font can draw: all of them in Windows Terminal,
+/// which sets `WT_SESSION`, and otherwise only those classic conhost can.
+pub fn glyphs() -> Glyphs {
+    glyphs_for(std::env::var_os("WT_SESSION").is_some())
+}
+
+/// The pure decision behind [`glyphs`].
+fn glyphs_for(windows_terminal: bool) -> Glyphs {
+    if windows_terminal {
+        Glyphs::FULL
+    } else {
+        Glyphs::CP437
+    }
 }
 
 /// Turn on escape-code processing for stdout's console. `false` when stdout
@@ -164,6 +203,28 @@ mod tests {
         assert!(supports_truecolor(None, true));
         assert!(!supports_truecolor(Some(OsStr::new("yes")), false));
         assert!(!supports_truecolor(None, false));
+    }
+
+    #[test]
+    fn only_windows_terminal_gets_glyphs_outside_code_page_437() {
+        assert_eq!(glyphs_for(true), Glyphs::FULL);
+        assert_eq!(glyphs_for(false), Glyphs::CP437);
+        // Classic conhost's default font draws these, and no other block element.
+        let drawable = [" ", "▀", "▄", "█", "▌", "▐", "░", "▒", "▓"];
+        let Glyphs { bars, mark } = Glyphs::CP437;
+        let steps = [
+            bars.full,
+            bars.seven_eighths,
+            bars.three_quarters,
+            bars.five_eighths,
+            bars.half,
+            bars.three_eighths,
+            bars.one_quarter,
+            bars.one_eighth,
+            bars.empty,
+            mark,
+        ];
+        assert!(steps.iter().all(|s| drawable.contains(s)), "{steps:?}");
     }
 
     #[test]
