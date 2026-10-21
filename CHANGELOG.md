@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ## [Unreleased]
 
-## [2.1.0] — 2026-10-21
+## [2.1.0] — 2026-10-22
 
 PerfWindow comes to the terminal: perfwindow-cli shows every reading as a live dashboard, or as a plain report or JSON for scripts and AI agents.
 
@@ -23,6 +23,31 @@ PerfWindow comes to the terminal: perfwindow-cli shows every reading as a live d
 
 ### Fixed
 
+- **One failing device no longer stops every reading.** When a single drive or
+  sensor threw an error as it was read, the sensor service lost the whole pass:
+  every reading froze, and Windows logged an error each second. Each device is
+  now updated on its own, and a failure is logged once for that device.
+- **Per-core readings line up on hybrid and Hyper-Threading CPUs.** On CPUs
+  with two threads per core, the per-core strip and heat map showed one load per
+  thread, so on Intel's hybrid parts P-cores and E-cores were labelled wrong and
+  a cell showed another core's clock, and per-core temperatures were missing.
+  Load, clock and temperature are now one reading per core, P-cores first, and a
+  core's load is the average of its threads. Some CPUs also mixed the distance
+  to TjMax or effective clocks into the core rows; they no longer do.
+- **A sensor service that stops responding shows NO SIGNAL.** If it hung while
+  loading, the loading screen never ended; if it stopped later, the last
+  readings stayed on screen under the green dot. After 30 seconds without a
+  reading the window now says the feed stopped and offers RESPAWN.
+- **RESPAWN reaches a service that stopped responding.** The request to end the
+  old session could not get through to a silent service, so RESPAWN reported
+  that another PerfWindow window was connected until the app was restarted.
+  Reconnecting right after a session ends also waits a few seconds for the
+  service to finish, rather than reporting another window.
+- **History keeps recording while the window is minimized.** The graphs skipped
+  that time and joined the minutes before it to the moment the window came back.
+- **The start timeout message gives the real wait,** 30 seconds; it said 15.
+- **The power-on time reads `6788 h (≈ 282 d)`,** without a zero year or a
+  double space.
 - **The update check trusts only current certificates.** The lockfile picks up
   `rustls-webpki` 0.103.16 and `webpki-roots` 1.0.10, the fixes `cargo audit`
   flags for certificate authorities that are no longer trusted.
