@@ -362,16 +362,17 @@ pub(crate) fn format_data_volume(gb: f64) -> String {
     }
 }
 
-/// Format cumulative power-on hours with a parenthetical year/day breakdown
-/// once the figure exceeds a year. `5057 h (≈ 0 y 211 d)`.
+/// Format cumulative power-on hours with the days, and past a year the
+/// years, they come to: `6788 h (≈ 282 d)`, `21293 h (≈ 2 y 157 d)`.
 pub(crate) fn format_power_on_hours(hours: i64) -> String {
-    if hours <= 0 {
-        return format!("{} h", hours);
+    let days = hours / 24;
+    if days <= 0 {
+        format!("{hours} h")
+    } else if days < 365 {
+        format!("{hours} h (\u{2248} {days} d)")
+    } else {
+        format!("{hours} h (\u{2248} {} y {} d)", days / 365, days % 365)
     }
-    let days_total = hours / 24;
-    let years = days_total / 365;
-    let days = days_total % 365;
-    format!("{} h  (\u{2248} {} y {} d)", hours, years, days)
 }
 
 /// Format a `used_gb` / `total_gb` pair (both already in gigabytes).
@@ -490,6 +491,15 @@ mod tests {
         assert_eq!(format_data_volume(1000.0), "1.0 TB");
         assert_eq!(format_data_volume(999.4), "999 GB");
         assert_eq!(format_data_volume(0.0), "0 GB");
+    }
+
+    #[test]
+    fn power_on_hours_come_to_years_and_days_without_a_zero_year() {
+        assert_eq!(format_power_on_hours(21293), "21293 h (≈ 2 y 157 d)");
+        assert_eq!(format_power_on_hours(8760), "8760 h (≈ 1 y 0 d)");
+        assert_eq!(format_power_on_hours(6788), "6788 h (≈ 282 d)");
+        assert_eq!(format_power_on_hours(23), "23 h");
+        assert_eq!(format_power_on_hours(0), "0 h");
     }
 
     fn bare_disk() -> StorageInfo {

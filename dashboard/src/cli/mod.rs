@@ -103,8 +103,7 @@ fn connect(status: &mut Status) -> Option<PipeSensord> {
                 status.show("Connecting to the sensor service…")
             }
             ConnectEvent::Phase(ConnectPhase::RequestingElevation) => {
-                status.clear();
-                eprintln!("Starting the PerfWindow sensor service: approve the Windows prompt.");
+                status.notice("Starting the PerfWindow sensor service: approve the Windows prompt.")
             }
             ConnectEvent::Phase(ConnectPhase::StartingService) => {
                 status.show("Starting the sensor service…")

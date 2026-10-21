@@ -172,7 +172,7 @@ internal sealed class SensorPipeWorker : BackgroundService
                 // Computer.Open cannot be cancelled mid-flight; WaitAsync lets
                 // a session end abandon it (AbandonMonitorInit observes and
                 // disposes the orphan; worst case process exit cleans up).
-                monitorTask = Task.Run(() => new HardwareMonitor(staged: true), CancellationToken.None);
+                monitorTask = Task.Run(() => new HardwareMonitor(staged: true, _log), CancellationToken.None);
                 var diskTask = Task.Run(DiskInfoReader.Read, CancellationToken.None);
                 await Task.WhenAll(monitorTask, diskTask).WaitAsync(sessionCt);
 
@@ -362,7 +362,7 @@ internal sealed class SensorPipeWorker : BackgroundService
                             HardwareMonitor? newMonitor = null;
                             try
                             {
-                                newMonitor = new HardwareMonitor();
+                                newMonitor = new HardwareMonitor(log: _log);
                             }
                             catch (Exception ctorEx) when (ctorEx is not OperationCanceledException)
                             {

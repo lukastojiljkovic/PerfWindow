@@ -72,6 +72,10 @@ pub struct CpuInfo {
     pub name: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub load: Option<f64>,
+    /// Each physical core's load in percent, the mean of its hardware
+    /// threads: one entry per core, not per thread. `cores`,
+    /// `core_clocks_mhz` and `core_temps` are parallel, entry `i` of each
+    /// being the same core, with the P-Cores first on hybrid silicon.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cores: Option<Vec<f64>>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -80,6 +84,8 @@ pub struct CpuInfo {
     pub clock_mhz: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub power_w: Option<f64>,
+    /// Per-core temperatures in °C, parallel to `cores`. Individual entries
+    /// may be `null`; absent where the CPU has no per-core sensor (AMD).
     #[serde(default)]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub core_temps: Option<Vec<Option<f64>>>,
@@ -104,8 +110,9 @@ pub struct CpuInfo {
     #[serde(default)]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub power_platform_w: Option<f64>,
-    /// On Intel hybrid CPUs, the count of P-Cores and E-Cores so the
-    /// dashboard can section the heat-map. Both `None` on non-hybrid CPUs.
+    /// On Intel hybrid CPUs, the count of P-Cores and E-Cores: the first
+    /// `p_core_count` entries of each per-core array are the P-Cores, the
+    /// next `e_core_count` the E-Cores. Both `None` on non-hybrid CPUs.
     #[serde(default)]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub p_core_count: Option<u32>,
@@ -117,9 +124,8 @@ pub struct CpuInfo {
     #[serde(default)]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub bus_clock_mhz: Option<f64>,
-    /// Per-core clocks in MHz, parallel to `cores` (P-Cores first on hybrid
-    /// silicon). Individual entries may be `null` when a core's clock sensor
-    /// is missing.
+    /// Per-core clocks in MHz, parallel to `cores`. Individual entries may
+    /// be `null` when a core's clock sensor is missing.
     #[serde(default)]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub core_clocks_mhz: Option<Vec<Option<f64>>>,

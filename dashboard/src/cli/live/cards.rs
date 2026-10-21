@@ -19,7 +19,7 @@ use crate::panels::ram::hottest_dimm;
 use crate::panels::storage::{disk_temp_severity, format_capacity, kind_label};
 use crate::widgets::bars::heat_cell;
 use crate::widgets::{health_severity, temp_severity, TempKind};
-use ratatui::layout::{Constraint, Layout, Rect};
+use ratatui::layout::{Constraint, Flex, Layout, Rect};
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Cell, Paragraph, Row, Table};
@@ -294,7 +294,7 @@ pub(super) fn network(frame: &mut Frame, area: Rect, model: &Model, net: &NetInf
             Line::styled(rate(bps).unwrap_or_default(), p.value()),
         ];
         frame.render_widget(Paragraph::new(lines), text);
-        sparkline(frame, spark, buffer, p.fg(color));
+        sparkline(frame, spark, buffer, p.fg(color), p);
     }
     if let Some((label, value)) = link {
         let stat = Stat::new(&label.to_uppercase(), &value, p.value());
@@ -379,6 +379,20 @@ pub(super) fn storage(frame: &mut Frame, area: Rect, model: &Model, disks: &[Sto
     let count = format!("{} DISKS", disks.len());
     let inner = card(frame, area, "STORAGE", Some(&count), p);
     let columns = storage_columns(inner.width);
+    let widths: Vec<Constraint> = columns
+        .iter()
+        .map(|&(_, width, _)| match width {
+            0 => Constraint::Fill(1),
+            width => Constraint::Length(width),
+        })
+        .collect();
+    // The table cuts a long disk name at its column's edge with no mark, so
+    // lay the columns out as it does and cut the name there with `…`.
+    let name_width = Layout::horizontal(widths.clone())
+        .flex(Flex::Start)
+        .spacing(1)
+        .split(inner)[0]
+        .width;
     let cell = |text: String, right: bool, style: Style| {
         let line = Line::styled(text, style);
         Cell::from(if right { line.right_aligned() } else { line })
@@ -386,7 +400,10 @@ pub(super) fn storage(frame: &mut Frame, area: Rect, model: &Model, disks: &[Sto
     let rows = disks.iter().map(|disk| {
         Row::new(columns.iter().map(|&(name, _, right)| {
             let (text, style) = match name {
-                "DISK" => (Some(clean(&disk.name)), p.fg(p.theme.ink)),
+                "DISK" => (
+                    Some(fit(&clean(&disk.name), usize::from(name_width))),
+                    p.fg(p.theme.ink),
+                ),
                 "TYPE" => (Some(kind_label(&disk.kind)), p.label()),
                 "CAPACITY" => (
                     finite(disk.used_gb)
@@ -416,10 +433,6 @@ pub(super) fn storage(frame: &mut Frame, area: Rect, model: &Model, disks: &[Sto
             .iter()
             .map(|&(name, _, right)| cell(name.to_string(), right, p.label())),
     );
-    let widths = columns.iter().map(|&(_, width, _)| match width {
-        0 => Constraint::Fill(1),
-        width => Constraint::Length(width),
-    });
     frame.render_widget(Table::new(rows, widths).header(header), inner);
 }
 

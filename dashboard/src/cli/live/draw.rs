@@ -294,7 +294,7 @@ fn draw_footer(frame: &mut Frame, model: &Model, area: Rect) {
     );
     let wordmark = p.fg(p.theme.accent).add_modifier(Modifier::BOLD);
     let mut left = vec![
-        Span::styled(" ▚ PERFWINDOW ", wordmark),
+        Span::styled(format!(" {} PERFWINDOW ", p.glyphs.mark), wordmark),
         Span::styled(env!("CARGO_PKG_VERSION"), p.label()),
     ];
     if let Some(uptime) = snapshot.uptime_sec {
@@ -329,6 +329,7 @@ mod tests {
     use super::super::{Depth, Palette};
     use super::*;
     use crate::cli::fixtures::{snapshot, FULL};
+    use crate::cli::term::Glyphs;
     use crate::config::ThemeId;
     use crate::format::TempUnit;
     use crate::theme::Theme;
@@ -341,6 +342,7 @@ mod tests {
         let palette = Palette {
             theme: Theme::for_id(ThemeId::Amber),
             depth: Depth::TrueColor,
+            glyphs: Glyphs::FULL,
         };
         let mut model = Model::new(snapshot(FULL), palette, TempUnit::Celsius);
         for i in 0..80 {
@@ -415,6 +417,31 @@ mod tests {
         );
         // The load history is drawn in braille.
         assert!(frame.contains('⣿'), "{frame}");
+    }
+
+    #[test]
+    fn classic_conhost_gets_no_block_element_its_font_lacks() {
+        let mut model = model();
+        model.palette.glyphs = Glyphs::CP437;
+        let frame = render(&model, 120, 40);
+        let missing = |c: char| ('\u{2580}'..='\u{259f}').contains(&c) && !"▀▄█▌▐░▒▓".contains(c);
+        assert!(!frame.chars().any(missing), "{frame}");
+        assert!(frame.contains("▌ PERFWINDOW"), "{frame}");
+    }
+
+    #[test]
+    fn a_disk_name_too_long_for_its_column_ends_in_an_ellipsis() {
+        let mut model = model();
+        if let Some(disk) = model.snapshot.storage.iter_mut().flatten().next() {
+            disk.name = "Samsung SSD 970 EVO Plus 1TB ".repeat(3);
+        }
+        let frame = render(&model, 120, 40);
+        let row = frame
+            .lines()
+            .find(|line| line.contains("Samsung SSD"))
+            .expect("the disk's row");
+        assert!(row.contains("Samsung SSD 970 "), "{row}");
+        assert!(row.contains('…'), "{row}");
     }
 
     #[test]

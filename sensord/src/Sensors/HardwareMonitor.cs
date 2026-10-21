@@ -1,4 +1,6 @@
 using LibreHardwareMonitor.Hardware;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Sensord.Sensors;
 
@@ -23,11 +25,12 @@ public sealed class HardwareMonitor : IDisposable
     };
 
     private readonly Computer _computer;
-    private readonly UpdateVisitor _visitor = new();
+    private readonly UpdateVisitor _visitor;
     private readonly CategoryStager _stager;
 
-    public HardwareMonitor(bool staged = false)
+    public HardwareMonitor(bool staged = false, ILogger? log = null)
     {
+        _visitor = new UpdateVisitor(log ?? NullLogger.Instance);
         _computer = new Computer
         {
             IsCpuEnabled = true,
@@ -143,13 +146,28 @@ internal sealed class CategoryStager
     }
 }
 
-internal sealed class UpdateVisitor : IVisitor
+internal sealed class UpdateVisitor(ILogger log) : IVisitor
 {
+    // A device that fails once usually fails every tick: log it once.
+    private readonly HashSet<string> _failed = new();
+
     public void VisitComputer(IComputer computer) => computer.Traverse(this);
 
     public void VisitHardware(IHardware hardware)
     {
-        hardware.Update();
+        // LHM's Computer.Traverse has no try/catch either, so one device's
+        // exception would abort the whole pass, and every snapshot with it.
+        try
+        {
+            hardware.Update();
+        }
+        catch (Exception ex)
+        {
+            string id = hardware.Identifier.ToString();
+            if (_failed.Add(id))
+                log.LogWarning(ex, "{Hardware} ({Id}) failed to update; its readings may be stale",
+                    hardware.Name, id);
+        }
         foreach (IHardware sub in hardware.SubHardware)
             sub.Accept(this);
     }

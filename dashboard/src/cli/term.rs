@@ -1,10 +1,11 @@
-//! The terminal around `perfwindow-cli`: what stdout can take, escape codes
-//! on the Windows console, and the status line on stderr while the sensors
-//! load.
+//! The terminal around `perfwindow-cli`: what stdout can take, the glyphs
+//! its font can draw, escape codes on the Windows console, and the status
+//! line on stderr while the sensors load.
 
 use super::report::Style;
+use ratatui::symbols::bar;
 use std::ffi::OsStr;
-use std::io::IsTerminal;
+use std::io::{IsTerminal, Stderr, Write};
 
 /// The report style stdout takes: ASCII unless it is a terminal, coloured
 /// when that terminal takes escape codes and colour is allowed.
@@ -62,6 +63,44 @@ fn supports_truecolor(colorterm: Option<&OsStr>, windows_terminal: bool) -> bool
     windows_terminal || colorterm.is_some_and(|value| value == "truecolor" || value == "24bit")
 }
 
+/// The block glyphs the live dashboard draws with.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Glyphs {
+    /// The steps a sparkline's bars rise in.
+    pub bars: bar::Set<'static>,
+    /// The mark before the wordmark in the footer.
+    pub mark: &'static str,
+}
+
+impl Glyphs {
+    /// Every block element: the eighth blocks and the window's `▚` mark.
+    pub const FULL: Glyphs = Glyphs {
+        bars: bar::NINE_LEVELS,
+        mark: "▚",
+    };
+    /// Only code page 437's block elements: classic conhost's default font
+    /// has no others, and draws them as missing-glyph boxes.
+    pub const CP437: Glyphs = Glyphs {
+        bars: bar::THREE_LEVELS,
+        mark: "▌",
+    };
+}
+
+/// The glyphs the terminal's font can draw: all of them in Windows Terminal,
+/// which sets `WT_SESSION`, and otherwise only those classic conhost can.
+pub fn glyphs() -> Glyphs {
+    glyphs_for(std::env::var_os("WT_SESSION").is_some())
+}
+
+/// The pure decision behind [`glyphs`].
+fn glyphs_for(windows_terminal: bool) -> Glyphs {
+    if windows_terminal {
+        Glyphs::FULL
+    } else {
+        Glyphs::CP437
+    }
+}
+
 /// Turn on escape-code processing for stdout's console. `false` when stdout
 /// is no console or the console refuses, so the report goes out uncoloured.
 #[cfg(windows)]
@@ -90,8 +129,10 @@ fn enable_escapes() -> bool {
 
 /// One line on stderr that says how far the sensors have loaded. It is drawn
 /// only while stderr is a terminal and rewritten in place with a carriage
-/// return, so it needs no escape codes; piped stderr stays empty.
-pub struct Status {
+/// return, so it needs no escape codes; piped stderr gets only the notices.
+/// A write that fails is dropped: the line is only ever a courtesy.
+pub struct Status<W: Write = Stderr> {
+    out: W,
     enabled: bool,
     shown: String,
 }
@@ -99,24 +140,39 @@ pub struct Status {
 impl Status {
     /// A status line, drawn only if stderr is a terminal.
     pub fn new() -> Status {
+        let out = std::io::stderr();
         Status {
-            enabled: std::io::stderr().is_terminal(),
+            enabled: out.is_terminal(),
+            out,
             shown: String::new(),
         }
     }
+}
 
+impl<W: Write> Status<W> {
     /// Show `text` in place of the current status.
     pub fn show(&mut self, text: &str) {
         if self.enabled && text != self.shown {
-            eprint!("{}", overwrite(&self.shown, text));
+            let _ = write!(self.out, "{}", overwrite(&self.shown, text));
             self.shown = text.to_string();
+        }
+    }
+
+    /// Show `text` even where no status line is drawn: on a terminal in its
+    /// place, so the next status or [`Status::finish`] erases it rather than
+    /// leaving it in the scrollback, and on piped stderr as a line of its own.
+    pub fn notice(&mut self, text: &str) {
+        if self.enabled {
+            self.show(text);
+        } else {
+            let _ = writeln!(self.out, "{text}");
         }
     }
 
     /// Erase the line, so a message or the report starts on a clean one.
     pub fn clear(&mut self) {
         if !self.shown.is_empty() {
-            eprint!("{}\r", overwrite(&self.shown, ""));
+            let _ = write!(self.out, "{}\r", overwrite(&self.shown, ""));
             self.shown.clear();
         }
     }
@@ -164,6 +220,59 @@ mod tests {
         assert!(supports_truecolor(None, true));
         assert!(!supports_truecolor(Some(OsStr::new("yes")), false));
         assert!(!supports_truecolor(None, false));
+    }
+
+    #[test]
+    fn only_windows_terminal_gets_glyphs_outside_code_page_437() {
+        assert_eq!(glyphs_for(true), Glyphs::FULL);
+        assert_eq!(glyphs_for(false), Glyphs::CP437);
+        // Classic conhost's default font draws these, and no other block element.
+        let drawable = [" ", "▀", "▄", "█", "▌", "▐", "░", "▒", "▓"];
+        let Glyphs { bars, mark } = Glyphs::CP437;
+        let steps = [
+            bars.full,
+            bars.seven_eighths,
+            bars.three_quarters,
+            bars.five_eighths,
+            bars.half,
+            bars.three_eighths,
+            bars.one_quarter,
+            bars.one_eighth,
+            bars.empty,
+            mark,
+        ];
+        assert!(steps.iter().all(|s| drawable.contains(s)), "{steps:?}");
+    }
+
+    fn status(terminal: bool) -> Status<Vec<u8>> {
+        Status {
+            out: Vec::new(),
+            enabled: terminal,
+            shown: String::new(),
+        }
+    }
+
+    #[test]
+    fn a_notice_on_a_terminal_is_erased_once_the_status_finishes() {
+        let mut status = status(true);
+        status.notice("Approve the prompt.");
+        status.finish();
+        assert_eq!(
+            String::from_utf8(status.out).unwrap(),
+            "\rApprove the prompt.\r                   \r"
+        );
+    }
+
+    #[test]
+    fn a_notice_on_piped_stderr_is_a_line_of_its_own() {
+        let mut status = status(false);
+        status.notice("Approve the prompt.");
+        status.show("Loading sensors…");
+        status.finish();
+        assert_eq!(
+            String::from_utf8(status.out).unwrap(),
+            "Approve the prompt.\n"
+        );
     }
 
     #[test]
