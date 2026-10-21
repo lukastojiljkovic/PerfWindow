@@ -45,7 +45,7 @@ readings need the PawnIO driver.
 
 Capabilities, from the README's *What it monitors*:
 
-- CPU load (overall, per-core or per-thread), package and per-core
+- CPU load (overall and per core), package and per-core
   temperatures, current clock, Vcore, RAPL power and distance to TjMax. Intel
   P-cores and E-cores are separated in both the strip view and the heat-map.
 - Discrete and integrated GPUs: load, core / hot-spot / memory-junction

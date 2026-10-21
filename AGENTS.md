@@ -127,9 +127,12 @@ dotnet test sensord\sensord.sln
 
 - **The `Status` enum** (`app.rs`) drives every render decision. `ingest()`
   takes snapshots with `take()`, and moves `SensordDown → Running` when a
-  snapshot arrives over a live feed. The only demotion deadline is
-  silence-based: never reintroduce a fixed first-snapshot deadline, because
-  slow LHM enumeration is legitimate.
+  snapshot arrives over a live feed. Every demotion deadline is
+  silence-based: the startup watchdog stays armed until the first FULL
+  snapshot, and a loaded feed with no line for 30 s (`FEED_SILENCE`) drops to
+  NO SIGNAL. Never reintroduce a fixed first-snapshot deadline, because slow
+  LHM enumeration is legitimate. `ingest()` runs from `App::logic`, which
+  eframe calls even while the window is minimized; `ui()` is skipped then.
 - **Control messages** (interval, shutdown) go through a writer thread
   (`ipc/mod.rs`). Never do pipe I/O on the UI thread.
 - **Card layout** uses a per-card capacity model (`ui/capacity.rs`,
@@ -147,10 +150,21 @@ dotnet test sensord\sensord.sln
   through `BufReader::lines()`. Never use `FILE_FLAG_OVERLAPPED` there: a
   synchronous read on an overlapped handle returns `ERROR_IO_PENDING`, which
   Rust turns into an abort (`0xc0000409`, with no panic-hook entry). That was
-  the 0.9.1–0.9.4 startup crash.
+  the 0.9.1–0.9.4 startup crash. Synchronous I/O on one handle is serialized,
+  so a control write waits behind the reader's pending `ReadFile`:
+  `shutdown()` cancels that read with `CancelIoEx` through a third cloned
+  handle. Connecting retries a busy pipe for 4 s, because the old instance
+  answers busy while sensord ends its previous session.
+- **Per-core arrays are per core and parallel.** `cores`, `core_clocks_mhz`
+  and `core_temps` hold one entry per physical core in one order (P-cores
+  first on hybrid Intel). A core's load is the mean of its threads' loads,
+  because LHM reports load per thread (`SnapshotBuilder.CollectPerCore`).
 - **sensord guards every value.** Each sensor read goes through finite-guards
   (`SensorEx`): a NaN or Infinity reaching `JsonSerializer` kills every
-  snapshot, and serde_json rejects NaN literals on the other side.
+  snapshot, and serde_json rejects NaN literals on the other side. Likewise
+  `UpdateVisitor` catches each device's `Update()` failure and logs it once,
+  because LHM's traversal has no guard and one throwing device stopped them
+  all.
 - **The CLI reads untrusted text.** It strips control characters from every
   string that comes from the sensors or Windows (SSIDs, device names) before
   printing, so a network name can't inject escape sequences or fake lines.
