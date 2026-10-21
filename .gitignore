@@ -1,7 +1,7 @@
 # Brainstorming / visual companion (session artifacts)
 .superpowers/
 
-# Claude Code session config (CLAUDE.md, memory) — kept locally only
+# Claude Code local settings and memory (the agent guide is AGENTS.md) — kept locally only
 .claude/
 
 # Internal design specifications and implementation plans — kept locally only
