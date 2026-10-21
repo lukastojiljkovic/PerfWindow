@@ -932,7 +932,7 @@ pub fn error_overlay(ui: &mut egui::Ui, app: &mut PerfApp, ctx: &egui::Context) 
                         // `dim` explanatory line, wrapped to the card width.
                         ui.label(
                             RichText::new(
-                                "The sensor process exited. Hardware readings are paused.",
+                                "The sensor service stopped responding. Hardware readings are paused.",
                             )
                             .family(theme.font_data.egui())
                             .size(11.0)

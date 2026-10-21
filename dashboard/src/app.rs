@@ -836,7 +836,8 @@ impl PerfApp {
 
     /// Drain pending connect events from the worker thread, advancing
     /// `status` and adopting the `PipeSensord` once it becomes available.
-    /// Called once per frame from `eframe::App::ui`. Cheap when there are
+    /// Called from `eframe::App::logic`, so a connection that completes while
+    /// the window is minimized starts recording at once. Cheap when there are
     /// no events.
     pub fn poll_connect_events(&mut self) {
         use crate::ipc::connect::ConnectEvent;
@@ -935,6 +936,7 @@ impl eframe::App for PerfApp {
     /// Runs before every `ui` pass, and also while the window is minimized,
     /// when eframe skips `ui`, so history keeps recording the feed.
     fn logic(&mut self, _ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        self.poll_connect_events();
         self.ingest();
     }
 
@@ -947,7 +949,6 @@ impl eframe::App for PerfApp {
             self.apply_config_change(&ctx);
         }
         self.display_cache.maybe_refresh(std::time::Instant::now());
-        self.poll_connect_events();
         self.poll_download_outcome();
 
         // A launch whose config asked for the strip enters it here, on the
