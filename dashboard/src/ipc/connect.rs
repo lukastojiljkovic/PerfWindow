@@ -5,6 +5,7 @@
 use crate::ipc::pipe::{elevate_and_start_service, ConnectError, PipeSensord};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ConnectPhase {
@@ -46,6 +47,11 @@ const POLL_INTERVAL_MS: u64 = 250;
 /// reach `WaitForConnectionAsync`. Public so the failure copy on the loading
 /// screen can quote the real value.
 pub const START_DEADLINE_S: u64 = 30;
+/// How long phase 1 retries a busy pipe. sensord keeps its single instance
+/// for up to 3.5 s after a client leaves, while it ends that session, so a
+/// RESPAWN or a CLI run right after another one must not read as another
+/// window being connected.
+const BUSY_RETRY_MS: u64 = 4000;
 
 /// Spawn the connect state machine on a worker thread. Returns the shared
 /// phase handle (for UI polling) plus an mpsc receiver carrying every
@@ -71,7 +77,10 @@ fn run(phase: SharedPhase, tx: Sender<ConnectEvent>, repaint: Arc<dyn Fn() + Sen
     // Phase 1: try opening the pipe directly. Covers the case where the
     // service is already running from a previous session.
     set_phase(&phase, &tx, &repaint, ConnectPhase::OpeningPipe);
-    match PipeSensord::connect_no_elevation(clone_repaint(&repaint)) {
+    match open_waiting_out_busy(
+        || PipeSensord::connect_no_elevation(clone_repaint(&repaint)),
+        std::thread::sleep,
+    ) {
         Ok(p) => {
             emit_ready(&phase, &tx, &repaint, p);
             return;
@@ -132,9 +141,25 @@ fn run(phase: SharedPhase, tx: Sender<ConnectEvent>, repaint: Arc<dyn Fn() + Sen
     }
 }
 
+/// Run `open` until it reports anything but [`ConnectError::Busy`], waiting
+/// [`POLL_INTERVAL_MS`] between tries for up to [`BUSY_RETRY_MS`]. `open` and
+/// `sleep` are passed in so the policy is testable without a pipe.
+fn open_waiting_out_busy<T>(
+    mut open: impl FnMut() -> Result<T, ConnectError>,
+    mut sleep: impl FnMut(Duration),
+) -> Result<T, ConnectError> {
+    for _ in 0..BUSY_RETRY_MS / POLL_INTERVAL_MS {
+        match open() {
+            Err(ConnectError::Busy) => sleep(Duration::from_millis(POLL_INTERVAL_MS)),
+            result => return result,
+        }
+    }
+    open()
+}
+
 /// Open errors the elevated `sc start` step can never fix: another client
 /// already holds the single pipe instance, or the ACL refused us. Failing
-/// fast avoids showing a pointless UAC prompt for those.
+/// without elevation avoids showing a pointless UAC prompt for those.
 fn unrecoverable_open_failure(e: &ConnectError) -> Option<FailedReason> {
     match e {
         ConnectError::Busy | ConnectError::AccessDenied => {
@@ -210,5 +235,62 @@ mod tests {
         assert!(unrecoverable_open_failure(&ConnectError::NotFound).is_none());
         let io = ConnectError::Io(std::io::Error::other("transient"));
         assert!(unrecoverable_open_failure(&io).is_none());
+    }
+
+    /// Feed `open_waiting_out_busy` a scripted sequence of open results and
+    /// record the waits between them. Opens past the script stay busy.
+    fn open_scripted(
+        mut script: Vec<Result<(), ConnectError>>,
+    ) -> (Result<(), ConnectError>, usize, Duration) {
+        script.reverse();
+        let mut opens = 0;
+        let mut waited = Duration::ZERO;
+        let result = open_waiting_out_busy(
+            || {
+                opens += 1;
+                script.pop().unwrap_or(Err(ConnectError::Busy))
+            },
+            |wait| waited += wait,
+        );
+        (result, opens, waited)
+    }
+
+    #[test]
+    fn a_pipe_busy_while_sensord_ends_its_last_session_is_retried() {
+        let script = vec![
+            Err(ConnectError::Busy),
+            Err(ConnectError::Busy),
+            Err(ConnectError::Busy),
+            Ok(()),
+        ];
+        let (result, opens, waited) = open_scripted(script);
+        assert!(result.is_ok());
+        assert_eq!(opens, 4);
+        assert_eq!(waited, Duration::from_millis(3 * POLL_INTERVAL_MS));
+    }
+
+    #[test]
+    fn a_busy_pipe_that_outlasts_the_retry_window_reports_busy() {
+        let (result, _, waited) = open_scripted(Vec::new());
+        assert!(matches!(result, Err(ConnectError::Busy)));
+        assert_eq!(waited, Duration::from_millis(BUSY_RETRY_MS));
+    }
+
+    #[test]
+    fn a_busy_pipe_that_disappears_falls_through_to_not_found() {
+        // sensord exits once its session has ended, so the instance goes away
+        // and the next open reports the pipe missing.
+        let script = vec![Err(ConnectError::Busy), Err(ConnectError::NotFound)];
+        let (result, opens, _) = open_scripted(script);
+        assert!(matches!(result, Err(ConnectError::NotFound)));
+        assert_eq!(opens, 2);
+    }
+
+    #[test]
+    fn other_open_errors_are_not_retried() {
+        let (result, opens, waited) = open_scripted(vec![Err(ConnectError::AccessDenied)]);
+        assert!(matches!(result, Err(ConnectError::AccessDenied)));
+        assert_eq!(opens, 1);
+        assert_eq!(waited, Duration::ZERO);
     }
 }
