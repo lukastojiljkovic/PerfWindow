@@ -709,6 +709,22 @@ fn frames_contain_expected_content() {
 }
 
 #[test]
+fn start_timeout_card_quotes_the_real_deadline() {
+    let (mut app, ctx) = fresh(ThemeId::Amber, TempUnit::Celsius, false);
+    app.status = Status::Connecting(connect::ConnectPhase::Failed(
+        connect::FailedReason::StartTimeout,
+    ));
+    let _ = run_frame(&mut app, &ctx, SIZE, 1.0, Vec::new());
+    let out = run_frame(&mut app, &ctx, SIZE, 1.0, Vec::new());
+    let deadline = format!("within {} seconds", connect::START_DEADLINE_S);
+    assert!(
+        out.text.contains(&deadline),
+        "the timeout card does not say {deadline:?}; text was:\n{}",
+        out.text
+    );
+}
+
+#[test]
 fn hover_sweep_exercises_tooltips_without_crashing() {
     // Sweep the pointer across the whole window in each headline state. The
     // 1 s frame-clock step exceeds egui's tooltip delay, so a second frame at

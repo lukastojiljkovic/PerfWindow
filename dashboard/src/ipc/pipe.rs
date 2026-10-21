@@ -47,6 +47,9 @@ pub struct PipeSensord {
     control: Option<std::sync::mpsc::Sender<ControlMsg>>,
     writer: Option<JoinHandle<()>>,
     reader: Option<JoinHandle<()>>,
+    /// A third handle on the pipe, kept only to cancel the reader's pending
+    /// read in [`Self::shutdown`].
+    canceller: Option<File>,
     pub state: SharedState,
 }
 
@@ -104,6 +107,7 @@ impl PipeSensord {
         // panicking the worker thread and freezing the UI on "Loading
         // sensors..." until the rx side hangs up.
         let write = read.try_clone().map_err(ConnectError::from)?;
+        let canceller = read.try_clone().map_err(ConnectError::from)?;
         let state: SharedState = Arc::new(Mutex::new(SensorState {
             alive: true,
             ..SensorState::default()
@@ -112,6 +116,8 @@ impl PipeSensord {
         let reader = std::thread::spawn(move || {
             let lines = BufReader::new(read).lines();
             for line in lines {
+                // EOF, a broken pipe and the cancel in `shutdown`
+                // (ERROR_OPERATION_ABORTED) all end the feed alike.
                 let Ok(line) = line else { break };
                 let Some(parsed) = parse_line(&line) else {
                     continue;
@@ -132,6 +138,7 @@ impl PipeSensord {
             control: Some(tx),
             writer: Some(writer),
             reader: Some(reader),
+            canceller: Some(canceller),
             state,
         })
     }
@@ -166,13 +173,32 @@ impl PipeSensord {
         if let Some(tx) = self.control.take() {
             let _ = tx.send(ControlMsg::Shutdown);
         }
-        // Detach both threads. Joining the reader would deadlock: it blocks
-        // in `BufReader::lines` until the service side closes the pipe, which
-        // only happens after sensord acts on the shutdown message above. The
-        // writer may equally be stuck mid-write on a full pipe.
+        // The handle is synchronous, so the shutdown write waits behind the
+        // reader's pending read, which a silent sensord never completes.
+        // Cancelling that read lets the write through and ends the reader.
+        if let Some(pipe) = self.canceller.take() {
+            cancel_pending_io(&pipe);
+        }
+        // Detach both threads rather than join them: a cancel that lands
+        // between two reads leaves the reader waiting on sensord's next line,
+        // and the writer may be stuck mid-write on a full pipe.
         let _ = self.reader.take();
         let _ = self.writer.take();
     }
+}
+
+/// Cancel every I/O pending on `pipe`'s file object, from any thread.
+fn cancel_pending_io(pipe: &File) {
+    use std::os::windows::io::AsRawHandle;
+    // kernel32 is implicitly linked, as for the FFI in `ui/shell.rs`.
+    extern "system" {
+        fn CancelIoEx(
+            handle: std::os::windows::io::RawHandle,
+            overlapped: *mut std::ffi::c_void,
+        ) -> i32;
+    }
+    // The result is not actionable: ERROR_NOT_FOUND means no read was pending.
+    unsafe { CancelIoEx(pipe.as_raw_handle(), std::ptr::null_mut()) };
 }
 
 #[cfg(any(test, feature = "test-support"))]
@@ -184,6 +210,7 @@ impl PipeSensord {
             control: None,
             writer: None,
             reader: None,
+            canceller: None,
             state,
         }
     }
@@ -266,6 +293,7 @@ mod tests {
             control: Some(tx),
             writer: Some(writer),
             reader: None,
+            canceller: None,
             state,
         };
 
