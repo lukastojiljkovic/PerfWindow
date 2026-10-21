@@ -135,7 +135,7 @@ pub fn network_panel(
 /// Compose the WI-FI row value: `"ssid · 87 % · 866 Mbps"`, skipping absent
 /// or non-finite parts. `None` when nothing is displayable, so the caller
 /// falls back to the plain LINK row.
-fn wifi_value(wifi: &WifiInfo) -> Option<String> {
+pub(crate) fn wifi_value(wifi: &WifiInfo) -> Option<String> {
     let mut parts: Vec<String> = Vec::new();
     if let Some(ssid) = wifi.ssid.as_deref().map(str::trim) {
         if !ssid.is_empty() {

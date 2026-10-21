@@ -345,7 +345,7 @@ fn lifetime_tooltip(disk: &StorageInfo) -> Option<String> {
 
 /// Format a lifetime data volume given in GB: terabytes with one decimal once
 /// the figure crosses 1000 GB, whole gigabytes below.
-fn format_data_volume(gb: f64) -> String {
+pub(crate) fn format_data_volume(gb: f64) -> String {
     if gb >= 1000.0 {
         format!("{:.1} TB", gb / 1000.0)
     } else {
@@ -355,7 +355,7 @@ fn format_data_volume(gb: f64) -> String {
 
 /// Format cumulative power-on hours with a parenthetical year/day breakdown
 /// once the figure exceeds a year. `5057 h (≈ 0 y 211 d)`.
-fn format_power_on_hours(hours: i64) -> String {
+pub(crate) fn format_power_on_hours(hours: i64) -> String {
     if hours <= 0 {
         return format!("{} h", hours);
     }
@@ -369,7 +369,7 @@ fn format_power_on_hours(hours: i64) -> String {
 ///
 /// Drives above 1000 GB are shown in terabytes (`"1.42 / 1.81 TB"`), smaller
 /// ones in gigabytes (`"412 / 931 GB"`). A missing value yields `"—"`.
-fn format_capacity(used_gb: Option<f64>, total_gb: Option<f64>) -> String {
+pub(crate) fn format_capacity(used_gb: Option<f64>, total_gb: Option<f64>) -> String {
     match (used_gb, total_gb) {
         (Some(used), Some(total)) => {
             if total >= 1000.0 {
@@ -385,7 +385,7 @@ fn format_capacity(used_gb: Option<f64>, total_gb: Option<f64>) -> String {
 /// Display form of a disk `kind` tag. `sensord` emits lower-case tags
 /// (`"nvme"`, `"ssd"`, `"hdd"`); this restores their conventional casing.
 /// An unrecognised tag is upper-cased as a fallback.
-fn kind_label(kind: &str) -> String {
+pub(crate) fn kind_label(kind: &str) -> String {
     match kind.to_ascii_lowercase().as_str() {
         "nvme" => "NVMe".to_string(),
         "ssd" => "SSD".to_string(),

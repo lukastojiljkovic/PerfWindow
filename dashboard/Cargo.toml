@@ -13,6 +13,10 @@ path = "src/lib.rs"
 name = "PerfWindow"
 path = "src/main.rs"
 
+[[bin]]
+name = "perfwindow-cli"
+path = "src/cli_main.rs"
+
 [dependencies]
 eframe = { version = "0.34.3", features = ["glow"] }
 egui = "0.34.2"

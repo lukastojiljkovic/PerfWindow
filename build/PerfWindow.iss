@@ -58,6 +58,7 @@ Name: "desktopicon"; Description: "Create a &desktop shortcut"; GroupDescription
 
 [Files]
 Source: "..\dashboard\target\release\PerfWindow.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\dashboard\target\release\perfwindow-cli.exe"; DestDir: "{app}"; Flags: ignoreversion
 ; The entire sensord folder publish: sensord.exe must stay a direct sibling
 ; of PerfWindow.exe, with the runtime DLLs beside it (the .NET host resolves
 ; the runtime from the directory the exe lives in).
@@ -432,6 +433,39 @@ begin
     mbInformation, MB_OK, IDOK);
 end;
 
+{ Take {app} back off the user's PATH: the Command line setting added it.
+  Written back only when the entry was there, so an unchanged PATH is left
+  exactly as it was. }
+procedure RemoveAppFromUserPath;
+var
+  Path, Entry, Kept, AppDir: String;
+  I: Integer;
+  Changed: Boolean;
+begin
+  if not RegQueryStringValue(HKEY_CURRENT_USER, 'Environment', 'Path', Path) then
+    Exit;
+  AppDir := ExpandConstant('{app}');
+  Path := Path + ';';
+  Kept := '';
+  Changed := False;
+  while Path <> '' do
+  begin
+    I := Pos(';', Path);
+    Entry := Copy(Path, 1, I - 1);
+    Delete(Path, 1, I);
+    if CompareText(Entry, AppDir) = 0 then
+      Changed := True
+    else if Entry <> '' then
+    begin
+      if Kept <> '' then
+        Kept := Kept + ';';
+      Kept := Kept + Entry;
+    end;
+  end;
+  if Changed then
+    RegWriteExpandStringValue(HKEY_CURRENT_USER, 'Environment', 'Path', Kept);
+end;
+
 procedure CurStepChanged(CurStep: TSetupStep);
 begin
   if CurStep = ssInstall then begin
@@ -454,5 +488,6 @@ begin
   UninstallSensorService;
   CleanupLegacyDefenderEntries;
   CleanupLegacyDriverService;
+  RemoveAppFromUserPath;
   UninstallPawnIo;
 end;

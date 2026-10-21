@@ -267,6 +267,27 @@ remembers those and the monitor it was on. A reading with no data shows a
 dash, a temperature the dashboard would highlight keeps its colour, and a
 reading that does not fit the monitor's width is dropped from the right.
 
+## Command line
+
+`perfwindow-cli` prints every reading the window shows, as plain text, for a
+terminal or an AI agent. It is off until you turn it on in **Settings → Command
+line**, which also puts the install folder on your user `PATH`, so new terminals
+find the command.
+
+```
+perfwindow-cli             one text report, then exit
+perfwindow-cli --json      the same readings as JSON (temperatures in °C)
+perfwindow-cli --watch 5   a new report every 5 seconds until Ctrl+C (1 to 60)
+```
+
+It connects to the sensor service the way the window does, so Windows asks for
+the same approval. The window and the command line cannot read the sensors at
+the same time: close the window before running the command, or the other way
+round.
+
+Exit codes: 0 report printed, 2 bad arguments, 3 command-line readings are off
+in Settings, 4 the sensor service is unavailable.
+
 ## Limitations
 
 - **The mini strip stays on one monitor.** It remembers the monitor it was last

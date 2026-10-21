@@ -128,7 +128,7 @@ fn gb(mb: Option<f64>) -> String {
 /// Hottest finite DIMM reading plus the count of finite readings. `None` when
 /// every reading is absent or non-finite, so an all-NaN snapshot hides the
 /// row instead of rendering a `f64::MIN` fold as `"-9223372036854775808°"`.
-fn hottest_dimm(dimms: &[DimmTemp]) -> Option<(f64, usize)> {
+pub(crate) fn hottest_dimm(dimms: &[DimmTemp]) -> Option<(f64, usize)> {
     let mut hottest: Option<f64> = None;
     let mut finite_count = 0usize;
     for t in dimms.iter().map(|d| d.temp_c).filter(|t| t.is_finite()) {

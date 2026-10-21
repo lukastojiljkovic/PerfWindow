@@ -90,6 +90,11 @@ pub struct Config {
     /// window is on".
     #[serde(default)]
     pub mini_strip_monitor: Option<String>,
+    /// Whether `perfwindow-cli` may read the sensors. Off until the user turns
+    /// it on in Settings, because the CLI is a second way into the sensor
+    /// service, and the service serves one client at a time.
+    #[serde(default)]
+    pub cli_enabled: bool,
     /// Which readings the strip shows. Last field on purpose: it serializes as
     /// a `[mini_strip_values]` table, and TOML requires tables after plain
     /// values.
@@ -169,6 +174,7 @@ impl Default for Config {
             last_run_version: None,
             mini_strip: false,
             mini_strip_monitor: None,
+            cli_enabled: false,
             mini_strip_values: MiniStripValues::default(),
         }
     }
@@ -249,6 +255,7 @@ mod tests {
             last_run_version: None,
             mini_strip: true,
             mini_strip_monitor: Some(r"\\.\DISPLAY2".to_string()),
+            cli_enabled: true,
             mini_strip_values: MiniStripValues {
                 battery: true,
                 network: false,
@@ -394,6 +401,16 @@ battery = true
         assert!(!text.is_empty());
         assert!(!text.contains("mini_strip_monitor"));
         assert_eq!(Config::from_toml_str(&text), Config::default());
+    }
+
+    #[test]
+    fn cli_readings_default_to_off_and_round_trip_when_on() {
+        assert!(!Config::from_toml_str("").cli_enabled);
+        let c = Config {
+            cli_enabled: true,
+            ..Config::default()
+        };
+        assert!(Config::from_toml_str(&c.to_toml_string()).cli_enabled);
     }
 
     #[test]

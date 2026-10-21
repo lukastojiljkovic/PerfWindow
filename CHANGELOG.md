@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ## [Unreleased]
 
+### Added
+
+- **A command-line report.** `perfwindow-cli` prints every reading the window
+  shows, as text or with `--json`, once or every few seconds with `--watch`. It
+  is off until it is turned on in Settings → Command line, which also adds it to
+  your `PATH`.
+
 ## [2.0.3] — 2026-10-15
 
 The CPU card labels its distance to TjMax HEADROOM, so the reading no longer looks like the throttle point itself.
