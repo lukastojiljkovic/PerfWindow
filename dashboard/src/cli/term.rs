@@ -5,7 +5,7 @@
 use super::report::Style;
 use ratatui::symbols::bar;
 use std::ffi::OsStr;
-use std::io::IsTerminal;
+use std::io::{IsTerminal, Stderr, Write};
 
 /// The report style stdout takes: ASCII unless it is a terminal, coloured
 /// when that terminal takes escape codes and colour is allowed.
@@ -129,8 +129,10 @@ fn enable_escapes() -> bool {
 
 /// One line on stderr that says how far the sensors have loaded. It is drawn
 /// only while stderr is a terminal and rewritten in place with a carriage
-/// return, so it needs no escape codes; piped stderr stays empty.
-pub struct Status {
+/// return, so it needs no escape codes; piped stderr gets only the notices.
+/// A write that fails is dropped: the line is only ever a courtesy.
+pub struct Status<W: Write = Stderr> {
+    out: W,
     enabled: bool,
     shown: String,
 }
@@ -138,24 +140,39 @@ pub struct Status {
 impl Status {
     /// A status line, drawn only if stderr is a terminal.
     pub fn new() -> Status {
+        let out = std::io::stderr();
         Status {
-            enabled: std::io::stderr().is_terminal(),
+            enabled: out.is_terminal(),
+            out,
             shown: String::new(),
         }
     }
+}
 
+impl<W: Write> Status<W> {
     /// Show `text` in place of the current status.
     pub fn show(&mut self, text: &str) {
         if self.enabled && text != self.shown {
-            eprint!("{}", overwrite(&self.shown, text));
+            let _ = write!(self.out, "{}", overwrite(&self.shown, text));
             self.shown = text.to_string();
+        }
+    }
+
+    /// Show `text` even where no status line is drawn: on a terminal in its
+    /// place, so the next status or [`Status::finish`] erases it rather than
+    /// leaving it in the scrollback, and on piped stderr as a line of its own.
+    pub fn notice(&mut self, text: &str) {
+        if self.enabled {
+            self.show(text);
+        } else {
+            let _ = writeln!(self.out, "{text}");
         }
     }
 
     /// Erase the line, so a message or the report starts on a clean one.
     pub fn clear(&mut self) {
         if !self.shown.is_empty() {
-            eprint!("{}\r", overwrite(&self.shown, ""));
+            let _ = write!(self.out, "{}\r", overwrite(&self.shown, ""));
             self.shown.clear();
         }
     }
@@ -225,6 +242,37 @@ mod tests {
             mark,
         ];
         assert!(steps.iter().all(|s| drawable.contains(s)), "{steps:?}");
+    }
+
+    fn status(terminal: bool) -> Status<Vec<u8>> {
+        Status {
+            out: Vec::new(),
+            enabled: terminal,
+            shown: String::new(),
+        }
+    }
+
+    #[test]
+    fn a_notice_on_a_terminal_is_erased_once_the_status_finishes() {
+        let mut status = status(true);
+        status.notice("Approve the prompt.");
+        status.finish();
+        assert_eq!(
+            String::from_utf8(status.out).unwrap(),
+            "\rApprove the prompt.\r                   \r"
+        );
+    }
+
+    #[test]
+    fn a_notice_on_piped_stderr_is_a_line_of_its_own() {
+        let mut status = status(false);
+        status.notice("Approve the prompt.");
+        status.show("Loading sensors…");
+        status.finish();
+        assert_eq!(
+            String::from_utf8(status.out).unwrap(),
+            "Approve the prompt.\n"
+        );
     }
 
     #[test]
