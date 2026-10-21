@@ -49,6 +49,9 @@ PrivilegesRequired=admin
 MinVersion=10.0.14393
 CloseApplications=force
 RestartApplications=no
+; The uninstaller takes the install folder off the user's PATH (the Command
+; line setting puts it there), so it tells running programs to re-read it.
+ChangesEnvironment=yes
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
@@ -433,9 +436,9 @@ begin
     mbInformation, MB_OK, IDOK);
 end;
 
-{ Take {app} back off the user's PATH: the Command line setting added it.
-  Written back only when the entry was there, so an unchanged PATH is left
-  exactly as it was. }
+{ Take the install folder back off the user's PATH: the Command line setting
+  added it. Written back only when the entry was there, so an unchanged PATH
+  is left exactly as it was. }
 procedure RemoveAppFromUserPath;
 var
   Path, Entry, Kept, AppDir: String;
