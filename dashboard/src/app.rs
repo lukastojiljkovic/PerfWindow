@@ -164,8 +164,9 @@ const STARTUP_WATCHDOG: std::time::Duration = std::time::Duration::from_secs(120
 const LINE_SILENCE: std::time::Duration = std::time::Duration::from_secs(20);
 /// How long a fully loaded feed may go without a snapshot before it counts as
 /// stopped. Far above the slowest refresh rate, because sensord rebuilding its
-/// hardware list after a device change can hold a snapshot back for a while.
-const FEED_SILENCE: std::time::Duration = std::time::Duration::from_secs(30);
+/// hardware list after a device change (a laptop's dGPU powering down on a
+/// switch to battery) re-opens every sensor without sending a line.
+const FEED_SILENCE: std::time::Duration = std::time::Duration::from_secs(60);
 
 /// How often strip mode re-checks its monitor and re-asserts the topmost band.
 /// Cheap enough to be idempotent, slow enough that a steady desktop costs one
@@ -680,10 +681,14 @@ impl PerfApp {
             // fill here would stack a second translucent layer under it.
             .frame(egui::Frame::NONE)
             .show_inside(ui, |ui| {
+                // Only a live feed's readings: once the session is demoted the
+                // strip shows dashes, not the last readings frozen in place.
                 crate::ui::mini_strip::strip_row(
                     ui,
                     &self.theme,
-                    self.latest.as_ref(),
+                    self.latest
+                        .as_ref()
+                        .filter(|_| matches!(self.status, Status::Running)),
                     &self.config,
                 )
             })
@@ -935,9 +940,15 @@ impl PerfApp {
 impl eframe::App for PerfApp {
     /// Runs before every `ui` pass, and also while the window is minimized,
     /// when eframe skips `ui`, so history keeps recording the feed.
-    fn logic(&mut self, _ctx: &egui::Context, _frame: &mut eframe::Frame) {
+    fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.poll_connect_events();
         self.ingest();
+        // Watchdog pass a little past the refresh interval, minimized or not:
+        // new snapshots already wake the app via request_repaint from the
+        // reader thread, so this one only matters once the feed goes quiet.
+        ctx.request_repaint_after(std::time::Duration::from_millis(
+            self.config.refresh.as_millis() as u64 + 500,
+        ));
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
@@ -962,9 +973,6 @@ impl eframe::App for PerfApp {
             // Sensor polling, history and the update machinery above all keep
             // running; only the chrome is replaced by the strip row.
             self.strip_frame(&ctx, ui);
-            ctx.request_repaint_after(std::time::Duration::from_millis(
-                self.config.refresh.as_millis() as u64 + 500,
-            ));
             if self.want_quit {
                 ctx.send_viewport_cmd(egui::ViewportCommand::Close);
             }
@@ -1032,13 +1040,6 @@ impl eframe::App for PerfApp {
         // every panel and the modal. (The grid is drawn earlier, inside the
         // central panel, so the opaque cards cover it.)
         crate::ui::effects::paint_effects(&ctx, &self.theme, self.config.background_opacity);
-
-        // Watchdog repaint a little past the refresh interval; new snapshots
-        // already wake the UI via request_repaint from the reader thread, and
-        // the blinking cursor needs steady frames regardless.
-        ctx.request_repaint_after(std::time::Duration::from_millis(
-            self.config.refresh.as_millis() as u64 + 500,
-        ));
 
         if self.want_quit {
             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
@@ -1268,9 +1269,10 @@ mod tests {
         feed_snapshot(&state, false, t0);
         app.ingest_at(t0);
         // A topology rebuild in sensord can hold the next snapshot a while.
-        ingest_each_second(&mut app, t0, 29);
+        let quiet = FEED_SILENCE.as_secs() - 1;
+        ingest_each_second(&mut app, t0, quiet);
         assert!(matches!(app.status, Status::Running));
-        ingest_each_second(&mut app, t0 + std::time::Duration::from_secs(29), 2);
+        ingest_each_second(&mut app, t0 + std::time::Duration::from_secs(quiet), 2);
         assert!(matches!(app.status, Status::SensordDown));
     }
 
@@ -1284,10 +1286,11 @@ mod tests {
         // wake come before sensord's next line.
         let woke = t0 + std::time::Duration::from_secs(3600);
         app.ingest_at(woke);
-        ingest_each_second(&mut app, woke, 29);
+        let quiet = FEED_SILENCE.as_secs() - 1;
+        ingest_each_second(&mut app, woke, quiet);
         assert!(matches!(app.status, Status::Running));
         // A feed that stays silent after the wake still counts as stopped.
-        ingest_each_second(&mut app, woke + std::time::Duration::from_secs(29), 2);
+        ingest_each_second(&mut app, woke + std::time::Duration::from_secs(quiet), 2);
         assert!(matches!(app.status, Status::SensordDown));
     }
 

@@ -129,7 +129,7 @@ dotnet test sensord\sensord.sln
   takes snapshots with `take()`, and moves `SensordDown → Running` when a
   snapshot arrives over a live feed. Every demotion deadline is
   silence-based: the startup watchdog stays armed until the first FULL
-  snapshot, and a loaded feed with no line for 30 s (`FEED_SILENCE`) drops to
+  snapshot, and a loaded feed with no line for 60 s (`FEED_SILENCE`) drops to
   NO SIGNAL. Never reintroduce a fixed first-snapshot deadline, because slow
   LHM enumeration is legitimate. `ingest()` runs from `App::logic`, which
   eframe calls even while the window is minimized; `ui()` is skipped then.
@@ -153,12 +153,14 @@ dotnet test sensord\sensord.sln
   the 0.9.1–0.9.4 startup crash. Synchronous I/O on one handle is serialized,
   so a control write waits behind the reader's pending `ReadFile`:
   `shutdown()` cancels that read with `CancelIoEx` through a third cloned
-  handle. Connecting retries a busy pipe for 4 s, because the old instance
-  answers busy while sensord ends its previous session.
+  handle. Connecting retries a busy pipe for 8 s, because the old instance
+  answers busy until the sensord that served the previous session has exited.
 - **Per-core arrays are per core and parallel.** `cores`, `core_clocks_mhz`
   and `core_temps` hold one entry per physical core in one order (P-cores
   first on hybrid Intel). A core's load is the mean of its threads' loads,
-  because LHM reports load per thread (`SnapshotBuilder.CollectPerCore`).
+  because LHM reports load per thread (`SnapshotBuilder.CollectPerCore`). On
+  AMD, LHM names every thread a core of its own ("CPU Core #1..#2C", no
+  " Thread #"), so runs of loads are grouped by the per-core clock count.
 - **sensord guards every value.** Each sensor read goes through finite-guards
   (`SensorEx`): a NaN or Infinity reaching `JsonSerializer` kills every
   snapshot, and serde_json rejects NaN literals on the other side. Likewise

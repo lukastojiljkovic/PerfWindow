@@ -279,7 +279,7 @@ fn pipe_client_blocks_on_empty_pipe_without_aborting() {
 /// the reader's pending read. Against a sensord that stopped writing (a driver
 /// call that never returns), that read never completes: sensord would hear
 /// neither the shutdown nor EOF, keep its single pipe instance, and turn every
-/// reconnect into "another PerfWindow window is already connected".
+/// reconnect into a busy pipe.
 #[test]
 fn shutdown_reaches_a_server_that_went_silent() {
     let name = format!(r"\\.\pipe\PerfWindowSilentServer_{}", std::process::id());

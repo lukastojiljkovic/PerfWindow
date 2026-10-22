@@ -48,10 +48,10 @@ const POLL_INTERVAL_MS: u64 = 250;
 /// screen can quote the real value.
 pub const START_DEADLINE_S: u64 = 30;
 /// How long phase 1 retries a busy pipe. sensord keeps its single instance
-/// for up to 3.5 s after a client leaves, while it ends that session, so a
-/// RESPAWN or a CLI run right after another one must not read as another
-/// window being connected.
-const BUSY_RETRY_MS: u64 = 4000;
+/// after a client leaves until its process exits: a 3.5 s teardown grace, then
+/// the service stopping, seen to take up to 6 s in all. A RESPAWN or a CLI run
+/// right after another one must not read as another client being connected.
+const BUSY_RETRY_MS: u64 = 8000;
 
 /// Spawn the connect state machine on a worker thread. Returns the shared
 /// phase handle (for UI polling) plus an mpsc receiver carrying every

@@ -10,7 +10,7 @@ const PIPE_PATH: &str = r"\\.\pipe\PerfWindowSensor";
 pub enum ConnectError {
     /// The pipe does not exist: service not installed or not running.
     NotFound,
-    /// Another dashboard is already connected.
+    /// Another client (a window or perfwindow-cli) holds the single pipe instance.
     Busy,
     /// The pipe's ACL refused access.
     AccessDenied,
@@ -22,7 +22,12 @@ impl std::fmt::Display for ConnectError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             ConnectError::NotFound => write!(f, "sensor service is not running"),
-            ConnectError::Busy => write!(f, "another PerfWindow window is already connected"),
+            ConnectError::Busy => {
+                write!(
+                    f,
+                    "PerfWindow is already reading the sensors in another window or terminal"
+                )
+            }
             ConnectError::AccessDenied => write!(f, "access to sensor pipe was denied"),
             ConnectError::Io(e) => write!(f, "pipe I/O error: {e}"),
         }
