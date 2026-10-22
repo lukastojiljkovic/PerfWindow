@@ -9,6 +9,10 @@ temperatures, power and lifetime metrics** for CPU, GPU (discrete and
 integrated), RAM, storage, motherboard, fans, voltages, battery and network
 throughput, in a single retro-utilitarian dashboard.
 
+The readings also work without the window: [`perfwindow-cli`](#command-line)
+shows them as a live dashboard in a terminal, and as plain text or JSON for
+scripts and AI agents.
+
 PerfWindow has no resident background process while its window is closed and
 no system tray. It is installed by a standard Windows setup program and
 removed cleanly through Add/Remove Programs.
@@ -122,11 +126,17 @@ GitHub's public Releases API.
 
 ## Architecture
 
-PerfWindow is two processes shipped as a single installer:
+PerfWindow is a sensor service and two clients for it, shipped as a single
+installer:
 
 - **`PerfWindow.exe`** — the dashboard: a Rust application using
   [`eframe`/`egui`](https://github.com/emilk/egui). Runs as the current user
   (no elevation manifest) and renders the UI.
+- **`perfwindow-cli.exe`** — the [command line](#command-line): a second binary
+  of the same crate that draws the dashboard in a terminal with
+  [`ratatui`](https://ratatui.rs), or prints a text or JSON report. It reaches
+  the service the way the dashboard does, and only one of the two reads at a
+  time.
 - **`PerfWindowSensor`** — a Windows Service running `sensord.exe --service`
   as `LocalSystem`. Built on
   [LibreHardwareMonitorLib](https://github.com/LibreHardwareMonitor/LibreHardwareMonitor),
@@ -195,7 +205,8 @@ Run it from a developer command prompt, or otherwise ensure the MSVC
 environment is on `PATH` (for example by sourcing `vcvars64.bat`).
 
 The build produces `dashboard/target/release/PerfWindow.exe` with its
-`sensord.exe` sibling, and the installer `dist/PerfWindow-Setup.exe`.
+`perfwindow-cli.exe` and `sensord.exe` siblings, and the installer
+`dist/PerfWindow-Setup.exe`.
 
 `build/make-icon.ps1` regenerates `dashboard/assets/PerfWindow.ico` from code;
 it only needs to be run if the icon is changed.
@@ -279,7 +290,11 @@ their load and temperature history, redrawn on every sample and fitted to the
 terminal's size. `q`, `Esc` or `Ctrl+C` leaves it. When its input or output is
 not a terminal (piped, redirected, or run by a script or an AI agent), it prints
 one text report instead: plain ASCII, one `Label: value` reading per line.
-Scripts and AI agents should ask for `--json` or `--once`.
+Scripts and AI agents should ask for `--json` or `--once`: an agent can read the
+machine's loads, temperatures, clocks, power and drive health that way, without
+a screenshot.
+
+![perfwindow-cli's live dashboard in Windows Terminal](docs/images/cli.png)
 
 ```
 perfwindow-cli                   the live dashboard (a text report when piped)

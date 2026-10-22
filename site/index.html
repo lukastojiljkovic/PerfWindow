@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>PerfWindow: free Windows hardware monitor for temperatures, usage and power</title>
-    <meta name="description" content="PerfWindow shows CPU, GPU, RAM, drive, motherboard, fan, battery and network sensors in one real-time Windows dashboard: usage, temperatures, clocks, power and SMART health. Nothing stays running when it's closed. Free and open source.">
+    <meta name="description" content="PerfWindow shows CPU, GPU, RAM, drive, motherboard, fan, battery and network sensors in one real-time Windows dashboard: usage, temperatures, clocks, power and SMART health. A command line gives the same readings to a terminal, scripts and AI agents. Nothing stays running when it's closed. Free and open source.">
     <meta name="author" content="Luka Stojiljković">
     <link rel="canonical" href="https://lukastojiljkovic.github.io/PerfWindow/">
 
@@ -20,7 +20,7 @@
     <link rel="icon" type="image/png" href="icon.png">
     <link rel="apple-touch-icon" href="icon.png">
     <link rel="preload" href="fonts/archivo-latin.woff2" as="font" type="font/woff2" crossorigin>
-    <link rel="stylesheet" href="site.css?v=3">
+    <link rel="stylesheet" href="site.css?v=4">
     <style>:root { --app: #0a756c; --app-dark: #34e0d0; }</style>
 
     <script>
@@ -39,7 +39,7 @@
             {
                 "@type": "SoftwareApplication",
                 "name": "PerfWindow",
-                "description": "Windows hardware monitor that shows real-time usage, temperatures, clocks, power and SMART drive health for the CPU, GPU, RAM, storage, motherboard, fans, voltages, battery and network in one dashboard that fits any window size or collapses into a one-line strip at the top of the screen, built on LibreHardwareMonitor. No background process or tray icon while it's closed.",
+                "description": "Windows hardware monitor that shows real-time usage, temperatures, clocks, power and SMART drive health for the CPU, GPU, RAM, storage, motherboard, fans, voltages, battery and network in one dashboard that fits any window size or collapses into a one-line strip at the top of the screen, built on LibreHardwareMonitor. Its command line, perfwindow-cli, gives the same readings to a terminal as a live dashboard, and to scripts and AI agents as plain text or JSON. No background process or tray icon while it's closed.",
                 "applicationCategory": "UtilitiesApplication",
                 "operatingSystem": "Windows 11, Windows 10 version 1607 or later",
                 "url": "https://lukastojiljkovic.github.io/PerfWindow/",
@@ -78,6 +78,7 @@
             <a class="mark" href="#top"><img src="icon.png" alt="" width="24" height="24">PerfWindow</a>
             <nav class="nav" aria-label="Sections">
                 <a href="#features">Features</a>
+                <a href="#terminal">Terminal</a>
                 <a href="#how">How it works</a>
                 <a href="#limits">Limits</a>
                 <a href="#faq">FAQ</a>
@@ -172,6 +173,31 @@
                 <figcaption>Hover a drive for its SMART lifetime: hours, data written and wear.</figcaption>
             </figure>
         </div>
+    </section>
+
+    <section class="wrap grid section" id="terminal">
+        <h2 class="section-title">In the terminal</h2>
+        <p class="section-lede">New in 2.1: <code>perfwindow-cli</code> brings every reading to the command line, for when you'd rather not open a window, and for scripts and AI agents that read text. Turn it on in Settings → Command line, which also adds it to your <code>PATH</code>.</p>
+        <div class="cells">
+            <article class="cell">
+                <h3>A dashboard in your terminal</h3>
+                <p>The window's cards in your theme, with load and temperature history, fitted to the terminal's size. It runs in Windows Terminal and in the classic console, and <code>q</code> leaves it.</p>
+            </article>
+            <article class="cell">
+                <h3>For scripts</h3>
+                <p>Piped or redirected, it prints one plain report instead, one <code>Label: value</code> reading per line. <code>--once</code> prints a report and exits; <code>--watch 5</code> prints one every 5 seconds.</p>
+            </article>
+            <article class="cell">
+                <h3>For AI agents</h3>
+                <p><code>perfwindow-cli --json</code> gives an agent the machine's loads, temperatures, clocks, power and drive health as JSON, so it can check why a build is slow or a laptop runs hot without a screenshot.</p>
+            </article>
+        </div>
+        <figure class="figure-wide">
+            <div class="plate">
+                <img src="images/cli.png" width="1382" height="792" alt="perfwindow-cli's live dashboard in Windows Terminal: CPU, GPU, integrated graphics, memory, network, battery and storage cards with load and temperature history" loading="lazy">
+            </div>
+            <figcaption>The live dashboard in Windows Terminal, in the window's theme. Windows asks for the same approval as for the window, and the two can't read the sensors at the same time.</figcaption>
+        </figure>
     </section>
 
     <section class="wrap grid section" id="how">
