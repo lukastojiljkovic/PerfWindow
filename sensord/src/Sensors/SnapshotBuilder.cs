@@ -78,30 +78,45 @@ public static partial class SnapshotBuilder
     /// otherwise.
     ///
     /// LibreHardwareMonitor (0.9.6) keeps one core list, sorted by CPUID core
-    /// ID. Its loads, one per hardware thread on every vendor, are named
-    /// "CPU Core #N" for the Nth core of that list, plus " Thread #T" when the
-    /// core has more than one thread; a core's load is its threads' mean. The
-    /// per-core temperatures and clocks are created in that same order, so
-    /// their rank by Index is their core. Intel names them after the core:
-    /// "CPU Core #N", or "P-Core #k" and "E-Core #k" on hybrid parts. AMD
-    /// names its per-core clocks "Core #N" and has no per-core temperature.
+    /// ID. Its loads, one per hardware thread, are named "CPU Core #N" for the
+    /// Nth entry of that list, plus " Thread #T" when the entry has more than
+    /// one thread; a core's load is its threads' mean. The per-core
+    /// temperatures and clocks are created in core order, so their rank by
+    /// Index is their core. Intel names them after the core: "CPU Core #N", or
+    /// "P-Core #k" and "E-Core #k" on hybrid parts. AMD names its per-core
+    /// clocks "Core #N" and has no per-core temperature.
+    ///
+    /// On AMD, LHM cannot split the APIC ID into core and thread, so every
+    /// thread is an entry of its own and the loads carry no " Thread #T". The
+    /// list is in APIC ID order, which keeps SMT siblings adjacent, so when the
+    /// loads outnumber the per-core sensors by a whole factor, each run of that
+    /// many loads is one core.
     /// </summary>
     internal static PerCore CollectPerCore(IHardware cpu)
     {
-        var threads = cpu.Sensors
+        var threadLoads = cpu.Sensors
             .Where(s => s.SensorType == SensorType.Load)
             .Select(s => (Match: ThreadLoadName().Match(s.Name), Load: Finite(s.Value)))
             .Where(t => t.Match.Success)
-            .ToLookup(t => int.Parse(t.Match.Groups[1].Value) - 1, t => t.Load);
-        // Positional, so a core with no finite thread reading reads 0 rather
-        // than shifting every later core.
-        var loads = Enumerable.Range(0, threads.Count == 0 ? 0 : threads.Max(g => g.Key) + 1)
-            .Select(core => threads[core].Average() ?? 0)
+            .Select(t => (Entry: int.Parse(t.Match.Groups[1].Value) - 1, Threaded: t.Match.Groups[2].Success, t.Load))
             .ToList();
+        int entries = threadLoads.Count == 0 ? 0 : threadLoads.Max(t => t.Entry) + 1;
 
         var temps = PerCoreSensors(cpu, SensorType.Temperature);
         var clocks = PerCoreSensors(cpu, SensorType.Clock);
         var named = temps.Count > 0 ? temps : clocks;
+
+        int perCore = !threadLoads.Any(t => t.Threaded) && named.Count > 0
+                      && entries > named.Count && entries % named.Count == 0
+            ? entries / named.Count
+            : 1;
+        var threads = threadLoads.ToLookup(t => t.Entry / perCore, t => t.Load);
+        // Positional, so a core with no finite thread reading reads 0 rather
+        // than shifting every later core.
+        var loads = Enumerable.Range(0, entries / perCore)
+            .Select(core => threads[core].Average() ?? 0)
+            .ToList();
+
         bool IsECore(int core) => core < named.Count && named[core].Name.StartsWith("E-Core #", StringComparison.Ordinal);
         // OrderBy is stable, so the P-cores and the E-cores each keep core order.
         List<T>? InOrder<T>(IReadOnlyList<T> byCore) => byCore.Count == 0
@@ -132,7 +147,7 @@ public static partial class SnapshotBuilder
 
     private static double? Finite(float? value) => value is float v && float.IsFinite(v) ? v : null;
 
-    [GeneratedRegex(@"^CPU Core #([1-9][0-9]*)(?: Thread #[0-9]+)?$")]
+    [GeneratedRegex(@"^CPU Core #([1-9][0-9]*)( Thread #[0-9]+)?$")]
     private static partial Regex ThreadLoadName();
 
     [GeneratedRegex(@"^(?:CPU Core|P-Core|E-Core|Core) #[0-9]+$")]

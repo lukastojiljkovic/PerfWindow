@@ -297,8 +297,10 @@ public class SnapshotBuilderTests
     [Fact]
     public void BuildCpu_averages_each_amd_core_s_smt_threads_and_takes_its_plain_clock()
     {
-        // Ryzen 3 3300X: four cores with two threads each. Amd17Cpu has no
-        // per-core temperature; each core has a "Core #N" clock and a
+        // Ryzen 3 3300X: four cores with two threads each. LHM takes each AMD
+        // thread for a core of its own, so the eight loads are "CPU Core #1"
+        // to "#8" with no " Thread #T", sibling threads adjacent. Amd17Cpu has
+        // no per-core temperature; each core has a "Core #N" clock and a
         // "Core #N (Effective)" one, which is not the core clock.
         var clocks = new List<ISensor>
         {
@@ -312,7 +314,8 @@ public class SnapshotBuilderTests
             clocks.Add(new FakeSensor { Name = $"Core #{core + 1} (Effective)", SensorType = SensorType.Clock, Index = 4 + 2 * core, Value = 800 + core });
         }
         var info = SnapshotBuilder.BuildCpu(Cpu(
-            ThreadLoads(new[] { 10f, 30f }, new[] { 20f, 40f }, new[] { 0f, 100f }, new[] { 50f, 50f }),
+            ThreadLoads(new[] { 10f }, new[] { 30f }, new[] { 20f }, new[] { 40f },
+                        new[] { 0f }, new[] { 100f }, new[] { 50f }, new[] { 50f }),
             new ISensor[]
             {
                 new FakeSensor { Name = "Core (Tctl/Tdie)", SensorType = SensorType.Temperature, Index = 0, Value = 70f },
