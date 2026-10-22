@@ -79,7 +79,7 @@ body {
 
 img { display: block; max-width: 100%; height: auto; }
 ol, ul { padding: 0; list-style: none; }
-code { font: 400 0.875em/1 ui-monospace, "Cascadia Mono", Consolas, monospace; }
+code { font: 400 0.875em/1 ui-monospace, "Cascadia Mono", Consolas, monospace; white-space: nowrap; }
 
 /* Text links are underlined in a hairline that darkens on hover. */
 a {
@@ -264,6 +264,9 @@ h3 { font-size: 1.25rem; line-height: 1.25; font-weight: 700; letter-spacing: -0
 
 .screens { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 48px var(--gutter); margin-top: 72px; }
 figcaption { margin-top: 14px; font-size: 0.9375rem; color: var(--ink-2); }
+/* One screenshot across the page, on a plate shaped like it. */
+.figure-wide { margin-top: 72px; }
+.figure-wide .plate { aspect-ratio: 16 / 9; }
 
 /* How it works: rows on the page grid; numbered only where the order matters. */
 .steps { border-top: 1px solid var(--ink); counter-reset: step; }

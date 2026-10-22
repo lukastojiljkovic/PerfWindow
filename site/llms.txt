@@ -8,11 +8,21 @@ Key facts:
 - GPU: discrete NVIDIA and AMD cards and Intel integrated graphics, with hot spot and memory junction temperatures, clocks, encoder load, fan, power and VRAM.
 - Memory and storage: per-module DIMM temperatures where reported, drive temperatures against each drive's own limits, and SMART lifetime (power-on hours, NVMe wear, data written).
 - Six themes (Amber Mainframe, Cyber Slate, Phosphor Tactical, Synthwave Neon, Crimson Terminal and Light) that can follow Windows' light and dark setting. Refresh every 0.5, 1, 2 or 5 seconds, in °C or °F.
-- Command line: `perfwindow-cli` opens a live terminal dashboard of the same readings in the user's theme; piped or run by a script or an AI agent it prints a plain ASCII report, one `Label: value` reading per line, or JSON with `--json`. It is off until turned on in Settings → Command line.
+- Command line (new in 2.1): `perfwindow-cli` opens a live terminal dashboard of the same readings in the user's theme; piped or run by a script or an AI agent it prints a plain ASCII report, one `Label: value` reading per line, or JSON with `--json`. It is off until turned on in Settings → Command line.
 - Architecture: a Rust and egui dashboard that runs as the user, and a .NET sensor service running as LocalSystem that starts on demand (one UAC prompt per launch) and exits when the dashboard closes. They talk over a named pipe.
 - The installer adds the signed PawnIO driver for CPU temperature, clock and power registers, and the Visual C++ runtime when missing.
 - Reads sensors only: no overclocking, undervolting or fan control. No telemetry; the only network request is an optional, anonymous update check against GitHub at most once every six hours.
 - Requires Windows 11, or Windows 10 version 1607 or later, x64.
+
+## Reading the sensors from an agent
+
+On a Windows machine with PerfWindow 2.1 or later installed and Settings → Command line turned on (which puts `perfwindow-cli` on the user `PATH`):
+
+- `perfwindow-cli --json`: every reading as one JSON object, temperatures in °C. Characters outside ASCII are written as escapes.
+- `perfwindow-cli --once`: one plain ASCII report, one `Label: value` reading per line.
+- `perfwindow-cli --watch 5 --json`: one JSON object per line every 5 seconds (1 to 60) until stopped.
+- Exit codes: 0 success, 2 bad arguments, 3 command-line readings are off in Settings, 4 the sensor service is unavailable or stopped.
+- Starting the sensor service needs the user to approve a Windows (UAC) prompt, and the command and the PerfWindow window cannot read the sensors at the same time.
 
 ## Download
 
