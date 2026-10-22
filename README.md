@@ -20,7 +20,7 @@ removed cleanly through Add/Remove Programs.
 
 ## What it monitors
 
-- **CPU** — load (overall and per-core or per-thread), package and per-core
+- **CPU** — load (overall and per core), package and per-core
   temperatures, current clock (with bus clock on hover), Vcore, RAPL power
   (Package, plus a Cores / DRAM / Platform breakdown on hover) and
   distance-to-TjMax for throttling headroom. On Intel hybrid CPUs P-Cores and

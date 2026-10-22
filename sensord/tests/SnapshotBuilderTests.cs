@@ -218,6 +218,163 @@ public class SnapshotBuilderTests
         Assert.Equal(1.234, info.VoltageV!.Value, 3);
     }
 
+    // ---- Per-core arrays, on LibreHardwareMonitor 0.9.6's names and indices ----
+
+    [Fact]
+    public void BuildCpu_gives_hybrid_intel_with_hyper_threading_one_entry_per_core_p_cores_first()
+    {
+        // i7-13620H: six P-cores with two threads each, then four E-cores.
+        string[] names = { "P-Core #1", "P-Core #2", "P-Core #3", "P-Core #4", "P-Core #5", "P-Core #6",
+                           "E-Core #1", "E-Core #2", "E-Core #3", "E-Core #4" };
+        var info = SnapshotBuilder.BuildCpu(Cpu(
+            ThreadLoads(new[] { 10f, 30f }, new[] { 0f, 0f }, new[] { 50f, 50f }, new[] { 100f, 0f },
+                        new[] { 5f, 15f }, new[] { 40f, 60f }, new[] { 70f }, new[] { 80f }, new[] { 90f }, new[] { 100f }),
+            IntelCoreSensors(names,
+                temps: new[] { 61f, 62f, 63f, 64f, 65f, 66f, 51f, 52f, 53f, 54f },
+                clocks: new[] { 4701f, 4702f, 4703f, 4704f, 4705f, 4706f, 3501f, 3502f, 3503f, 3504f })));
+
+        Assert.Equal(new double[] { 20, 0, 50, 50, 10, 50, 70, 80, 90, 100 }, info.Cores);
+        Assert.Equal(new double?[] { 61, 62, 63, 64, 65, 66, 51, 52, 53, 54 }, info.CoreTemps);
+        Assert.Equal(new double?[] { 4701, 4702, 4703, 4704, 4705, 4706, 3501, 3502, 3503, 3504 }, info.CoreClocksMhz);
+        Assert.Equal(6, info.PCoreCount);
+        Assert.Equal(4, info.ECoreCount);
+    }
+
+    [Fact]
+    public void BuildCpu_lists_p_cores_first_when_the_core_order_interleaves_them()
+    {
+        // LHM orders cores by CPUID core ID, which need not put every P-core first.
+        string[] names = { "P-Core #1", "E-Core #1", "E-Core #2", "P-Core #2" };
+        var info = SnapshotBuilder.BuildCpu(Cpu(
+            ThreadLoads(new[] { 10f }, new[] { 20f }, new[] { 30f }, new[] { 40f }),
+            IntelCoreSensors(names,
+                temps: new[] { 61f, 51f, 52f, 62f },
+                clocks: new[] { 4701f, 3501f, 3502f, 4702f })));
+
+        Assert.Equal(new double[] { 10, 40, 20, 30 }, info.Cores);
+        Assert.Equal(new double?[] { 61, 62, 51, 52 }, info.CoreTemps);
+        Assert.Equal(new double?[] { 4701, 4702, 3501, 3502 }, info.CoreClocksMhz);
+        Assert.Equal(2, info.PCoreCount);
+        Assert.Equal(2, info.ECoreCount);
+    }
+
+    [Fact]
+    public void BuildCpu_averages_each_intel_core_s_threads_and_leaves_out_distance_to_tjmax()
+    {
+        // i7-7700K: four cores with two threads each. A non-finite thread
+        // reading drops out of its core's mean.
+        string[] names = { "CPU Core #1", "CPU Core #2", "CPU Core #3", "CPU Core #4" };
+        var info = SnapshotBuilder.BuildCpu(Cpu(
+            ThreadLoads(new[] { 10f, 30f }, new[] { 20f, 40f }, new[] { 0f, 100f }, new[] { float.NaN, 50f }),
+            IntelCoreSensors(names,
+                temps: new[] { 60f, 61f, 62f, 63f },
+                clocks: new[] { 4500f, 4501f, 4502f, 4503f })));
+
+        Assert.Equal(new double[] { 20, 30, 50, 50 }, info.Cores);
+        Assert.Equal(new double?[] { 60, 61, 62, 63 }, info.CoreTemps);
+        Assert.Equal(new double?[] { 4500, 4501, 4502, 4503 }, info.CoreClocksMhz);
+        Assert.Null(info.PCoreCount);
+        Assert.Null(info.ECoreCount);
+    }
+
+    [Fact]
+    public void BuildCpu_gives_a_cpu_without_hyper_threading_its_core_loads_as_they_are()
+    {
+        // i5-9600K: six cores, one thread each, so the loads carry no " Thread #T".
+        string[] names = { "CPU Core #1", "CPU Core #2", "CPU Core #3", "CPU Core #4", "CPU Core #5", "CPU Core #6" };
+        var info = SnapshotBuilder.BuildCpu(Cpu(
+            ThreadLoads(new[] { 1f }, new[] { 2f }, new[] { 3f }, new[] { 4f }, new[] { 5f }, new[] { 6f }),
+            IntelCoreSensors(names,
+                temps: new[] { 50f, 51f, 52f, 53f, 54f, 55f },
+                clocks: new[] { 4300f, 4301f, 4302f, 4303f, 4304f, 4305f })));
+
+        Assert.Equal(new double[] { 1, 2, 3, 4, 5, 6 }, info.Cores);
+        Assert.Equal(new double?[] { 50, 51, 52, 53, 54, 55 }, info.CoreTemps);
+        Assert.Equal(new double?[] { 4300, 4301, 4302, 4303, 4304, 4305 }, info.CoreClocksMhz);
+        Assert.Null(info.PCoreCount);
+    }
+
+    [Fact]
+    public void BuildCpu_averages_each_amd_core_s_smt_threads_and_takes_its_plain_clock()
+    {
+        // Ryzen 3 3300X: four cores with two threads each. LHM takes each AMD
+        // thread for a core of its own, so the eight loads are "CPU Core #1"
+        // to "#8" with no " Thread #T", sibling threads adjacent. Amd17Cpu has
+        // no per-core temperature; each core has a "Core #N" clock and a
+        // "Core #N (Effective)" one, which is not the core clock.
+        var clocks = new List<ISensor>
+        {
+            new FakeSensor { Name = "Bus Speed", SensorType = SensorType.Clock, Index = 0, Value = 100f },
+            new FakeSensor { Name = "Cores (Average)", SensorType = SensorType.Clock, Index = 1, Value = 4000f },
+            new FakeSensor { Name = "Cores (Average Effective)", SensorType = SensorType.Clock, Index = 2, Value = 900f },
+        };
+        for (int core = 0; core < 4; core++)
+        {
+            clocks.Add(new FakeSensor { Name = $"Core #{core + 1}", SensorType = SensorType.Clock, Index = 3 + 2 * core, Value = 4200 + core });
+            clocks.Add(new FakeSensor { Name = $"Core #{core + 1} (Effective)", SensorType = SensorType.Clock, Index = 4 + 2 * core, Value = 800 + core });
+        }
+        var info = SnapshotBuilder.BuildCpu(Cpu(
+            ThreadLoads(new[] { 10f }, new[] { 30f }, new[] { 20f }, new[] { 40f },
+                        new[] { 0f }, new[] { 100f }, new[] { 50f }, new[] { 50f }),
+            new ISensor[]
+            {
+                new FakeSensor { Name = "Core (Tctl/Tdie)", SensorType = SensorType.Temperature, Index = 0, Value = 70f },
+                new FakeSensor { Name = "CCD1 (Tdie)", SensorType = SensorType.Temperature, Index = 1, Value = 68f },
+            },
+            clocks));
+
+        Assert.Equal(new double[] { 20, 30, 50, 50 }, info.Cores);
+        Assert.Equal(new double?[] { 4200, 4201, 4202, 4203 }, info.CoreClocksMhz);
+        Assert.Null(info.CoreTemps);
+        Assert.Null(info.PCoreCount);
+    }
+
+    /// <summary>A CPU hardware node carrying every given sensor.</summary>
+    private static FakeHardware Cpu(params IEnumerable<ISensor>[] sensors)
+        => new() { Name = "Test CPU", HardwareTypeValue = HardwareType.Cpu, SensorsArray = sensors.SelectMany(s => s).ToArray() };
+
+    /// <summary>
+    /// GenericCpu's loads: "CPU Total" (0), "CPU Core Max" (1), then one per
+    /// hardware thread at its logical-processor number + 2, named "CPU Core #N"
+    /// for the Nth core, with " Thread #T" when that core has more than one.
+    /// </summary>
+    private static IEnumerable<ISensor> ThreadLoads(params float[][] coreThreads)
+    {
+        yield return new FakeSensor { Name = "CPU Total", SensorType = SensorType.Load, Index = 0, Value = 42f };
+        yield return new FakeSensor { Name = "CPU Core Max", SensorType = SensorType.Load, Index = 1, Value = 100f };
+        int thread = 0;
+        for (int core = 0; core < coreThreads.Length; core++)
+            for (int t = 0; t < coreThreads[core].Length; t++)
+                yield return new FakeSensor
+                {
+                    Name = $"CPU Core #{core + 1}" + (coreThreads[core].Length > 1 ? $" Thread #{t + 1}" : ""),
+                    SensorType = SensorType.Load,
+                    Index = 2 + thread++,
+                    Value = coreThreads[core][t],
+                };
+    }
+
+    /// <summary>
+    /// IntelCpu's per-core sensors, named after the core and created in core
+    /// order: temperatures after "Core Max" (0) and "Core Average" (1), then
+    /// "CPU Package" and a "&lt;core&gt; Distance to TjMax" for each core;
+    /// clocks after "Bus Speed" (0), at the core's position + 1.
+    /// </summary>
+    private static IEnumerable<ISensor> IntelCoreSensors(string[] names, float[] temps, float[] clocks)
+    {
+        int n = names.Length;
+        yield return new FakeSensor { Name = "Core Max", SensorType = SensorType.Temperature, Index = 0, Value = temps.Max() };
+        yield return new FakeSensor { Name = "Core Average", SensorType = SensorType.Temperature, Index = 1, Value = temps.Average() };
+        for (int i = 0; i < n; i++)
+            yield return new FakeSensor { Name = names[i], SensorType = SensorType.Temperature, Index = 2 + i, Value = temps[i] };
+        yield return new FakeSensor { Name = "CPU Package", SensorType = SensorType.Temperature, Index = 2 + n, Value = temps.Max() };
+        for (int i = 0; i < n; i++)
+            yield return new FakeSensor { Name = names[i] + " Distance to TjMax", SensorType = SensorType.Temperature, Index = 3 + n + i, Value = 100 - temps[i] };
+        yield return new FakeSensor { Name = "Bus Speed", SensorType = SensorType.Clock, Index = 0, Value = 100f };
+        for (int i = 0; i < n; i++)
+            yield return new FakeSensor { Name = names[i], SensorType = SensorType.Clock, Index = i + 1, Value = clocks[i] };
+    }
+
     [Fact]
     public void BuildGpus_reads_hot_spot_temperature()
     {

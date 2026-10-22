@@ -33,18 +33,23 @@ public record HealthInfo(
 
 /// <summary>
 /// CPU metrics. Units: <c>load</c>/<c>cores</c> = 0–100 %; <c>temp</c>,
-/// <c>distance_to_tjmax_c</c> = °C; <c>clock_mhz</c> = MHz; every
-/// <c>power_*_w</c> = watts; <c>voltage_v</c> = volts.
+/// <c>core_temps</c>, <c>distance_to_tjmax_c</c> = °C; <c>clock_mhz</c>,
+/// <c>core_clocks_mhz</c> = MHz; every <c>power_*_w</c> = watts;
+/// <c>voltage_v</c> = volts.
 ///
 /// Power breakdown (Intel RAPL domains, AMD-equivalent where exposed):
 /// <c>power_w</c> = whole-package draw (always the primary reading);
 /// <c>power_cores_w</c>, <c>power_memory_w</c>, <c>power_platform_w</c> = the
 /// RAPL sub-domains when the silicon exposes them.
 ///
-/// Hybrid-CPU split: <c>p_core_count</c> and <c>e_core_count</c> describe how
-/// the entries of <c>cores</c>/<c>core_temps</c> partition (P-Cores first,
-/// then E-Cores). On non-hybrid CPUs both counts are <c>null</c> and the heat
-/// map renders uniformly.
+/// Per-core arrays: <c>cores</c> (each core's load, the mean of its hardware
+/// threads), <c>core_clocks_mhz</c> and <c>core_temps</c> hold one entry per
+/// physical core, not per thread, and are parallel: entry i of each is the
+/// same core. Hybrid Intel lists its P-cores first, then its E-cores;
+/// <c>p_core_count</c> and <c>e_core_count</c> say where that split falls,
+/// and both are <c>null</c> on other CPUs. An array is absent when the CPU
+/// has no such reading (AMD has no per-core temperature); a single missing
+/// clock or temperature is a <c>null</c> entry, so later cores never shift.
 /// </summary>
 public record CpuInfo(
     [property: JsonPropertyName("name")] string Name,

@@ -6,7 +6,7 @@ mod cards;
 mod draw;
 mod widgets;
 
-use super::term;
+use super::term::{self, Glyphs};
 use crate::config::Config;
 use crate::format::TempUnit;
 use crate::history::{History, RingBuffer};
@@ -38,6 +38,7 @@ pub fn run(
     let palette = Palette {
         theme: Theme::for_id(effective_theme_id(config, windows_is_light())),
         depth,
+        glyphs: term::glyphs(),
     };
     let mut model = Model::new(first, palette, config.unit);
     let result = match ratatui::try_init() {
@@ -156,10 +157,12 @@ pub enum Depth {
     TrueColor,
 }
 
-/// The user's PerfWindow theme as terminal styles.
+/// The user's PerfWindow theme as terminal styles, in the glyphs the
+/// terminal's font can draw.
 pub struct Palette {
     pub theme: Theme,
     pub depth: Depth,
+    pub glyphs: Glyphs,
 }
 
 impl Palette {
@@ -276,6 +279,7 @@ mod tests {
         let palette = |depth| Palette {
             theme: Theme::for_id(crate::config::ThemeId::Amber),
             depth,
+            glyphs: Glyphs::FULL,
         };
         let mono = palette(Depth::Mono);
         assert_eq!(mono.color(mono.theme.accent), Color::Reset);
@@ -299,6 +303,7 @@ mod tests {
             Palette {
                 theme: Theme::for_id(crate::config::ThemeId::Slate),
                 depth: Depth::TrueColor,
+                glyphs: Glyphs::FULL,
             },
             TempUnit::Celsius,
         );

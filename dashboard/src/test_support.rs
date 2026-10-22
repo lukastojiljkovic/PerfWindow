@@ -11,7 +11,7 @@ use crate::ipc::{
 };
 
 /// A snapshot exercising the widest, tallest reading every panel can render:
-/// a discrete GPU with 24 GB of VRAM, an iGPU, a 24-thread CPU, 64 GB of RAM,
+/// a discrete GPU with 24 GB of VRAM, an iGPU, a 24-core CPU, 64 GB of RAM,
 /// gigabit-class network throughput, a battery, four disks, and a board with
 /// four fans and four voltage rails.
 ///

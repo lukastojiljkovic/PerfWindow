@@ -13,6 +13,12 @@ use egui::{Align, Layout, Margin, RichText, ScrollArea, Vec2};
 const WINDOW_WIDTH: f32 = 600.0;
 const BODY_PADDING_X: i8 = 18;
 const BODY_PADDING_Y: i8 = 16;
+/// The title bar, the body padding, the "updated to" line, the "Show all
+/// versions" link and outer breathing room. The body's `ScrollArea` is capped
+/// at the window height less this, so the modal never runs past a short window.
+const CHROME_RESERVE: f32 = 170.0;
+/// Floor for the body's `ScrollArea` max height on a very short window.
+const MIN_BODY_HEIGHT: f32 = 200.0;
 
 /// The file contents, frozen at compile time. The path is relative to this
 /// source file: `dashboard/src/ui/changelog_modal.rs` → repo root.
@@ -373,10 +379,7 @@ pub fn changelog_modal(ctx: &egui::Context, app: &mut PerfApp) {
                 close = true;
             }
 
-            let viewport_h = ctx
-                .input(|i| i.viewport().inner_rect.map(|r| r.height()))
-                .unwrap_or(720.0);
-            let max_h = (viewport_h - 120.0).max(200.0);
+            let max_h = (ctx.content_rect().height() - CHROME_RESERVE).max(MIN_BODY_HEIGHT);
             let nodes: &[ChangelogNode] = match (&updated_to, show_all) {
                 (Some(_), false) => updated_nodes.map(Vec::as_slice).unwrap_or(full_nodes),
                 _ => full_nodes,

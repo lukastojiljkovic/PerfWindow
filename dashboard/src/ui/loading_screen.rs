@@ -6,7 +6,7 @@
 //! Exit semantics from a single place.
 
 use crate::format::letter_spaced;
-use crate::ipc::connect::{ConnectPhase, FailedReason};
+use crate::ipc::connect::{ConnectPhase, FailedReason, START_DEADLINE_S};
 use crate::ipc::ProgressInfo;
 use crate::theme::Theme;
 use egui::{Align, FontId, Layout, RichText, Sense, Stroke, Vec2};
@@ -213,8 +213,10 @@ fn failed(ui: &mut egui::Ui, theme: &Theme, reason: &FailedReason) -> LoadingAct
         ),
         FailedReason::StartTimeout => (
             "SERVICE DID NOT START IN TIME",
-            "The sensor service was launched but did not become ready within 15 seconds."
-                .to_string(),
+            format!(
+                "The sensor service was launched but did not become ready within \
+                 {START_DEADLINE_S} seconds."
+            ),
         ),
         FailedReason::PipeError(e) => ("SENSOR SERVICE COULD NOT CONNECT", e.clone()),
     };

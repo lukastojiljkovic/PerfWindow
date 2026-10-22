@@ -103,8 +103,7 @@ fn connect(status: &mut Status) -> Option<PipeSensord> {
                 status.show("Connecting to the sensor service…")
             }
             ConnectEvent::Phase(ConnectPhase::RequestingElevation) => {
-                status.clear();
-                eprintln!("Starting the PerfWindow sensor service: approve the Windows prompt.");
+                status.notice("Starting the PerfWindow sensor service: approve the Windows prompt.")
             }
             ConnectEvent::Phase(ConnectPhase::StartingService) => {
                 status.show("Starting the sensor service…")
@@ -131,7 +130,7 @@ fn failure_message(reason: &FailedReason) -> String {
             format!("the sensor service did not start within {START_DEADLINE_S} seconds.")
         }
         FailedReason::PipeError(text) if *text == crate::ipc::ConnectError::Busy.to_string() => {
-            "PerfWindow's window is reading the sensors; close it and run the command again."
+            "PerfWindow is reading the sensors in another window or terminal; close it and run the command again."
                 .to_string()
         }
         FailedReason::PipeError(text) => format!("the sensor service is unavailable: {text}."),

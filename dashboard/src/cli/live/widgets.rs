@@ -204,8 +204,14 @@ pub(super) fn chart(frame: &mut Frame, area: Rect, series: &[(Vec<f32>, Style)],
 }
 
 /// A block sparkline of byte rates, newest at the right edge, scaled to its
-/// own peak.
-pub(super) fn sparkline(frame: &mut Frame, area: Rect, buffer: Option<&RingBuffer>, style: Style) {
+/// own peak, in the bar steps the terminal's font can draw.
+pub(super) fn sparkline(
+    frame: &mut Frame,
+    area: Rect,
+    buffer: Option<&RingBuffer>,
+    style: Style,
+    p: &Palette,
+) {
     let rates: Vec<u64> = samples(buffer)
         .iter()
         .rev()
@@ -215,6 +221,7 @@ pub(super) fn sparkline(frame: &mut Frame, area: Rect, buffer: Option<&RingBuffe
     let sparkline = Sparkline::default()
         .data(&rates)
         .direction(RenderDirection::RightToLeft)
+        .bar_set(p.glyphs.bars.clone())
         .style(style);
     frame.render_widget(sparkline, area);
 }

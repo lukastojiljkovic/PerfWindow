@@ -840,7 +840,7 @@ mod tests {
                 ("Module", "Kingston KF556S40 #1"),
                 ("Swap", "2.1 / 8.0 GB"),
                 ("Read", "1.0 MB/s"),
-                ("Power-on hours", "1200 h  (≈ 0 y 50 d)"),
+                ("Power-on hours", "1200 h (≈ 50 d)"),
                 ("NVMe wear", "3 %"),
                 ("Wi-Fi", "HomeNet · 86 % · 867 Mbps"),
                 ("Download", "4.2 MB/s"),
@@ -932,7 +932,7 @@ mod tests {
                     "Module",
                     "Kingston KF556S40 #0, 16 GB, 44 C, CL40-39-39 @ 5600 MT/s",
                 ),
-                ("Power-on hours", "1200 h  (~ 0 y 50 d)"),
+                ("Power-on hours", "1200 h (~ 50 d)"),
             ],
         );
     }

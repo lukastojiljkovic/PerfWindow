@@ -4,7 +4,7 @@
 
 Key facts:
 
-- CPU: load per core or thread, package and core temperatures, clocks, Vcore, RAPL power and headroom to TjMax, with Intel P-cores and E-cores shown apart.
+- CPU: load per core, package and core temperatures, clocks, Vcore, RAPL power and headroom to TjMax, with Intel P-cores and E-cores shown apart.
 - GPU: discrete NVIDIA and AMD cards and Intel integrated graphics, with hot spot and memory junction temperatures, clocks, encoder load, fan, power and VRAM.
 - Memory and storage: per-module DIMM temperatures where reported, drive temperatures against each drive's own limits, and SMART lifetime (power-on hours, NVMe wear, data written).
 - Six themes (Amber Mainframe, Cyber Slate, Phosphor Tactical, Synthwave Neon, Crimson Terminal and Light) that can follow Windows' light and dark setting. Refresh every 0.5, 1, 2 or 5 seconds, in °C or °F.

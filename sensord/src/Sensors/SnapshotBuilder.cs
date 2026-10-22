@@ -1,35 +1,24 @@
+using System.Text.RegularExpressions;
 using LibreHardwareMonitor.Hardware;
 using Sensord.Model;
 
 namespace Sensord.Sensors;
 
-public static class SnapshotBuilder
+public static partial class SnapshotBuilder
 {
     public static CpuInfo BuildCpu(IHardware cpu)
     {
-        // Heat-map cells are positional, so a missing/non-finite per-core load
-        // degrades to 0 rather than shifting every later core.
-        var cores = cpu.Sensors
-            .Where(s => s.SensorType == SensorType.Load && s.Name.StartsWith("CPU Core #"))
-            .OrderBy(s => s.Index)
-            .Select(s => s.Value is float v && float.IsFinite(v) ? (double)v : 0.0)
-            .ToList();
-
-        var coreTemps = cpu.Sensors
-            .Where(s => s.SensorType == SensorType.Temperature && s.Name.StartsWith("CPU Core #"))
-            .OrderBy(s => s.Index)
-            .Select(s => s.Value is float v && float.IsFinite(v) ? (double?)v : null)
-            .ToList();
+        PerCore perCore = CollectPerCore(cpu);
 
         double? temp = cpu.Val(SensorType.Temperature, "Package")
                     ?? cpu.Val(SensorType.Temperature, "Core (Tctl")
                     ?? cpu.FirstVal(SensorType.Temperature);
 
         // Pick the highest per-core clock as the displayed value. LHM names
-        // cores differently across vendors / generations: non-hybrid Intel and
-        // AMD use "CPU Core #N"; Intel hybrid (12th gen+) uses "P-Core #N" and
-        // "E-Core #N". We accept all three and only exclude "Bus Speed", which
-        // is the chipset bus base, not a CPU core clock.
+        // cores differently across vendors / generations: non-hybrid Intel
+        // uses "CPU Core #N", Intel hybrid (12th gen+) "P-Core #N" and
+        // "E-Core #N", AMD "Core #N". We accept them all and only exclude
+        // "Bus Speed", which is the chipset bus base, not a CPU core clock.
         double? clock = cpu.Sensors
             .Where(s => s.SensorType == SensorType.Clock
                      && !s.Name.Equals("Bus Speed", StringComparison.OrdinalIgnoreCase)
@@ -56,74 +45,113 @@ public static class SnapshotBuilder
             .DefaultIfEmpty(null)
             .Min();
 
-        // Intel hybrid-CPU split: count P-Core/E-Core entries from the
-        // Temperature group (Clock would also work; Temperature is present even
-        // when per-core clock readings are not). Counts are null on non-hybrid
-        // CPUs so the dashboard can fall back to its uniform heat-map.
-        int pCoreCount = cpu.Sensors.Count(s =>
-            s.SensorType == SensorType.Temperature
-            && s.Name.StartsWith("P-Core #", StringComparison.OrdinalIgnoreCase)
-            && !s.Name.Contains("Distance to TjMax", StringComparison.OrdinalIgnoreCase));
-        int eCoreCount = cpu.Sensors.Count(s =>
-            s.SensorType == SensorType.Temperature
-            && s.Name.StartsWith("E-Core #", StringComparison.OrdinalIgnoreCase)
-            && !s.Name.Contains("Distance to TjMax", StringComparison.OrdinalIgnoreCase));
-
         return new CpuInfo(
             Name: cpu.Name,
             Load: cpu.Val(SensorType.Load, "CPU Total"),
-            Cores: cores.Count > 0 ? cores : null,
+            Cores: perCore.Loads,
             Temp: temp,
             ClockMhz: clock,
             PowerW: cpu.Val(SensorType.Power, "Package"),
-            CoreTemps: coreTemps.Count > 0 ? coreTemps : null,
+            CoreTemps: perCore.Temps,
             VoltageV: voltage,
             DistanceToTjMaxC: distanceToTjMax,
             PowerCoresW: cpu.Val(SensorType.Power, "CPU Cores"),
             PowerMemoryW: cpu.Val(SensorType.Power, "CPU Memory"),
             PowerPlatformW: cpu.Val(SensorType.Power, "CPU Platform"),
-            PCoreCount: pCoreCount > 0 ? pCoreCount : null,
-            ECoreCount: eCoreCount > 0 ? eCoreCount : null,
+            PCoreCount: perCore.PCores,
+            ECoreCount: perCore.ECores,
             BusClockMhz: cpu.Val(SensorType.Clock, "Bus Speed"),
-            CoreClocksMhz: CollectCoreClocks(cpu));
+            CoreClocksMhz: perCore.Clocks);
+    }
+
+    /// <summary>The per-core arrays: entry i of each is the same physical core.</summary>
+    internal sealed record PerCore(
+        IReadOnlyList<double>? Loads,
+        IReadOnlyList<double?>? Clocks,
+        IReadOnlyList<double?>? Temps,
+        int? PCores,
+        int? ECores);
+
+    /// <summary>
+    /// One entry per physical core in each per-core array, all in one order:
+    /// the P-cores, then the E-cores, on hybrid Intel; LHM's core order
+    /// otherwise.
+    ///
+    /// LibreHardwareMonitor (0.9.6) keeps one core list, sorted by CPUID core
+    /// ID. Its loads, one per hardware thread, are named "CPU Core #N" for the
+    /// Nth entry of that list, plus " Thread #T" when the entry has more than
+    /// one thread; a core's load is its threads' mean. The per-core
+    /// temperatures and clocks are created in core order, so their rank by
+    /// Index is their core. Intel names them after the core: "CPU Core #N", or
+    /// "P-Core #k" and "E-Core #k" on hybrid parts. AMD names its per-core
+    /// clocks "Core #N" and has no per-core temperature.
+    ///
+    /// On AMD, LHM cannot split the APIC ID into core and thread, so every
+    /// thread is an entry of its own and the loads carry no " Thread #T". The
+    /// list is in APIC ID order, which keeps SMT siblings adjacent, so when the
+    /// loads outnumber the per-core sensors by a whole factor, each run of that
+    /// many loads is one core.
+    /// </summary>
+    internal static PerCore CollectPerCore(IHardware cpu)
+    {
+        var threadLoads = cpu.Sensors
+            .Where(s => s.SensorType == SensorType.Load)
+            .Select(s => (Match: ThreadLoadName().Match(s.Name), Load: Finite(s.Value)))
+            .Where(t => t.Match.Success)
+            .Select(t => (Entry: int.Parse(t.Match.Groups[1].Value) - 1, Threaded: t.Match.Groups[2].Success, t.Load))
+            .ToList();
+        int entries = threadLoads.Count == 0 ? 0 : threadLoads.Max(t => t.Entry) + 1;
+
+        var temps = PerCoreSensors(cpu, SensorType.Temperature);
+        var clocks = PerCoreSensors(cpu, SensorType.Clock);
+        var named = temps.Count > 0 ? temps : clocks;
+
+        int perCore = !threadLoads.Any(t => t.Threaded) && named.Count > 0
+                      && entries > named.Count && entries % named.Count == 0
+            ? entries / named.Count
+            : 1;
+        var threads = threadLoads.ToLookup(t => t.Entry / perCore, t => t.Load);
+        // Positional, so a core with no finite thread reading reads 0 rather
+        // than shifting every later core.
+        var loads = Enumerable.Range(0, entries / perCore)
+            .Select(core => threads[core].Average() ?? 0)
+            .ToList();
+
+        bool IsECore(int core) => core < named.Count && named[core].Name.StartsWith("E-Core #", StringComparison.Ordinal);
+        // OrderBy is stable, so the P-cores and the E-cores each keep core order.
+        List<T>? InOrder<T>(IReadOnlyList<T> byCore) => byCore.Count == 0
+            ? null
+            : Enumerable.Range(0, byCore.Count).OrderBy(IsECore).Select(core => byCore[core]).ToList();
+
+        int pCores = named.Count(s => s.Name.StartsWith("P-Core #", StringComparison.Ordinal));
+        int eCores = named.Count(s => s.Name.StartsWith("E-Core #", StringComparison.Ordinal));
+        return new PerCore(
+            Loads: InOrder(loads),
+            Clocks: InOrder(clocks.Select(s => Finite(s.Value)).ToList()),
+            Temps: InOrder(temps.Select(s => Finite(s.Value)).ToList()),
+            PCores: pCores > 0 ? pCores : null,
+            ECores: eCores > 0 ? eCores : null);
     }
 
     /// <summary>
-    /// Per-core clocks in core order, mirroring the <c>cores</c>/<c>core_temps</c>
-    /// partition: on hybrid CPUs P-Cores first then E-Cores, otherwise plain
-    /// "CPU Core #N" / "Core #N" by sensor index. Entries are positional, so a
-    /// missing/non-finite reading becomes a null element rather than shifting
-    /// later cores. Returns null when no per-core clock sensor exists.
+    /// One sensor type's per-core sensors in core order. The exact names
+    /// leave out the aggregates ("Core Max", "Cores (Average)") and the
+    /// suffixed per-core readings ("P-Core #1 Distance to TjMax",
+    /// "Core #1 (Effective)").
     /// </summary>
-    internal static IReadOnlyList<double?>? CollectCoreClocks(IHardware cpu)
-    {
-        List<(int Index, double? Value)>? pCores = null;
-        List<(int Index, double? Value)>? eCores = null;
-        List<(int Index, double? Value)>? plain = null;
-        foreach (var s in cpu.Sensors)
-        {
-            if (s.SensorType != SensorType.Clock) continue;
-            double? v = s.Value is float f && float.IsFinite(f) ? (double?)f : null;
-            if (s.Name.StartsWith("P-Core #", StringComparison.OrdinalIgnoreCase))
-                (pCores ??= new()).Add((s.Index, v));
-            else if (s.Name.StartsWith("E-Core #", StringComparison.OrdinalIgnoreCase))
-                (eCores ??= new()).Add((s.Index, v));
-            else if (s.Name.StartsWith("CPU Core #", StringComparison.OrdinalIgnoreCase)
-                  || s.Name.StartsWith("Core #", StringComparison.OrdinalIgnoreCase))
-                (plain ??= new()).Add((s.Index, v));
-        }
+    private static List<ISensor> PerCoreSensors(IHardware cpu, SensorType type)
+        => cpu.Sensors
+            .Where(s => s.SensorType == type && PerCoreName().IsMatch(s.Name))
+            .OrderBy(s => s.Index)
+            .ToList();
 
-        if (pCores is not null || eCores is not null)
-        {
-            var hybrid = new List<double?>((pCores?.Count ?? 0) + (eCores?.Count ?? 0));
-            if (pCores is not null)
-                hybrid.AddRange(pCores.OrderBy(c => c.Index).Select(c => c.Value));
-            if (eCores is not null)
-                hybrid.AddRange(eCores.OrderBy(c => c.Index).Select(c => c.Value));
-            return hybrid;
-        }
-        return plain?.OrderBy(c => c.Index).Select(c => c.Value).ToList();
-    }
+    private static double? Finite(float? value) => value is float v && float.IsFinite(v) ? v : null;
+
+    [GeneratedRegex(@"^CPU Core #([1-9][0-9]*)( Thread #[0-9]+)?$")]
+    private static partial Regex ThreadLoadName();
+
+    [GeneratedRegex(@"^(?:CPU Core|P-Core|E-Core|Core) #[0-9]+$")]
+    private static partial Regex PerCoreName();
 
     /// <summary>
     /// Builds the full per-GPU list (including integrated GPUs) without any

@@ -139,33 +139,42 @@ pub struct PerfApp {
     /// hiding it for the rest of the session even if the degraded condition
     /// persists. Reset on next launch (not persisted).
     pub health_banner_dismissed: bool,
-    /// Timestamp of the most recent transition into [`Status::Running`]. Used
-    /// by [`Self::ingest`] to detect a "running but never got a snapshot"
-    /// stall: if a sensord client connects but dies before the first NDJSON
-    /// line arrives, the alive flag may not flip cleanly before the OS reaps
-    /// the reader thread, leaving the dashboard stuck on the loading screen.
-    /// Demotion to `SensordDown` is silence-based (see [`startup_stalled`]):
-    /// progress lines from a slow staged init keep the session alive, so a
-    /// long hardware enumeration is never mistaken for a dead service.
+    /// When the session started waiting for its sensors to load: set on the
+    /// transition into [`Status::Running`], cleared by the first full
+    /// snapshot. While it is set, [`Self::ingest`] demotes a stalled load to
+    /// `SensordDown`, silence-based (see [`startup_stalled`]): progress lines
+    /// from a slow staged init keep the session alive, so a long hardware
+    /// enumeration is never mistaken for a dead service.
     pub running_since: Option<std::time::Instant>,
+    /// When [`Self::ingest`] last ran, and when it last ran after a gap longer
+    /// than [`FEED_SILENCE`]. `Instant` keeps counting through a system sleep,
+    /// so after one the feed's silence counts from the wake, not from the
+    /// last line sensord sent before the machine slept.
+    ingested_at: Option<std::time::Instant>,
+    woke_at: Option<std::time::Instant>,
     update_source: Arc<GitHubReleaseSource>,
     os_is_light: bool,
 }
 
-/// How long a `Running` session may go without its first snapshot before the
-/// silence watchdog is allowed to fire at all.
+/// How long a `Running` session may go without its first full snapshot before
+/// the silence watchdog is allowed to fire at all.
 const STARTUP_WATCHDOG: std::time::Duration = std::time::Duration::from_secs(120);
 /// How long the pipe must have carried no line at all (snapshot or progress)
-/// before the watchdog treats the feed as dead.
+/// before the watchdog treats a feed that is still loading as dead.
 const LINE_SILENCE: std::time::Duration = std::time::Duration::from_secs(20);
+/// How long a fully loaded feed may go without a snapshot before it counts as
+/// stopped. Far above the slowest refresh rate, because sensord rebuilding its
+/// hardware list after a device change (a laptop's dGPU powering down on a
+/// switch to battery) re-opens every sensor without sending a line.
+const FEED_SILENCE: std::time::Duration = std::time::Duration::from_secs(60);
 
 /// How often strip mode re-checks its monitor and re-asserts the topmost band.
 /// Cheap enough to be idempotent, slow enough that a steady desktop costs one
 /// `GetWindowRect` a second.
 const STRIP_REFRESH_SECS: f64 = 1.0;
 
-/// Decide whether a first-snapshot-pending session has truly stalled. Pure so
-/// the timing matrix is unit-testable with fabricated instants.
+/// Decide whether a session still loading its sensors has truly stalled. Pure
+/// so the timing matrix is unit-testable with fabricated instants.
 fn startup_stalled(
     running_since: Option<std::time::Instant>,
     last_line_at: Option<std::time::Instant>,
@@ -293,7 +302,7 @@ impl PerfApp {
         }
 
         // Dev mode reaches Running synchronously inside `new`; record the
-        // start time so the no-first-snapshot deadline applies there too.
+        // start time so the startup watchdog applies there too.
         let running_since = matches!(status, Status::Running).then(std::time::Instant::now);
 
         // The overlay placement needs the window's raw Win32 handle.
@@ -336,6 +345,8 @@ impl PerfApp {
             strip_refreshed_at: None,
             health_banner_dismissed: false,
             running_since,
+            ingested_at: None,
+            woke_at: None,
             update_source,
             os_is_light,
         };
@@ -670,10 +681,14 @@ impl PerfApp {
             // fill here would stack a second translucent layer under it.
             .frame(egui::Frame::NONE)
             .show_inside(ui, |ui| {
+                // Only a live feed's readings: once the session is demoted the
+                // strip shows dashes, not the last readings frozen in place.
                 crate::ui::mini_strip::strip_row(
                     ui,
                     &self.theme,
-                    self.latest.as_ref(),
+                    self.latest
+                        .as_ref()
+                        .filter(|_| matches!(self.status, Status::Running)),
                     &self.config,
                 )
             })
@@ -718,6 +733,12 @@ impl PerfApp {
 
     /// Pull the newest snapshot out of the shared state and update history.
     fn ingest(&mut self) {
+        self.ingest_at(std::time::Instant::now());
+    }
+
+    /// [`Self::ingest`] at an explicit `now`, so the silence watchdog can be
+    /// tested with fabricated instants.
+    fn ingest_at(&mut self, now: std::time::Instant) {
         // While a connect machine runs it owns `status`. A stale (or absent)
         // sensord must not clobber Connecting with SensordDown every frame,
         // and a leftover dead feed must not be drained into `latest`.
@@ -748,26 +769,38 @@ impl PerfApp {
                 if state.alive {
                     // A snapshot from a live feed proves sensord works —
                     // promote out of SensordDown so a late first snapshot
-                    // (or a recovered feed) clears the error overlay.
+                    // (or a recovered feed) clears the error overlay. The
+                    // startup grace lasts until the sensors are all loaded,
+                    // and restarts when a partial snapshot revives the feed.
                     self.status = Status::Running;
-                    self.running_since = None;
+                    if state.latest_partial {
+                        self.running_since.get_or_insert(now);
+                    } else {
+                        self.running_since = None;
+                    }
                 }
                 self.history.record(&snap);
                 self.latest = Some(snap);
                 self.latest_partial = state.latest_partial;
             }
         }
-        // Silence watchdog: a session that never produced a snapshot is
-        // demoted only when the pipe has carried no line at all for a long
-        // time — progress lines during staged sensor init keep it alive.
-        if matches!(self.status, Status::Running)
-            && self.latest.is_none()
-            && startup_stalled(self.running_since, last_line_at, std::time::Instant::now())
-        {
-            eprintln!(
-                "PerfWindow: no snapshot and a silent pipe past the watchdog; \
-                 demoting to SensordDown"
-            );
+        // Silence watchdog. While the sensors load, the session is demoted
+        // only when the pipe has carried no line at all for a long time:
+        // progress lines during staged init keep it alive. Once they have
+        // loaded, a feed that stops is demoted too, so frozen readings never
+        // sit under the running dot.
+        let previous_pass = self.ingested_at.replace(now);
+        if previous_pass.is_some_and(|pass| now.saturating_duration_since(pass) > FEED_SILENCE) {
+            self.woke_at = Some(now);
+        }
+        let heard_at = last_line_at.max(self.woke_at);
+        let stalled = if self.latest.is_none() || self.latest_partial {
+            startup_stalled(self.running_since, heard_at, now)
+        } else {
+            heard_at.is_some_and(|heard| now.saturating_duration_since(heard) > FEED_SILENCE)
+        };
+        if matches!(self.status, Status::Running) && stalled {
+            eprintln!("PerfWindow: the sensor feed went silent; demoting to SensordDown");
             self.status = Status::SensordDown;
             self.running_since = None;
         }
@@ -808,7 +841,8 @@ impl PerfApp {
 
     /// Drain pending connect events from the worker thread, advancing
     /// `status` and adopting the `PipeSensord` once it becomes available.
-    /// Called once per frame from `eframe::App::ui`. Cheap when there are
+    /// Called from `eframe::App::logic`, so a connection that completes while
+    /// the window is minimized starts recording at once. Cheap when there are
     /// no events.
     pub fn poll_connect_events(&mut self) {
         use crate::ipc::connect::ConnectEvent;
@@ -894,6 +928,8 @@ impl PerfApp {
             strip_refreshed_at: None,
             health_banner_dismissed: false,
             running_since: None,
+            ingested_at: None,
+            woke_at: None,
             update_source: Arc::new(GitHubReleaseSource::new(OWNER, REPO)),
             os_is_light: false,
             config,
@@ -902,6 +938,19 @@ impl PerfApp {
 }
 
 impl eframe::App for PerfApp {
+    /// Runs before every `ui` pass, and also while the window is minimized,
+    /// when eframe skips `ui`, so history keeps recording the feed.
+    fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        self.poll_connect_events();
+        self.ingest();
+        // Watchdog pass a little past the refresh interval, minimized or not:
+        // new snapshots already wake the app via request_repaint from the
+        // reader thread, so this one only matters once the feed goes quiet.
+        ctx.request_repaint_after(std::time::Duration::from_millis(
+            self.config.refresh.as_millis() as u64 + 500,
+        ));
+    }
+
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
         // Follow-Windows must track a live OS light/dark switch; the poll is
@@ -910,9 +959,7 @@ impl eframe::App for PerfApp {
             self.os_is_light = light;
             self.apply_config_change(&ctx);
         }
-        self.ingest();
         self.display_cache.maybe_refresh(std::time::Instant::now());
-        self.poll_connect_events();
         self.poll_download_outcome();
 
         // A launch whose config asked for the strip enters it here, on the
@@ -926,9 +973,6 @@ impl eframe::App for PerfApp {
             // Sensor polling, history and the update machinery above all keep
             // running; only the chrome is replaced by the strip row.
             self.strip_frame(&ctx, ui);
-            ctx.request_repaint_after(std::time::Duration::from_millis(
-                self.config.refresh.as_millis() as u64 + 500,
-            ));
             if self.want_quit {
                 ctx.send_viewport_cmd(egui::ViewportCommand::Close);
             }
@@ -996,13 +1040,6 @@ impl eframe::App for PerfApp {
         // every panel and the modal. (The grid is drawn earlier, inside the
         // central panel, so the opaque cards cover it.)
         crate::ui::effects::paint_effects(&ctx, &self.theme, self.config.background_opacity);
-
-        // Watchdog repaint a little past the refresh interval; new snapshots
-        // already wake the UI via request_repaint from the reader thread, and
-        // the blinking cursor needs steady frames regardless.
-        ctx.request_repaint_after(std::time::Duration::from_millis(
-            self.config.refresh.as_millis() as u64 + 500,
-        ));
 
         if self.want_quit {
             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
@@ -1179,6 +1216,97 @@ mod tests {
         app.ingest();
         assert!(matches!(app.status, Status::SensordDown));
         assert!(app.latest.is_some());
+    }
+
+    /// Leave one snapshot for `ingest`, as the reader thread does on a line
+    /// that arrived at `at`; `partial` marks it taken mid staged-init.
+    fn feed_snapshot(state: &SharedState, partial: bool, at: std::time::Instant) {
+        let mut s = state.lock().unwrap();
+        s.latest = Some(test_snapshot(1, 1.0));
+        s.latest_partial = partial;
+        s.last_line_at = Some(at);
+    }
+
+    /// Run `ingest` once a second from `from` until `secs` have passed, as the
+    /// watchdog repaint does while the window is open.
+    fn ingest_each_second(app: &mut PerfApp, from: std::time::Instant, secs: u64) {
+        for s in 1..=secs {
+            app.ingest_at(from + std::time::Duration::from_secs(s));
+        }
+    }
+
+    #[test]
+    fn a_hang_during_staged_init_demotes_the_session() {
+        let (mut app, state) = app_with_feed(true);
+        let t0 = std::time::Instant::now();
+        app.running_since = Some(t0);
+        feed_snapshot(&state, true, t0);
+        app.ingest_at(t0);
+        assert!(matches!(app.status, Status::Running));
+        // The next sensor category never finishes enabling: no line follows.
+        ingest_each_second(&mut app, t0, 200);
+        assert!(matches!(app.status, Status::SensordDown));
+    }
+
+    #[test]
+    fn a_partial_snapshot_that_revives_the_feed_rearms_the_watchdog() {
+        let (mut app, state) = app_with_feed(true);
+        app.status = Status::SensordDown;
+        app.running_since = None;
+        let t0 = std::time::Instant::now();
+        feed_snapshot(&state, true, t0);
+        app.ingest_at(t0);
+        assert!(matches!(app.status, Status::Running));
+        ingest_each_second(&mut app, t0, 200);
+        assert!(matches!(app.status, Status::SensordDown));
+    }
+
+    #[test]
+    fn a_loaded_feed_that_stops_is_demoted() {
+        let (mut app, state) = app_with_feed(true);
+        let t0 = std::time::Instant::now();
+        app.running_since = Some(t0);
+        feed_snapshot(&state, false, t0);
+        app.ingest_at(t0);
+        // A topology rebuild in sensord can hold the next snapshot a while.
+        let quiet = FEED_SILENCE.as_secs() - 1;
+        ingest_each_second(&mut app, t0, quiet);
+        assert!(matches!(app.status, Status::Running));
+        ingest_each_second(&mut app, t0 + std::time::Duration::from_secs(quiet), 2);
+        assert!(matches!(app.status, Status::SensordDown));
+    }
+
+    #[test]
+    fn a_system_sleep_does_not_read_as_a_stopped_feed() {
+        let (mut app, state) = app_with_feed(true);
+        let t0 = std::time::Instant::now();
+        feed_snapshot(&state, false, t0);
+        app.ingest_at(t0);
+        // `Instant` counts through the sleep, and the first passes after the
+        // wake come before sensord's next line.
+        let woke = t0 + std::time::Duration::from_secs(3600);
+        app.ingest_at(woke);
+        let quiet = FEED_SILENCE.as_secs() - 1;
+        ingest_each_second(&mut app, woke, quiet);
+        assert!(matches!(app.status, Status::Running));
+        // A feed that stays silent after the wake still counts as stopped.
+        ingest_each_second(&mut app, woke + std::time::Duration::from_secs(quiet), 2);
+        assert!(matches!(app.status, Status::SensordDown));
+    }
+
+    #[test]
+    fn logic_ingests_without_a_ui_pass() {
+        // eframe skips `ui` while the window is minimized but still calls
+        // `logic` on every repaint the reader thread requests.
+        let (mut app, state) = app_with_feed(true);
+        state.lock().unwrap().latest = Some(test_snapshot(1, 1.0));
+        eframe::App::logic(
+            &mut app,
+            &egui::Context::default(),
+            &mut eframe::Frame::_new_kittest(),
+        );
+        assert!(app.latest.is_some());
+        assert_eq!(app.history.cpu.as_ref().map(|cpu| cpu.len()), Some(1));
     }
 
     #[test]

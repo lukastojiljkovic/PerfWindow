@@ -4,7 +4,10 @@
 //! Requires sensord.exe to be built; cargo's build.rs copies it next to the
 //! release binary, so this picks up the same artifact at runtime.
 
+use std::ffi::OsStr;
+use std::os::windows::ffi::OsStrExt;
 use std::process::{Child, Command, Stdio};
+use std::ptr;
 use std::time::{Duration, Instant};
 
 const TEST_PIPE: &str = "PerfWindowSensorTest_v080";
@@ -216,63 +219,8 @@ fn pipe_sensord_shutdown_terminates_child() {
 /// down (a hard CI failure), which is the regression we want to catch.
 #[test]
 fn pipe_client_blocks_on_empty_pipe_without_aborting() {
-    use std::ffi::OsStr;
-    use std::os::windows::ffi::OsStrExt;
-    use std::ptr;
-
-    // Win32 named-pipe server primitives (kernel32 is implicitly linked, same
-    // as the FFI in `ui/shell.rs` and `main.rs`).
-    extern "system" {
-        fn CreateNamedPipeW(
-            name: *const u16,
-            open_mode: u32,
-            pipe_mode: u32,
-            max_instances: u32,
-            out_buffer_size: u32,
-            in_buffer_size: u32,
-            default_timeout: u32,
-            security_attributes: *mut core::ffi::c_void,
-        ) -> isize;
-        fn ConnectNamedPipe(handle: isize, overlapped: *mut core::ffi::c_void) -> i32;
-        fn WriteFile(
-            handle: isize,
-            buf: *const u8,
-            len: u32,
-            written: *mut u32,
-            overlapped: *mut core::ffi::c_void,
-        ) -> i32;
-        fn FlushFileBuffers(handle: isize) -> i32;
-        fn CloseHandle(handle: isize) -> i32;
-    }
-    const PIPE_ACCESS_DUPLEX: u32 = 0x0000_0003;
-    const PIPE_TYPE_BYTE: u32 = 0x0000_0000;
-    const PIPE_WAIT: u32 = 0x0000_0000;
-    const INVALID_HANDLE_VALUE: isize = -1;
-
     let name = format!(r"\\.\pipe\PerfWindowOverlapRegr_{}", std::process::id());
-    let wide: Vec<u16> = OsStr::new(&name)
-        .encode_wide()
-        .chain(std::iter::once(0))
-        .collect();
-
-    let server = unsafe {
-        CreateNamedPipeW(
-            wide.as_ptr(),
-            PIPE_ACCESS_DUPLEX,
-            PIPE_TYPE_BYTE | PIPE_WAIT,
-            1,
-            4096,
-            4096,
-            0,
-            ptr::null_mut(),
-        )
-    };
-    assert_ne!(
-        server,
-        INVALID_HANDLE_VALUE,
-        "CreateNamedPipeW failed: {}",
-        std::io::Error::last_os_error()
-    );
+    let server = create_test_pipe(&name);
 
     // Server side: accept the client, wait long enough that the client's first
     // read is issued against an empty pipe, then deliver one snapshot line.
@@ -325,4 +273,134 @@ fn pipe_client_blocks_on_empty_pipe_without_aborting() {
 
     drop(client);
     let _ = server_thread.join();
+}
+
+/// The client's pipe handle is synchronous, so its shutdown line queues behind
+/// the reader's pending read. Against a sensord that stopped writing (a driver
+/// call that never returns), that read never completes: sensord would hear
+/// neither the shutdown nor EOF, keep its single pipe instance, and turn every
+/// reconnect into a busy pipe.
+#[test]
+fn shutdown_reaches_a_server_that_went_silent() {
+    let name = format!(r"\\.\pipe\PerfWindowSilentServer_{}", std::process::id());
+    let server = create_test_pipe(&name);
+
+    // Server side: send one line, then only listen, and report everything the
+    // client wrote once every client handle has closed.
+    let (heard_tx, heard_rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = unsafe { ConnectNamedPipe(server, ptr::null_mut()) };
+        let line = b"{\"v\":1,\"ts\":1,\"cpu\":{\"name\":\"Silent\",\"load\":1.0}}\n";
+        let mut n = 0u32;
+        unsafe {
+            WriteFile(
+                server,
+                line.as_ptr(),
+                line.len() as u32,
+                &mut n,
+                ptr::null_mut(),
+            )
+        };
+        let mut heard = Vec::new();
+        let mut buf = [0u8; 256];
+        // Fails with ERROR_BROKEN_PIPE once the client's handles are closed.
+        while unsafe {
+            ReadFile(
+                server,
+                buf.as_mut_ptr(),
+                buf.len() as u32,
+                &mut n,
+                ptr::null_mut(),
+            )
+        } != 0
+        {
+            heard.extend_from_slice(&buf[..n as usize]);
+        }
+        unsafe { CloseHandle(server) };
+        let _ = heard_tx.send(String::from_utf8_lossy(&heard).into_owned());
+    });
+
+    let mut client = perfwindow::ipc::pipe::PipeSensord::connect_to(&name, || {})
+        .expect("client connects to the test pipe");
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while client.state.lock().unwrap().latest.is_none() {
+        assert!(Instant::now() < deadline, "the server's line never arrived");
+        std::thread::sleep(Duration::from_millis(25));
+    }
+    // Let the reader block in its next read, on a server that stays silent.
+    std::thread::sleep(Duration::from_millis(200));
+
+    client.shutdown();
+    let heard = heard_rx
+        .recv_timeout(Duration::from_secs(2))
+        .expect("the server heard neither the shutdown nor EOF within 2 s");
+    assert!(
+        heard.contains(r#"{"shutdown":true}"#),
+        "the server heard {heard:?}"
+    );
+}
+
+// Win32 named-pipe server primitives (kernel32 is implicitly linked, same as
+// the FFI in `ui/shell.rs` and `main.rs`).
+extern "system" {
+    fn CreateNamedPipeW(
+        name: *const u16,
+        open_mode: u32,
+        pipe_mode: u32,
+        max_instances: u32,
+        out_buffer_size: u32,
+        in_buffer_size: u32,
+        default_timeout: u32,
+        security_attributes: *mut core::ffi::c_void,
+    ) -> isize;
+    fn ConnectNamedPipe(handle: isize, overlapped: *mut core::ffi::c_void) -> i32;
+    fn ReadFile(
+        handle: isize,
+        buf: *mut u8,
+        len: u32,
+        read: *mut u32,
+        overlapped: *mut core::ffi::c_void,
+    ) -> i32;
+    fn WriteFile(
+        handle: isize,
+        buf: *const u8,
+        len: u32,
+        written: *mut u32,
+        overlapped: *mut core::ffi::c_void,
+    ) -> i32;
+    fn FlushFileBuffers(handle: isize) -> i32;
+    fn CloseHandle(handle: isize) -> i32;
+}
+
+/// Create a blocking, single-instance pipe server at `name`: one client at a
+/// time, like sensord's.
+fn create_test_pipe(name: &str) -> isize {
+    const PIPE_ACCESS_DUPLEX: u32 = 0x0000_0003;
+    const PIPE_TYPE_BYTE: u32 = 0x0000_0000;
+    const PIPE_WAIT: u32 = 0x0000_0000;
+    const INVALID_HANDLE_VALUE: isize = -1;
+
+    let wide: Vec<u16> = OsStr::new(name)
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect();
+    let server = unsafe {
+        CreateNamedPipeW(
+            wide.as_ptr(),
+            PIPE_ACCESS_DUPLEX,
+            PIPE_TYPE_BYTE | PIPE_WAIT,
+            1,
+            4096,
+            4096,
+            0,
+            ptr::null_mut(),
+        )
+    };
+    assert_ne!(
+        server,
+        INVALID_HANDLE_VALUE,
+        "CreateNamedPipeW failed: {}",
+        std::io::Error::last_os_error()
+    );
+    server
 }
